@@ -5,7 +5,7 @@ import {
 } from './types';
 import { loadOpenAiApiKey } from './utils/settingsStorage';
 import { UIState, initialUIState } from './appTypes';
-import { sanitizeState } from './appUtils';
+// sanitizeState moved to appProjectActions
 import { initialAppDataState, appReducer } from './appReducer';
 import { buildArtStylePrompt, buildFinalPrompt } from './appStyleEngine';
 import { getVisionModelName as getVisionModelNamePure, editImageWithNanoWithRetry } from './appImageEngine';
@@ -16,6 +16,7 @@ import { createGenerationActions } from './appGenerationActions';
 import { createMiscActions } from './appMiscActions';
 import { createAnalysisPipelineActions } from './appAnalysisPipeline';
 import { createNormalizationActions } from './appNormalizationActions';
+import { createProjectActions } from './appProjectActions';
 import { AudioSplitterModal } from './components/AudioSplitterModal';
 import { get, set } from 'idb-keyval';
 
@@ -356,35 +357,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getVisionModelName,
     });
 
+    // --- Project actions from factory ---
+    const projectActions = createProjectActions({
+        dispatch, stateRef, addNotification, updateUIState, setUIState,
+    });
+
     const actions = {
         setUIState: updateUIState,
         addNotification,
         handleAddUsage,
         handleGenerateTitles: pipelineActions.handleGenerateTitles,
-        handleResetState: () => {
-            dispatch({ type: 'RESET_STATE' });
-            setUIState(initialUIState);
-        },
-        handleExportProject: () => {
-            const sanitizedState = sanitizeState(stateRef.current);
-            const data = JSON.stringify(sanitizedState);
-            const blob = new Blob([data], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `${stateRef.current.storyTitle || 'wvs_project'}.wvs_project`; a.click();
-        },
-        handleImportFile: (e: React.ChangeEvent<HTMLInputElement>) => {
-            const file = e.target.files?.[0]; if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                try {
-                    const parsed = JSON.parse(ev.target?.result as string);
-                    dispatch({ type: 'RESTORE_STATE', payload: parsed });
-                    setUIState(initialUIState);
-                } catch (err) { addNotification('불러오기 실패', 'error'); }
-                finally { e.target.value = ''; }
-            };
-            reader.readAsText(file);
-        },
+        handleResetState: projectActions.handleResetState,
+        handleExportProject: projectActions.handleExportProject,
+        handleImportFile: projectActions.handleImportFile,
         handleStartStudio: pipelineActions.handleStartStudio,
         handleConfirmSceneAnalysis: pipelineActions.handleConfirmSceneAnalysis,
         handleRegenerateSceneAnalysis: pipelineActions.handleRegenerateSceneAnalysis,
@@ -734,11 +719,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         handleOpenGuestSelection: (cutNumber: string) => dispatch({ type: 'START_GUEST_SELECTION', payload: cutNumber }),
         handleOpenAudioSplitter: () => updateUIState({ isAudioSplitterOpen: true }),
         handleConfirmAudioSplit,
-        handleUploadProjectFile: (file: File) => { 
-            const reader = new FileReader(); 
-            reader.onload = (ev) => { try { const parsed = JSON.parse(ev.target?.result as string); dispatch({ type: 'RESTORE_STATE', payload: parsed }); } catch (e) { addNotification('실패', 'error'); } }; 
-            reader.readAsText(file); 
-        },
+        handleUploadProjectFile: projectActions.handleUploadProjectFile,
         handleThirdCharacterEdit: miscActions.handleThirdCharacterEdit,
         triggerConfetti,
         handleEditImageWithNanoWithRetry,
