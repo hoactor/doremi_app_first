@@ -1,14 +1,13 @@
 
-import { 
-    enrichScriptWithDirections, analyzeCharacters, editImageWithNano, generateEditableStoryboard, 
-    generateCharacterMask, generateTitleSuggestions,
+import {
+    enrichScriptWithDirections, analyzeCharacters, editImageWithNano, generateEditableStoryboard,
+    generateTitleSuggestions,
     purifyImagePromptForSafety, regenerateCutFieldsForCharacterChange,
-    regenerateCutFieldsForIntentChange, generateOutfitsForLocations, generateOutfitImage,
-    verifyAndEnrichCutPrompt, regenerateOutfitDescription, injectPersonalityAndCreateSignaturePose,
-    upscaleImageWithNano, renderTextOnImage, replaceBackground, generateMultiCharacterImage,
-    outpaintImageWithNano, fillImageWithNano, generateFinalStoryboardFromEditable, generateSpeech,
+    regenerateCutFieldsForIntentChange,
+    verifyAndEnrichCutPrompt,
+    generateFinalStoryboardFromEditable, generateSpeech,
     regenerateSceneFromModification, extractFieldsFromSceneDescription, regenerateSingleCutDraft, regenerateImagePrompts,
-    generateCinematicBlueprint, analyzeHairStyle, formatTextWithSemanticBreaks, formatMultipleTextsWithSemanticBreaks, normalizeScriptCuts
+    generateCinematicBlueprint, formatMultipleTextsWithSemanticBreaks, normalizeScriptCuts
 } from './services/geminiService';
 import React, { createContext, useContext, useReducer, useRef, useEffect, useCallback, useState } from 'react';
 import { 
@@ -16,9 +15,13 @@ import {
 } from './types';
 import { loadOpenAiApiKey } from './utils/settingsStorage';
 import { UIState, initialUIState } from './appTypes';
-import { createInitialStudioSession, sanitizeState, getEngineFromModel, createGeneratedImage } from './appUtils';
+import { createInitialStudioSession, sanitizeState, getEngineFromModel } from './appUtils';
 import { initialAppDataState, appReducer } from './appReducer';
 import JSZip from 'jszip';
+import { createCharacterActions } from './appCharacterActions';
+import { createCutEditActions } from './appCutEditActions';
+import { createGenerationActions } from './appGenerationActions';
+import { createMiscActions } from './appMiscActions';
 import { AudioSplitterModal } from './components/AudioSplitterModal';
 import { get, set } from 'idb-keyval';
 
@@ -524,45 +527,22 @@ ${identityDNA}
 `.trim();
     }, []);
 
-    // --- Standalone function definitions to avoid circular reference in 'actions' object ---
-    
-    const handleEditInStudio = async (sId: 'a' | 'b', img: GeneratedImage, p: string, ref: string | null, mask?: string, override?: string) => {
-        dispatch({ type: 'START_LOADING', payload: '이미지 수정 중...' });
-        try { 
-            const finalSourceCut = override || stateRef.current.studioSessions[sId].sourceCutForNextEdit || img.sourceCutNumber;
-            const cut = stateRef.current.generatedContent?.scenes.flatMap(s => s.cuts).find(c => c.cutNumber === finalSourceCut);
-            const styleToUse = cut?.artStyleOverride || stateRef.current.artStyle;
-            const artStylePrompt = getArtStylePrompt(styleToUse);
+    // --- Cut edit actions from factory ---
+    const cutEditActions = createCutEditActions({
+        dispatch, stateRef, addNotification, handleAddUsage,
+        handleEditImageWithNanoWithRetry, getArtStylePrompt, getVisionModelName,
+        updateUIState, calculateFinalPrompt,
+    });
 
-            const { imageUrl, tokenCount } = await handleEditImageWithNanoWithRetry(img.imageUrl, p, img.prompt, ref || undefined, mask, undefined, false, artStylePrompt); 
-            handleAddUsage(tokenCount, 0); 
-            
-            const newImg = createGeneratedImage({ imageUrl, sourceCutNumber: finalSourceCut, prompt: p, model: stateRef.current.selectedNanoModel });
+    const handleEditInStudio = cutEditActions.handleEditInStudio;
+    const handleCreateInStudio = cutEditActions.handleCreateInStudio;
 
-            dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: finalSourceCut } });
-            dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { currentImage: newImg, history: [...stateRef.current.studioSessions[sId].history, newImg] } } });
-        }
-        catch (e) { addNotification('수정 실패', 'error'); } finally { dispatch({ type: 'STOP_LOADING' }); }
-    };
-
-    const handleCreateInStudio = async (sId: 'a' | 'b', base: GeneratedImage, p: string) => {
-        dispatch({ type: 'START_LOADING', payload: '이미지 생성 중...' });
-        try {
-            const finalSourceCut = stateRef.current.studioSessions[sId].sourceCutForNextEdit || 'custom';
-            const cut = stateRef.current.generatedContent?.scenes.flatMap(s => s.cuts).find(c => c.cutNumber === finalSourceCut);
-            const styleToUse = cut?.artStyleOverride || stateRef.current.artStyle;
-            const artStylePrompt = getArtStylePrompt(styleToUse);
-
-            const { imageUrl, tokenCount } = await handleEditImageWithNanoWithRetry(base.imageUrl, p, base.prompt, undefined, undefined, undefined, true, artStylePrompt);
-            handleAddUsage(tokenCount, 0);
-
-            const newImg = createGeneratedImage({ imageUrl, sourceCutNumber: finalSourceCut, prompt: p, model: stateRef.current.selectedNanoModel });
-
-            dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: finalSourceCut } });
-            dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { currentImage: newImg, history: [...stateRef.current.studioSessions[sId].history, newImg] } } });
-        }
-        catch (e) { addNotification('생성 실패', 'error'); } finally { dispatch({ type: 'STOP_LOADING' }); }
-    };
+    // --- Misc actions from factory ---
+    const miscActions = createMiscActions({
+        dispatch, stateRef, addNotification, handleAddUsage,
+        handleEditImageWithNanoWithRetry, getArtStylePrompt: getArtStylePrompt, getVisionModelName,
+        updateUIState,
+    });
 
     const handleStartStudio = async (overrides?: { artStyle?: ArtStyle, customArtStyle?: string }) => {
         const { userInputScript, speakerGender, artStyle, customArtStyle } = stateRef.current;
@@ -742,128 +722,15 @@ ${identityDNA}
         updateUIState({ isStoryboardReviewModalOpen: true });
     };
 
-    const handleUpdateAndFormatNarration = async (cutNumber: string, newNarration: string) => {
-        dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { narration: newNarration, isFormattingNarration: true } } });
-        try {
-            const { formattedText, tokenCount } = await formatTextWithSemanticBreaks(newNarration);
-            handleAddUsage(tokenCount, 0);
-            dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { narration: formattedText, isFormattingNarration: false } } });
-        } catch (error) {
-            console.error("Narration formatting failed:", error);
-            dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { isFormattingNarration: false } } });
-        }
-    };
+    // --- Generation actions from factory ---
+    const generationActions = createGenerationActions({
+        dispatch, stateRef, addNotification, handleAddUsage,
+        handleEditImageWithNanoWithRetry, getArtStylePrompt, getVisionModelName,
+        triggerConfetti, currentSessionIdRef, isAutoGeneratingLocalRef,
+        updateUIState, calculateFinalPrompt,
+    });
 
-        const handleRunSelectiveGeneration = useCallback(async (selectedCutNumbers: string[], overrideContent?: GeneratedScript) => {
-        const content = overrideContent || stateRef.current.generatedContent;
-        const characterDescriptions = stateRef.current.characterDescriptions;
-        if (!content) return;
-
-        const thisSessionId = ++currentSessionIdRef.current;
-        isAutoGeneratingLocalRef.current = false;
-        await new Promise(r => setTimeout(r, 100));
-
-        const allCuts = content.scenes.flatMap(s => s.cuts);
-        const targets = selectedCutNumbers.length > 0 
-            ? allCuts.filter(c => selectedCutNumbers.includes(c.cutNumber))
-            : allCuts;
-
-        if (targets.length === 0) {
-            addNotification('생성할 컷이 없습니다.', 'info');
-            return;
-        }
-
-        isAutoGeneratingLocalRef.current = true;
-        dispatch({ type: 'START_AUTO_GENERATION', payload: selectedCutNumbers.length > 0 ? '선택' : '전체' });
-        
-        const failedCuts: string[] = [];
-
-        for (let i = 0; i < targets.length; i++) {
-            if (!isAutoGeneratingLocalRef.current || currentSessionIdRef.current !== thisSessionId) break;
-            const cut = targets[i];
-
-            dispatch({ type: 'SET_LOADING_DETAIL', payload: `이미지 생성 진행 중... [컷 #${cut.cutNumber}] (${i+1}/${targets.length})` });
-            dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cut.cutNumber, data: { imageLoading: true } } });
-
-            try {
-                // Check if this cut has a specific override style
-                const styleToUse = cut.artStyleOverride || stateRef.current.artStyle;
-                const artStylePrompt = getArtStylePrompt(styleToUse);
-                const modelName = getVisionModelName();
-                const prompt = cut.imagePrompt || calculateFinalPrompt(cut as any);
-                
-                // Dynamic character detection
-                const presentCharKeys = Object.keys(characterDescriptions).filter(key => 
-                    cut.characters.some(c => c.includes(characterDescriptions[key].koreanName))
-                );
-                
-                let resultImageUrl = '';
-                let tokenCountUsed = 0;
-
-                // Build character array for generation
-                const charsToGenerate: { name: string, url: string }[] = [];
-                
-                // Add main characters
-                for (let j = 0; j < Math.min(2, presentCharKeys.length); j++) {
-                    const key = presentCharKeys[j];
-                    const char = characterDescriptions[key];
-                    const ref = char.mannequinImageUrl || char.upscaledImageUrl || (char.characterSheetHistory && char.characterSheetHistory[char.characterSheetHistory.length - 1]);
-                    if (ref) {
-                        charsToGenerate.push({ name: char.koreanName || `Char${j+1}`, url: ref });
-                    }
-                }
-                
-                // Add guest character if present
-                if (cut.guestCharacterUrl) {
-                    charsToGenerate.push({ name: cut.guestCharacterName || 'Guest', url: cut.guestCharacterUrl });
-                }
-
-                if (charsToGenerate.length >= 2) {
-                    // Handle multi-character (taking first 2 found characters + guest, up to 3)
-                    const res = await generateMultiCharacterImage(prompt, charsToGenerate.slice(0, 3), artStylePrompt, modelName);
-                    resultImageUrl = res.imageUrl;
-                    tokenCountUsed = res.tokenCount;
-                } else if (charsToGenerate.length === 1) {
-                    const ref = charsToGenerate[0].url;
-                    const res = await handleEditImageWithNanoWithRetry(ref, prompt, '', undefined, undefined, undefined, true, artStylePrompt);
-                    resultImageUrl = res.imageUrl;
-                    tokenCountUsed = res.tokenCount;
-                } else {
-                    const dummyRef = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
-                    const res = await handleEditImageWithNanoWithRetry(dummyRef, prompt, '', undefined, undefined, undefined, true, artStylePrompt);
-                    resultImageUrl = res.imageUrl;
-                    tokenCountUsed = res.tokenCount;
-                }
-
-                if (currentSessionIdRef.current !== thisSessionId) break;
-
-                if (resultImageUrl) {
-                    const newImage = createGeneratedImage({ imageUrl: resultImageUrl, sourceCutNumber: cut.cutNumber, prompt: prompt, model: stateRef.current.selectedNanoModel });
-
-                    dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImage, cutNumber: cut.cutNumber } });
-                    handleAddUsage(tokenCountUsed, 0);
-                }
-
-            } catch (error) {
-                console.error(`Failed to generate cut ${cut.cutNumber}:`, error);
-                failedCuts.push(cut.cutNumber);
-            } finally {
-                dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cut.cutNumber, data: { imageLoading: false } } });
-            }
-        }
-
-        if (currentSessionIdRef.current === thisSessionId) {
-            isAutoGeneratingLocalRef.current = false;
-            dispatch({ type: 'STOP_AUTO_GENERATION' });
-            dispatch({ type: 'SET_FAILED_CUTS', payload: failedCuts });
-            if (failedCuts.length > 0) {
-                addNotification(`${failedCuts.length}개 컷 생성 실패`, 'error');
-            } else {
-                addNotification('이미지 생성 작업 완료', 'success');
-                triggerConfetti();
-            }
-        }
-    }, [addNotification, dispatch, getArtStylePrompt, getVisionModelName, handleAddUsage, triggerConfetti, calculateFinalPrompt, handleEditImageWithNanoWithRetry]);
+    const handleRunSelectiveGeneration = generationActions.handleRunSelectiveGeneration;
 
     const handleRunNormalization = async (updatedScenes: EditableScene[], modifiedCutIds: Set<string>) => {
         dispatch({ type: 'START_LOADING', payload: 'AI 연출 엔진이 변경된 설정을 처리하고 있습니다...' });
@@ -1171,6 +1038,16 @@ ${identityDNA}
         handleOpenReviewModalForEdit(); 
     };
 
+    const characterActions = createCharacterActions({
+        dispatch,
+        stateRef,
+        addNotification,
+        handleAddUsage,
+        handleEditImageWithNanoWithRetry,
+        getArtStylePrompt,
+        getVisionModelName,
+    });
+
     const actions = {
         setUIState: updateUIState,
         addNotification,
@@ -1250,196 +1127,10 @@ ${identityDNA}
             // 2. Add a notification to inform the user that changes were applied
             addNotification('의상 변경사항이 적용되었습니다. 원하는 컷을 선택하여 다시 생성해주세요.', 'success');
         },
-        handleUploadSourceImageForStudio: async (key: string, file: File) => {
-             const reader = new FileReader();
-             reader.onload = async (e) => {
-                 dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { sourceImageUrl: e.target?.result as string, isAnalyzingHair: true } } });
-                 try {
-                     const charName = stateRef.current.characterDescriptions[key]?.koreanName || key;
-                     const res = await analyzeHairStyle(e.target?.result as string, charName);
-                     handleAddUsage(res.tokenCount, 0);
-                     dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { hairStyleDescription: res.hairDescription, facialFeatures: res.facialFeatures, isAnalyzingHair: false } } });
-                 } catch (error) {
-                     dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isAnalyzingHair: false } } });
-                     addNotification('비주얼 DNA 분석에 실패했습니다.', 'error');
-                 }
-             };
-             reader.readAsDataURL(file);
-        },
-        handleUploadUpscaledImageForStudio: async (key: string, file: File) => {
-            const reader = new FileReader(); reader.onload = (e) => dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { upscaledImageUrl: e.target?.result as string } } }); reader.readAsDataURL(file);
-        },
-        handleUpscaleCharacterImage: async (key: string) => {
-            const char = stateRef.current.characterDescriptions[key]; if (!char.sourceImageUrl) return;
-            dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isUpscaling: true } } });
-            try { const { imageUrl, tokenCount } = await upscaleImageWithNano(char.sourceImageUrl, getVisionModelName()); handleAddUsage(tokenCount, 0); dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { upscaledImageUrl: imageUrl } } }); }
-            finally { dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isUpscaling: false } } }); }
-        },
-        handleInjectPersonality: async (key: string) => {
-            const char = stateRef.current.characterDescriptions[key]; if (!char.upscaledImageUrl) return;
-            dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isInjectingPersonality: true } } });
-            try { const { imageUrl, tokenCount } = await injectPersonalityAndCreateSignaturePose(char.upscaledImageUrl, char, getVisionModelName(), getArtStylePrompt()); handleAddUsage(tokenCount, 0); dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { characterSheetHistory: [imageUrl] } } }); }
-            finally { dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isInjectingPersonality: false } } }); }
-        },
-        handleEditSignaturePose: async (key: string, p: string) => {
-            const char = stateRef.current.characterDescriptions[key]; const current = char.characterSheetHistory?.[char.characterSheetHistory.length - 1]; if (!current) return;
-            dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isEditingSheet: true } } });
-            try { const { imageUrl, tokenCount } = await handleEditImageWithNanoWithRetry(current, p, '', char.upscaledImageUrl); handleAddUsage(tokenCount, 0); dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { characterSheetHistory: [...(char.characterSheetHistory || []), imageUrl] } } }); }
-            finally { dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isEditingSheet: false } } }); }
-        },
-        handleUndoSignaturePoseEdit: (key: string) => {
-            const char = stateRef.current.characterDescriptions[key]; if (char.characterSheetHistory && char.characterSheetHistory.length > 1) dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { characterSheetHistory: char.characterSheetHistory.slice(0, -1) } } });
-        },
-        handleEditMannequin: async (key: string, p: string) => {
-            const char = stateRef.current.characterDescriptions[key];
-            const current = char.mannequinImageUrl || (char.characterSheetHistory ? char.characterSheetHistory[char.characterSheetHistory.length - 1] : null);
-            if (!current) return;
-            dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isApplyingCostume: true } } });
-            try {
-                const { imageUrl, tokenCount } = await handleEditImageWithNanoWithRetry(current, p, '', char.upscaledImageUrl);
-                handleAddUsage(tokenCount, 0);
-                dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { mannequinImageUrl: imageUrl, mannequinHistory: [...(char.mannequinHistory || []), imageUrl] } } });
-            } finally {
-                dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isApplyingCostume: false } } });
-            }
-        },
-        handleUndoMannequin: (key: string) => {
-            const char = stateRef.current.characterDescriptions[key];
-            if (char.mannequinHistory && char.mannequinHistory.length > 0) {
-                const newHistory = char.mannequinHistory.slice(0, -1);
-                const prevUrl = newHistory.length > 0 ? newHistory[newHistory.length - 1] : null;
-                dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { mannequinImageUrl: prevUrl, mannequinHistory: newHistory } } });
-            }
-        },
-        handleGenerateLocationOutfits: async (key: string) => {
-            const char = stateRef.current.characterDescriptions[key]; if (!char) return;
-            dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isGeneratingLocationOutfits: true } } });
-            try { 
-                const locs = Object.keys(char.locations || {}); 
-                // Note: passing empty string for signatureOutfitDescription is intentional as we are now pure English based
-                const { locationOutfits, tokenCount } = await generateOutfitsForLocations(char.koreanName, char.gender, '', locs); 
-                handleAddUsage(tokenCount, 0); 
-                // Populate both with the English result to maintain structure compatibility
-                const newK = { ...char.koreanLocations }; 
-                const newE = { ...char.locations }; 
-                Object.entries(locationOutfits).forEach(([l, o]) => { newK[l] = o; newE[l] = o; }); 
-                dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { koreanLocations: newK, locations: newE } } }); 
-            }
-            finally { dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isGeneratingLocationOutfits: false } } }); }
-        },
-        handleGenerateOutfitImage: async (key: string, loc: string, desc: string) => {
-            dispatch({ type: 'SET_LOCATION_OUTFIT_IMAGE_STATE', payload: { characterKey: key, location: loc, state: { imageLoading: true } } });
-            try { const { imageUrl, tokenCount } = await generateOutfitImage(desc, getVisionModelName()); handleAddUsage(tokenCount, 0); dispatch({ type: 'SET_LOCATION_OUTFIT_IMAGE_STATE', payload: { characterKey: key, location: loc, state: { imageUrl, imageLoading: false } } }); }
-            catch (e) { dispatch({ type: 'SET_LOCATION_OUTFIT_IMAGE_STATE', payload: { characterKey: key, location: loc, state: { imageLoading: false } } }); }
-        },
-        handleTryOnOutfit: async (key: string, kor: string, eng: string) => {
-            const char = stateRef.current.characterDescriptions[key]; const current = char.characterSheetHistory?.[char.characterSheetHistory.length - 1]; if (!current) return;
-            dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isApplyingCostume: true } } });
-            try { 
-                const prompt = `Change character's clothes to: ${eng}. Keep identity.`; 
-                const { imageUrl, tokenCount = 0 } = await handleEditImageWithNanoWithRetry(current, prompt, '', char.upscaledImageUrl); 
-                handleAddUsage(tokenCount, 0); 
-                dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { mannequinImageUrl: imageUrl, mannequinHistory: [...(char.mannequinHistory || []), imageUrl] } } }); 
-            }
-            finally { dispatch({ type: 'UPDATE_CHARACTER_DESCRIPTION', payload: { key, data: { isApplyingCostume: false } } }); }
-        },
-        handleModifyOutfitDescription: async (key: string, loc: string, req: string) => {
-            const char = stateRef.current.characterDescriptions[key]; if (!char) return;
-            dispatch({ type: 'SET_OUTFIT_MODIFICATION_STATE', payload: { characterKey: key, location: loc, isLoading: true } });
-            try { 
-                // Pass English description as original
-                const { newDescription, tokenCount } = await regenerateOutfitDescription(char.locations[loc], req, char.koreanName, char.gender); 
-                handleAddUsage(tokenCount, 0); 
-                // Update both fields with the new English description
-                dispatch({ type: 'UPDATE_LOCATION_OUTFIT', payload: { characterKey: key, location: loc, korean: newDescription, english: newDescription } }); 
-            }
-            finally { dispatch({ type: 'SET_OUTFIT_MODIFICATION_STATE', payload: { characterKey: key, location: loc, isLoading: false } }); }
-        },
-        handleUpdateCutCharacters: async (cutNumber: string, names: string[]) => {
-            const target = stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber);
-            const { characterDescriptions } = stateRef.current;
-            if (target) {
-                const profileOutfitParts: string[] = [];
-                names.forEach(name => {
-                    const key = Object.keys(characterDescriptions).find(k => characterDescriptions[k].koreanName === name);
-                    if (key && characterDescriptions[key]) {
-                        const hair = characterDescriptions[key].hairStyleDescription ? `(${characterDescriptions[key].hairStyleDescription}) ` : '';
-                        // Use English locations
-                        const outfitText = characterDescriptions[key].locations?.[target.location] || characterDescriptions[key].locations?.['기본 의상'] || characterDescriptions[key].baseAppearance || 'standard outfit';
-                        profileOutfitParts.push(`[${name}: ${hair}${outfitText}]`);
-                    }
-                });
-                const mechanicalOutfit = profileOutfitParts.join(' ');
-                const nextCut = { ...target, characters: names, characterOutfit: mechanicalOutfit };
-                dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { characters: names, characterOutfit: mechanicalOutfit, imagePrompt: calculateFinalPrompt(nextCut) } } });
-            }
-        },
-        handleUpdateCutIntent: async (cutNumber: string, intent: string) => {
-            dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { directorialIntent: intent, isUpdatingIntent: true } } });
-            try {
-                const { characterDescriptions } = stateRef.current;
-                const target = stateRef.current.generatedContent?.scenes.flatMap(s => s.cuts).find(c => c.cutNumber === cutNumber);
-                if (target) {
-                    const { regeneratedCut, tokenCount } = await regenerateCutFieldsForIntentChange(target, intent, characterDescriptions);
-                    handleAddUsage(tokenCount, 0);
-                    const updatedCutDataForPrompting = { ...target, directorialIntent: intent, ...regeneratedCut };
-                    const finalImagePrompt = calculateFinalPrompt(updatedCutDataForPrompting);
-                    dispatch({ 
-                        type: 'UPDATE_CUT', 
-                        payload: { 
-                            cutNumber, 
-                            data: { 
-                                ...regeneratedCut,
-                                directorialIntent: intent, 
-                                imagePrompt: finalImagePrompt,
-                                isUpdatingIntent: false 
-                            } 
-                        } 
-                    });
-                }
-            } catch (e) { 
-                console.error("Failed to update cut intent:", e);
-                addNotification(`컷 #${cutNumber} 연출 의도 업데이트 실패`, 'error');
-                dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { isUpdatingIntent: false } } }); 
-            }
-        },
+        ...characterActions,
+        ...cutEditActions,
         handleAnalyzeYoutubeUrl: async () => {},
-        handleEditInStudio,
-        handleCreateInStudio,
-        handleConfirmCutAssignment: (cutNumber: string) => {
-            const img = stateRef.current.imageToAssign; if (img) { 
-                const updated = { ...img, id: window.crypto.randomUUID(), sourceCutNumber: cutNumber }; 
-                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: updated, cutNumber } }); 
-                updateUIState({ isCutAssignmentModalOpen: false, imageToAssign: null }); 
-            }
-        },
-        handleOpenTargetCutSelector: (sId: 'a' | 'b') => updateUIState({ isTargetCutSelectionModalOpen: true, targetCutSelectionStudioId: sId }),
-        handleConfirmTargetCutSelection: (cutNumber: string) => { 
-            const studioId = stateRef.current.targetCutSelectionStudioId;
-            if (studioId) { 
-                const session = stateRef.current.studioSessions[studioId];
-                
-                // Update history images within session to the new target cut for consistency
-                const nextHistory = session.history.map(img => ({ ...img, sourceCutNumber: cutNumber }));
-                const nextCurrent = session.currentImage ? { ...session.currentImage, sourceCutNumber: cutNumber } : null;
-                const nextOriginal = session.originalImage ? { ...session.originalImage, sourceCutNumber: cutNumber } : null;
-
-                dispatch({ 
-                    type: 'UPDATE_STUDIO_SESSION', 
-                    payload: { 
-                        studioId: studioId, 
-                        data: { 
-                            sourceCutForNextEdit: cutNumber,
-                            history: nextHistory,
-                            currentImage: nextCurrent,
-                            originalImage: nextOriginal
-                        } 
-                    } 
-                }); 
-                updateUIState({ isTargetCutSelectionModalOpen: false, targetCutSelectionStudioId: null }); 
-            } 
-        },
-        handleReplaceBackground: async (newBackgroundPrompt: string, cutNumber: string) => {},
+        handleReplaceBackground: miscActions.handleReplaceBackground,
         handleClearStudioSession: (sId: 'a' | 'b') => dispatch({ type: 'CLEAR_STUDIO_SESSION', payload: { studioId: sId } }),
         handleRevertInStudio: (sId: 'a' | 'b') => dispatch({ type: 'REVERT_STUDIO_SESSION', payload: { studioId: sId } }),
         handleUndoInStudio: (sId: 'a' | 'b') => dispatch({ type: 'UNDO_STUDIO_SESSION', payload: { studioId: sId } }),
@@ -1462,7 +1153,7 @@ ${identityDNA}
         handleStudioPromptChange: (sId: 'a' | 'b', p: string) => dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { editPrompt: p } } }),
         handleStudioTransformChange: (sId: 'a' | 'b', z: number, p: { x: number; y: number }) => dispatch({ type: 'UPDATE_STUDIO_TRANSFORM', payload: { studioId: sId, zoom: z, pan: p } }),
         handleCommitStudioTransform: (sId: 'a' | 'b', url: string) => { const sess = stateRef.current.studioSessions[sId]; if (sess.currentImage) { const newImg = { ...sess.currentImage, id: window.crypto.randomUUID(), imageUrl: url, createdAt: new Date().toISOString() }; dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { currentImage: newImg, history: [...sess.history, newImg], zoom: 1, pan: { x: 0, y: 0 } } } }); } },
-        handleStudioRefill: (sId: 'a' | 'b') => Promise.resolve(),
+        handleStudioRefill: miscActions.handleStudioRefill,
         handleSendImageToStudio: (img: GeneratedImage) => dispatch({ type: 'LOAD_IMAGE_INTO_STUDIO', payload: { studioId: stateRef.current.activeStudioTarget, image: img } }),
         handleDeleteFromHistory: (id: string) => dispatch({ type: 'DELETE_FROM_IMAGE_HISTORY', payload: id }),
         handleCancelZipping: () => {
@@ -1724,87 +1415,23 @@ ${identityDNA}
         handleOpenEditor: (info: any) => updateUIState({ isEditorOpen: true, editingImageInfo: info }),
         handleOpenImageViewer: (url: string, alt: string, prompt?: string) => updateUIState({ isImageViewerOpen: true, viewerImage: { url, alt, prompt } }),
         handleOpenTextEditor: (cutNumber: string, url: string, chars: string[]) => updateUIState({ isTextEditorOpen: true, textEditingTarget: { cutNumber, imageUrl: url, characters: chars } }),
-        handleDeleteCut: (cutNumber: string) => dispatch({ type: 'DELETE_CUT', payload: cutNumber }),
-        handleTextRender: async (target: TextEditingTarget, text: string, type: 'speech' | 'narration', char?: string) => {
-            dispatch({ type: 'START_LOADING', payload: '텍스트 렌더링 중...' });
-            try { const { imageUrl, tokenCount } = await renderTextOnImage({ ...target, text, textType: type, characterName: char }, getVisionModelName()); handleAddUsage(tokenCount, 0); const newImg = createGeneratedImage({ imageUrl, sourceCutNumber: target.cutNumber, prompt: text, model: stateRef.current.selectedNanoModel }); dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: target.cutNumber } }); } finally { dispatch({ type: 'STOP_LOADING' }); }
-        },
-        handleAutoGenerateImageForCut: (cut: Cut) => handleRunSelectiveGeneration([cut.cutNumber]),
-        handleApplyAndRunPrompt: (p: string, cutNumber: string) => dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: stateRef.current.activeStudioTarget, data: { editPrompt: p, sourceCutForNextEdit: cutNumber } } }),
+        handleTextRender: miscActions.handleTextRender,
+        handleAutoGenerateImageForCut: generationActions.handleAutoGenerateImageForCut,
+        handleApplyAndRunPrompt: generationActions.handleApplyAndRunPrompt,
         handleOriginalPromptToActiveStudio: (p: string) => handleCreateInStudio(stateRef.current.activeStudioTarget, stateRef.current.studioSessions[stateRef.current.activeStudioTarget].originalImage!, p),
         handlePrepareStudioForCut: (cutNumber: string, p: string) => dispatch({ type: 'PREPARE_STUDIO_FOR_CUT', payload: { studioId: stateRef.current.activeStudioTarget, cutNumber, prompt: p } }),
-        handleUpdateCutFieldAndRegenerate: async (cutNumber: string, field: keyof Cut, val: string) => { const target = stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber); if (!target) return; const updates: any = { [field]: val }; if (field !== 'imagePrompt') { const temp = { ...target, ...updates }; updates.imagePrompt = calculateFinalPrompt(temp as any); } dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cutNumber, data: updates } }); },
-        handleUpdateCutIntentAndRegenerate: async (cutNumber: string, intent: string) => {
-            dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { directorialIntent: intent, isUpdatingIntent: true } } });
-            try {
-                const { characterDescriptions } = stateRef.current;
-                const target = stateRef.current.generatedContent?.scenes.flatMap(s => s.cuts).find(c => c.cutNumber === cutNumber);
-                if (target) {
-                    const { regeneratedCut, tokenCount } = await regenerateCutFieldsForIntentChange(target, intent, characterDescriptions);
-                    handleAddUsage(tokenCount, 0);
-                    const updatedCutDataForPrompting = { ...target, directorialIntent: intent, ...regeneratedCut };
-                    const finalImagePrompt = calculateFinalPrompt(updatedCutDataForPrompting);
-                    dispatch({ 
-                        type: 'UPDATE_CUT', 
-                        payload: { 
-                            cutNumber, 
-                            data: { 
-                                ...regeneratedCut,
-                                directorialIntent: intent, 
-                                imagePrompt: finalImagePrompt,
-                                isUpdatingIntent: false 
-                            } 
-                        } 
-                    });
-                }
-            } catch (e) { 
-                console.error("Failed to update cut intent:", e);
-                addNotification(`컷 #${cutNumber} 연출 의도 업데이트 실패`, 'error');
-                dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { isUpdatingIntent: false } } }); 
-            }
-        },
-        handleRefineCharacter: (cutNumber: string, name: string) => { 
-            const charKey = Object.keys(stateRef.current.characterDescriptions).find(k => stateRef.current.characterDescriptions[k].koreanName === name);
-            if (!charKey) return;
-            const ref = stateRef.current.characterDescriptions[charKey].upscaledImageUrl || (stateRef.current.characterDescriptions[charKey].characterSheetHistory && stateRef.current.characterDescriptions[charKey].characterSheetHistory![stateRef.current.characterDescriptions[charKey].characterSheetHistory!.length - 1]);
-            if (!ref) return;
-            dispatch({ type: 'START_LOADING', payload: `${name} 얼굴 정제 중...` });
-            handleEditImageWithNanoWithRetry(stateRef.current.generatedImageHistory.find(i => i.id === stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber)?.selectedImageId)?.imageUrl || '', `Maintain face identity from reference. Match hairstyle: ${stateRef.current.characterDescriptions[charKey].hairStyleDescription}`, '', ref).then(res => { 
-                handleAddUsage(res.tokenCount, 0); 
-                const newImg = createGeneratedImage({ imageUrl: res.imageUrl, sourceCutNumber: cutNumber, prompt: 'Identity refined', model: stateRef.current.selectedNanoModel }); 
-                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber } });
-                dispatch({ type: 'STOP_LOADING' }); 
-            }); 
-        },
-        handleRefineImage: async (cutNumber: string) => { 
-            dispatch({ type: 'START_LOADING', payload: '이미지 정제 중...' }); 
-            const target = stateRef.current.generatedImageHistory.find(i=>i.id===stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber)?.selectedImageId); 
-            if (target) { 
-                const { imageUrl, tokenCount } = await handleEditImageWithNanoWithRetry(target.imageUrl, "Transform to high quality chibi illustration style. Clean lines, vibrant colors.", target.prompt); 
-                handleAddUsage(tokenCount, 0); 
-                const newImg = createGeneratedImage({ imageUrl: imageUrl, sourceCutNumber: cutNumber, prompt: 'Refined Quality', model: stateRef.current.selectedNanoModel }); 
-                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber } });
-            } 
-            dispatch({ type: 'STOP_LOADING' }); 
-        },
         handleUserImageUpload: (sId: 'a' | 'b', url: string) => dispatch({ type: 'LOAD_USER_IMAGE_INTO_STUDIO', payload: { studioId: sId, imageDataUrl: url } }),
         handleUpdateStudioImageFromUpload: (sId: 'a' | 'b', url: string) => dispatch({ type: 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD', payload: { studioId: sId, imageDataUrl: url } }),
         handleUserImageUploadForStudio: (sId: 'a' | 'b', url: string) => dispatch({ type: 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD', payload: { studioId: sId, imageDataUrl: url } }),
         handleLoadImageIntoStudio: (sId: 'a' | 'b', img: GeneratedImage) => dispatch({ type: 'LOAD_IMAGE_INTO_STUDIO', payload: { studioId: sId, image: img } }),
         handleSetOriginalImage: (sId: 'a' | 'b', image: GeneratedImage) => dispatch({ type: 'SET_ORIGINAL_IMAGE', payload: { studioId: sId, image: image } }),
         handleSetActiveStudioTarget: (sId: 'a' | 'b') => dispatch({ type: 'SET_ACTIVE_STUDIO_TARGET', payload: sId }),
-        handleToggleAutoGeneration: () => { if (stateRef.current.isAutoGenerating) { isAutoGeneratingLocalRef.current = false; dispatch({ type: 'STOP_AUTO_GENERATION' }); } else handleRunSelectiveGeneration([]); },
-        handleRunSelectiveGeneration,
-        handleRetryFailedCuts: async () => handleRunSelectiveGeneration(stateRef.current.failedCutNumbers),
+        handleToggleAutoGeneration: generationActions.handleToggleAutoGeneration,
+        handleRunSelectiveGeneration: generationActions.handleRunSelectiveGeneration,
+        handleRetryFailedCuts: generationActions.handleRetryFailedCuts,
         handleRunNormalization,
         handleAttachAudioToCut: (cutNumber: string, file: File) => { const reader = new FileReader(); reader.onload = (e) => dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cutNumber, data: { audioDataUrls: [...(stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber)?.audioDataUrls || []), e.target?.result as string] } } }); reader.readAsDataURL(file); },
         handleRemoveAudioFromCut: (cutNumber: string, idx: number) => { const current = stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber)?.audioDataUrls || []; dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cutNumber, data: { audioDataUrls: current.filter((_, i) => i !== idx) } } }); },
-        handleUpdateCut: (cutNumber: string, data: Partial<Cut>) => dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data } }),
-        handleSelectImageForCut: (cutNumber: string, id: string | null) => dispatch({ type: 'SELECT_IMAGE_FOR_CUT', payload: { cutNumber: cutNumber, imageId: id } }),
-        handleAssignImageToCut: (cutNumber: string, image: GeneratedImage) => {
-            const updated = { ...image, id: window.crypto.randomUUID(), sourceCutNumber: cutNumber }; 
-            dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: updated, cutNumber } }); 
-        },
         handleSelectAsset: (asset: LibraryAsset) => {
             if (stateRef.current.guestSelectionTargetCutNumber) {
                 const cutNumber = stateRef.current.guestSelectionTargetCutNumber;
@@ -1828,10 +1455,7 @@ ${identityDNA}
             }
         },
         handleSelectAssetForBackground: (asset: LibraryAsset, cutNumber: string) => {},
-        handleAllCharacterHairAnalysis: async (characterKey: string, imageUrl: string) => {},
-        handleAddEffectToPrompt: (cutNumber: string, effectPrompt: string) => {},
-        handleRemoveEffectFromPrompt: (cutNumber: string, effectPrompt: string) => {},
-        handleGenerateMask: async (url: string) => { const res = await generateCharacterMask(url, getVisionModelName()); if (res) handleAddUsage(res.tokenCount, 0); return res?.imageUrl || null; },
+        handleGenerateMask: miscActions.handleGenerateMask,
         handleScrollToCut: (cutNumber: string) => { const el = document.getElementById(`cut-${cutNumber}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); },
         handleOpenReviewModalForEdit,
         handleRegenerateStoryboardDraft: async () => { 
@@ -1865,10 +1489,9 @@ ${identityDNA}
                 return null;
             }
         },
-        handleUpdateAndFormatNarration,
+        handleUpdateAndFormatNarration: cutEditActions.handleUpdateAndFormatNarration,
         handleOpenReviewModal: (cutNumber: string) => {},
         handleOpenReviewModalForDirectEntry: () => updateUIState({ isStoryboardReviewModalOpen: true }),
-        handleUploadImageForCut: (cutNumber: string, file: File) => { const reader = new FileReader(); reader.onload = (e) => { const newImg = createGeneratedImage({ imageUrl: e.target?.result as string, sourceCutNumber: cutNumber, prompt: 'User Upload', model: stateRef.current.selectedNanoModel }); dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber } }); }; reader.readAsDataURL(file); },
         handleOpenCutSplitter: (cut: Cut) => dispatch({ type: 'OPEN_CUT_SPLITTER', payload: cut }),
         handleConfirmCutSplit: async (orig: Cut, points: { time: number; textIndex: number }[]) => { dispatch({ type: 'CLOSE_CUT_SPLITTER' }); let lastIdx = 0; const newCuts = points.map((p, i) => { const text = orig.narration.substring(lastIdx, p.textIndex); lastIdx = p.textIndex; return { ...orig, id: window.crypto.randomUUID(), cutNumber: `${orig.cutNumber}-${i+1}`, narration: text.trim(), selectedImageId: i === 0 ? orig.selectedImageId : null }; }); newCuts.push({ ...orig, id: window.crypto.randomUUID(), cutNumber: `${orig.cutNumber}-${points.length+1}`, narration: orig.narration.substring(lastIdx).trim(), selectedImageId: null }); dispatch({ type: 'REPLACE_CUT', payload: { originalCutNumber: orig.cutNumber, newCuts: newCuts as Cut[] } }); },
         handleConfirmDraftReview: async (updatedScenes: EditableScene[], modifiedCutIds: Set<string>) => {
@@ -1882,78 +1505,11 @@ ${identityDNA}
             reader.onload = (ev) => { try { const parsed = JSON.parse(ev.target?.result as string); dispatch({ type: 'RESTORE_STATE', payload: parsed }); } catch (e) { addNotification('실패', 'error'); } }; 
             reader.readAsText(file); 
         },
-        handleThirdCharacterEdit: async (baseImage: GeneratedImage, referenceImage: GeneratedImage, characterToReplace: string) => {
-            dispatch({ type: 'START_LOADING', payload: '제3인물 교체 중...' });
-            try {
-                const editPrompt = `Replace the character "${characterToReplace}" with the character from the reference image. Maintain the original background and art style.`;
-                const res = await handleEditImageWithNanoWithRetry(baseImage.imageUrl, editPrompt, baseImage.prompt, referenceImage.imageUrl);
-                const newImg = createGeneratedImage({ imageUrl: res.imageUrl, sourceCutNumber: baseImage.sourceCutNumber, prompt: editPrompt, model: stateRef.current.selectedNanoModel });
-                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: baseImage.sourceCutNumber } });
-                updateUIState({ isThirdCharacterStudioOpen: false });
-                addNotification('제3인물 교체가 완료되었습니다.', 'success');
-            } catch (e) { addNotification('교체 실패', 'error'); } finally { dispatch({ type: 'STOP_LOADING' }); }
-        },
+        handleThirdCharacterEdit: miscActions.handleThirdCharacterEdit,
         triggerConfetti,
         handleEditImageWithNanoWithRetry,
-        handleOutpaintImageWithNanoWithRetry: async (baseImageUrl: string, direction: 'up' | 'down' | 'left' | 'right', originalPrompt?: string) => {
-            let attempt = 0;
-            const maxAttempts = 3;
-            while (attempt < maxAttempts) {
-                try {
-                    const res = await outpaintImageWithNano(baseImageUrl, direction, getVisionModelName(), originalPrompt);
-                    handleAddUsage(res.tokenCount, 0);
-                    return { imageUrl: res.imageUrl, textResponse: res.textResponse, tokenCount: res.tokenCount };
-                } catch (error: any) {
-                    attempt++;
-                    const isServerError = error.message && (error.message.includes('500') || error.message.includes('503') || error.message.includes('429') || error.message.includes('Internal error') || error.message.includes('Service Unavailable') || error.message.includes('Too Many Requests'));
-                    if (isServerError && attempt < maxAttempts) {
-                        console.warn(`[handleOutpaintImageWithNanoWithRetry] Server/Rate limit error encountered. Retrying attempt ${attempt} of ${maxAttempts}...`, error);
-                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-                    } else {
-                        throw error;
-                    }
-                }
-            }
-            throw new Error("Maximum retry attempts reached.");
-        },
-        handleFillImageWithNanoWithRetry: async (baseImageUrl: string, originalPrompt?: string, maskBase64?: string) => { 
-            let attempt = 0;
-            const maxAttempts = 3;
-            while (attempt < maxAttempts) {
-                try {
-                    const res = await fillImageWithNano(baseImageUrl, getVisionModelName(), originalPrompt, maskBase64); 
-                    handleAddUsage(res.tokenCount, 0); 
-                    return { imageUrl: res.imageUrl, tokenCount: res.tokenCount }; 
-                } catch (error: any) {
-                    attempt++;
-                    const isServerError = error.message && (error.message.includes('500') || error.message.includes('503') || error.message.includes('429') || error.message.includes('Internal error') || error.message.includes('Service Unavailable') || error.message.includes('Too Many Requests'));
-                    if (isServerError && attempt < maxAttempts) {
-                        console.warn(`[handleFillImageWithNanoWithRetry] Server/Rate limit error encountered. Retrying attempt ${attempt} of ${maxAttempts}...`, error);
-                        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-                    } else {
-                        throw error;
-                    }
-                }
-            }
-            throw new Error("Maximum retry attempts reached.");
-        },
-        handleUpdateCutArtStyle: (cutNumber: string, style: ArtStyle | undefined) => {
-            dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { artStyleOverride: style } } });
-        },
-        handleBatchUpdateStyle: (style: ArtStyle, customText: string) => {
-            // 1. Update Global State
-            dispatch({ type: 'SET_ART_STYLE', payload: style });
-            dispatch({ type: 'SET_CUSTOM_ART_STYLE', payload: customText });
-            
-            // 2. Trigger updates for draft scenes if they exist (to ensure fresh state for generation)
-            if (stateRef.current.editableStoryboard) {
-                // Since the style is applied at *Generation Time* via getArtStylePrompt(),
-                // we technically don't need to rewrite the `imagePrompt` text in the draft *unless* 
-                // the style change implies a fundamental shift in character/scene description.
-                // However, user feedback usually benefits from a notification.
-                addNotification(`화풍이 '${style}'로 변경되었습니다. '검수 완료'를 누르면 새 스타일이 적용됩니다.`, 'success');
-            }
-        }
+        handleOutpaintImageWithNanoWithRetry: miscActions.handleOutpaintImageWithNanoWithRetry,
+        handleFillImageWithNanoWithRetry: miscActions.handleFillImageWithNanoWithRetry,
     };
 
     return (
