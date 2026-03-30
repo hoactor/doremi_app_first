@@ -1,0 +1,126 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>도레미썰 스튜디오 (DoremiSsul Studio)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            }
+          }
+        }
+      }
+    </script>
+<style>
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+  @keyframes fade-in-scale {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out forwards;
+  }
+  .animate-fade-out {
+    animation: fade-out 0.3s ease-in forwards;
+  }
+  .animate-fade-in-scale {
+    animation: fade-in-scale 0.3s ease-out forwards;
+  }
+  .confetti {
+    position: fixed;
+    width: 10px;
+    height: 10px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  .confetti-fall {
+    top: -10px;
+    animation: fall linear forwards;
+  }
+
+  @keyframes fall {
+    0% {
+      transform: translateY(0) rotateZ(0deg);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(105vh) rotateZ(720deg);
+      opacity: 0;
+    }
+  }
+
+  .confetti-explode {
+    animation: explode 0.8s ease-out forwards;
+  }
+
+  @keyframes explode {
+    0% {
+      transform: translate(0, 0) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate(var(--tx), var(--ty)) scale(0);
+      opacity: 0;
+    }
+  }
+
+
+  @keyframes waddle-div {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+  }
+  @keyframes blink {
+    0%, 90%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(0.1); }
+  }
+  @keyframes pop-up {
+    0% { transform: scale(0); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.8; }
+    100% { transform: scale(0); opacity: 0; }
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard Variable", Pretendard, Roboto, "Noto Sans KR", "Segoe UI", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+  }
+  .highlight-cut {
+    background-color: rgba(234, 88, 12, 0.2) !important; /* orange-600 with opacity */
+    border-color: rgba(249, 115, 22, 0.8) !important; /* orange-500 */
+    transition: background-color 0.3s ease-out, border-color 0.3s ease-out;
+  }
+  .checkerboard-bg {
+    background-color: #44403c; /* stone-700 */
+    background-image:
+        linear-gradient(45deg, #57534e 25%, transparent 25%),
+        linear-gradient(-45deg, #57534e 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #57534e 75%),
+        linear-gradient(-45deg, transparent 75%, #57534e 75%);
+    background-size: 24px 24px;
+    background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
+  }
+</style>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-stone-950 text-stone-300">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

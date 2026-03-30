@@ -1,0 +1,6 @@
+{
+  "name": "\"DoReMiSsul Studio App\"",
+  "description": "AI 웹툰 & 스토리보드 스튜디오. 주요 기능: 대본 분석, 캐릭터 일관성 유지(Visual DNA), Gemini 기반 이미지 생성/편집, 오디오 싱크 비디오 내보내기.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
