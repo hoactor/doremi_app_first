@@ -12,6 +12,14 @@
     "fs:allow-write-file",
     "fs:allow-exists",
     "fs:allow-mkdir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$DOWNLOAD/**" }
+      ]
+    },
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",

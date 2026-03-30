@@ -36,18 +36,5 @@
       "icons/icon.ico"
     ]
   },
-  "plugins": {
-    "fs": {
-      "scope": {
-        "allow": ["$HOME/**", "$APPDATA/**", "$DOWNLOAD/**"]
-      }
-    },
-    "shell": {
-      "open": true
-    },
-    "dialog": {
-      "open": true,
-      "save": true
-    }
-  }
+  "plugins": {}
 }
