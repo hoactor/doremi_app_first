@@ -1,5 +1,6 @@
 
-import React, { useRef, useState, useLayoutEffect, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useLayoutEffect, useEffect, useMemo, useCallback } from 'react';
+import { ApiKeySettings } from './components/ApiKeySettings';
 import { SceneContainer } from './components/SceneCard';
 import { ImageEditorModal } from './components/ImageEditorModal';
 import { ImageViewerModal } from './components/ImageViewerModal';
@@ -64,6 +65,7 @@ export const App: React.FC = () => {
     const [isBgMusicDragging, setIsBgMusicDragging] = useState(false);
     const [isDragOverInput, setIsDragOverInput] = useState(false);
     const [rightPanelTab, setRightPanelTab] = useState<'studio' | 'history'>('studio');
+    const [isApiKeySettingsOpen, setIsApiKeySettingsOpen] = useState(false);
     
     // --- Local State for Script Input Optimization ---
     const [localScript, setLocalScript] = useState(userInputScript);
@@ -508,6 +510,11 @@ export const App: React.FC = () => {
                                     <span>기존 프로젝트 불러오기</span>
                                 </button>
 
+                                <button onClick={() => setIsApiKeySettingsOpen(true)} className="w-full group flex items-center justify-center gap-3 px-6 py-4 text-sm font-bold text-stone-300 bg-stone-800/80 hover:bg-stone-700 rounded-xl transition-all duration-300 border border-stone-700 hover:border-orange-500">
+                                    <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" /></svg>
+                                    <span>API 키 설정</span>
+                                </button>
+
                                 <div className="p-6 bg-stone-900/80 border border-stone-700 rounded-xl shadow-lg">
                                     <h3 className="text-xs font-mono text-stone-500 uppercase tracking-widest mb-4">Project Settings</h3>
                                     
@@ -767,6 +774,7 @@ export const App: React.FC = () => {
             {isEditorOpen && editingImageInfo && (<ImageEditorModal isOpen={isEditorOpen} onClose={() => actions.setUIState({ isEditorOpen: false })} onSave={(newUrl) => { const originalImage = generatedImageHistory.find(img => img.imageUrl === editingImageInfo.url); if (originalImage) { actions.handleSaveFromEditor(newUrl, originalImage); } else { actions.addNotification('원본 이미지를 찾을 수 없어 저장에 실패했습니다.', 'error'); } }} targetImage={editingImageInfo} allCharacterDescriptions={characterDescriptions} masterStyleSourceImageUrl={null} editImageFunction={actions.handleEditImageWithNanoWithRetry} outpaintImageFunction={actions.handleOutpaintImageWithNanoWithRetry} fillImageFunction={actions.handleFillImageWithNanoWithRetry} />)}
             {isTextEditorOpen && textEditingTarget && (<TextEditorModal isOpen={isTextEditorOpen} onClose={() => actions.setUIState({ isTextEditorOpen: false })} target={textEditingTarget} onRender={actions.handleTextRender} />)}
             {isSlideshowOpen && (<SlideshowModal isOpen={isSlideshowOpen} onClose={() => actions.setUIState({ isSlideshowOpen: false })} slideshowItems={slideshowData} storyTitle={storyTitle} generateSpeech={generateSpeech} addNotification={actions.addNotification} handleAddUsage={actions.handleAddUsage} backgroundMusicUrl={backgroundMusicUrl} />)}
+            <ApiKeySettings isOpen={isApiKeySettingsOpen} onClose={() => setIsApiKeySettingsOpen(false)} />
         </div>
     );
 };
