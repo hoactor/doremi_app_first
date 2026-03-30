@@ -14,7 +14,7 @@ import {
 
 // ─── editImageWithNano ────────────────────────────────────────────────────────
 export const editImageWithNano = async (baseImageUrl: string, editPrompt: string, originalPrompt: string, artStylePrompt: string, modelName: string, referenceImageUrl?: string, maskBase64?: string, masterStyleImageUrl?: string, seed?: number, isCreativeGeneration: boolean = false): Promise<{ imageUrl: string; textResponse: string; tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType = 'image/png' } = await dataUrlToBlob(baseImageUrl);
     const imageBase64 = await blobToBase64(blob);
     const parts: any[] = [{ inlineData: { mimeType, data: imageBase64 } }];
@@ -45,7 +45,7 @@ export const editImageWithNano = async (baseImageUrl: string, editPrompt: string
 
 // ─── generateOutfitImage ──────────────────────────────────────────────────────
 export const generateOutfitImage = async (outfitDescription: string, modelName: string, seed?: number): Promise<{ imageUrl: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     // Strengthened prompt to prevent model refusal regarding human generation by explicitly requesting a product photography flat lay of objects only.
     const prompt = `
     Generate a photorealistic flat lay image of clothing.
@@ -71,7 +71,7 @@ export const generateOutfitImage = async (outfitDescription: string, modelName: 
 
 // ─── generateCharacterMask ────────────────────────────────────────────────────
 export const generateCharacterMask = async (imageUrl: string, modelName: string, seed?: number): Promise<{imageUrl: string, tokenCount: number} | null> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType = 'image/png' } = await dataUrlToBlob(imageUrl);
     const imageBase64 = await blobToBase64(blob);
     const prompt = "Black and white mask for protagonist. Character white, background black.";
@@ -87,7 +87,7 @@ export const generateCharacterMask = async (imageUrl: string, modelName: string,
 
 // ─── injectPersonalityAndCreateSignaturePose ──────────────────────────────────
 export const injectPersonalityAndCreateSignaturePose = async (baseImageUrl: string, character: CharacterDescription, modelName: string, artStylePrompt: string, seed?: number): Promise<{ imageUrl: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType = 'image/png' } = await dataUrlToBlob(baseImageUrl);
     const imageBase64 = await blobToBase64(blob);
     // PDF Page 65 - signature pose logic
@@ -115,7 +115,7 @@ The final image must be identical to the original in every way except for the ch
 
 // ─── upscaleImageWithNano ─────────────────────────────────────────────────────
 export const upscaleImageWithNano = async (baseImageUrl: string, modelName: string, seed?: number): Promise<{ imageUrl: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType = 'image/png' } = await dataUrlToBlob(baseImageUrl);
     const imageBase64 = await blobToBase64(blob);
     const prompt = "Upscale resolution, preserve identity.";
@@ -132,7 +132,7 @@ export const upscaleImageWithNano = async (baseImageUrl: string, modelName: stri
 
 // ─── renderTextOnImage ────────────────────────────────────────────────────────
 export const renderTextOnImage = async (target: { imageUrl: string, text: string, textType: string, characterName?: string }, modelName: string, seed?: number): Promise<{ imageUrl: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType = 'image/png' } = await dataUrlToBlob(target.imageUrl);
     const imageBase64 = await blobToBase64(blob);
     const prompt = `Add comic ${target.textType}: "${target.text}".`;
@@ -143,7 +143,7 @@ export const renderTextOnImage = async (target: { imageUrl: string, text: string
 
 // ─── replaceBackground ────────────────────────────────────────────────────────
 export const replaceBackground = async (baseImageUrl: string, newBackgroundPrompt: string, modelName: string, seed?: number): Promise<{ finalImageUrl: string, totalTokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType = 'image/png' } = await dataUrlToBlob(baseImageUrl);
     const imageBase64 = await blobToBase64(blob);
     const prompt = `Replace background: ${newBackgroundPrompt}.`;
@@ -154,7 +154,7 @@ export const replaceBackground = async (baseImageUrl: string, newBackgroundPromp
 
 // ─── generateMultiCharacterImage ──────────────────────────────────────────────
 export const generateMultiCharacterImage = async (prompt: string, characters: { name: string; url: string; dna?: string }[], artStylePrompt: string, modelName: string, masterStyleImage?: string, seed?: number): Promise<{ imageUrl: string; tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     const parts: any[] = [];
     const [c1, c2, c3] = characters;
@@ -216,7 +216,7 @@ ${characters.map(c => `- Character ${c.name}: Match the face and hair from its r
 // ─── outpaintImageWithNano ────────────────────────────────────────────────────
 export const outpaintImageWithNano = async (baseImageUrl: string, direction: 'up' | 'down' | 'left' | 'right', modelName: string, originalPrompt?: string, seed?: number): Promise<{ imageUrl: string, textResponse: string, tokenCount: number }> => {
     try {
-        const ai = createGeminiClient();
+        const ai = await createGeminiClient();
         const { blob, mimeType = 'image/png' } = await dataUrlToBlob(baseImageUrl);
         const imageBase64 = await blobToBase64(blob);
 
@@ -251,7 +251,7 @@ Remove any black or empty borders by filling them with matching content, lightin
 // ─── fillImageWithNano ────────────────────────────────────────────────────────
 export const fillImageWithNano = async (baseImageUrl: string, modelName: string, originalPrompt?: string, maskBase64?: string, seed?: number): Promise<{ imageUrl: string, tokenCount: number }> => {
     try {
-        const ai = createGeminiClient();
+        const ai = await createGeminiClient();
         const { blob, mimeType = 'image/png' } = await dataUrlToBlob(baseImageUrl);
         const imageBase64 = await blobToBase64(blob);
 
@@ -295,7 +295,7 @@ The final image must have NO black or empty areas. Ensure the newly generated pa
 
 // ─── analyzeCostumeFromImage ──────────────────────────────────────────────────
 export const analyzeCostumeFromImage = async (imageDataUrl: string, characterName: string, gender: Gender, seed?: number): Promise<{ tokenCount: number, englishDescription: string, koreanDescription: string }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType } = await dataUrlToBlob(imageDataUrl);
     const imageBase64 = await blobToBase64(blob);
     const prompt = `Analyze the outfit. Provide extremely detailed description with HEX codes for each garment. Focus strictly on CLOTHING and ACCESSORIES. NO EMOTIONS. Output JSON { "englishDescription": "..." }. Name: ${characterName}, Gender: ${gender}`;
@@ -311,7 +311,7 @@ export const analyzeCostumeFromImage = async (imageDataUrl: string, characterNam
 
 // ─── analyzeCostumesFromTwoShotImage ──────────────────────────────────────────
 export const analyzeCostumesFromTwoShotImage = async (imageDataUrl: string, seed?: number): Promise<{ tokenCount: number, male: { englishDescription: string, koreanDescription: string }, female: { englishDescription: string, koreanDescription: string } }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType = 'image/png' } = await dataUrlToBlob(imageDataUrl);
     const imageBase64 = await blobToBase64(blob);
     const prompt = `Analyze two characters. Focus strictly on clothes and accessories. Include HEX codes. Output JSON { "male": { "english": "..." }, "female": { "english": "..." } } (English Only)`;

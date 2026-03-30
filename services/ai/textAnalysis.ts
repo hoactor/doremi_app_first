@@ -17,7 +17,7 @@ import {
 
 // ─── analyzeHairStyle ─────────────────────────────────────────────────────────
 export const analyzeHairStyle = async (imageDataUrl: string, characterName: string, seed?: number): Promise<{ hairDescription: string, facialFeatures: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const { blob, mimeType } = await dataUrlToBlob(imageDataUrl);
     const imageBase64 = await blobToBase64(blob);
 
@@ -62,7 +62,7 @@ export const analyzeCharacterVisualDNA = analyzeHairStyle;
 
 // ─── enrichScriptWithDirections ───────────────────────────────────────────────
 export const enrichScriptWithDirections = async (script: string, seed?: number, artStyle: string = 'normal', onProgress?: (textLength: number) => void): Promise<{ enrichedScript: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     // [Step 1] Analyze Global Context first
     const { context: storyContext, tokenCount: contextTokenCount } = await analyzeStoryContext(script, seed);
@@ -158,7 +158,7 @@ export const regenerateSingleCutDraft = async (
     gender: Gender,
     seed?: number
 ): Promise<Partial<EditableCut> & { tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `
 # Role: YouTube Shorts Visual Director (Cinematographer)
 # Task: Propose a DIFFERENT and SPECIFIC visual direction for this cut.
@@ -195,7 +195,7 @@ export const regenerateSingleCutDraft = async (
 // ─── analyzeCharacters ────────────────────────────────────────────────────────
 export const analyzeCharacters = async (script: string, gender: Gender, artStylePrompt: string, selectedArtStyle: string, isDetailedScript: boolean = false, seed?: number, onProgress?: (textLength: number) => void): Promise<{ characters: { [key: string]: CharacterDescription }, firstScenePrompt: string, title: string, tokenCount: number }> => {
 
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     let styleContext = "";
     if (selectedArtStyle === 'kyoto') {
@@ -321,7 +321,7 @@ ${script}
 
 // ─── generateTitleSuggestions ──────────────────────────────────────────────────
 export const generateTitleSuggestions = async (script: string, seed?: number): Promise<{ titles: string[], tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `Analyze the script and generate 3 catchy viral YouTube-style Korean titles. Output JSON: { "titles": ["...", "...", "..."] }. Script: ${script}`;
     const response = await ai.models.generateContent({
         model: MODELS.TEXT,
@@ -339,7 +339,7 @@ export const generateTitleSuggestions = async (script: string, seed?: number): P
 
 // ─── generateOutfitsForLocations ──────────────────────────────────────────────
 export const generateOutfitsForLocations = async (characterName: string, gender: Gender, signatureOutfitDescription: string, locations: string[], seed?: number): Promise<{ tokenCount: number, locationOutfits: { [location: string]: string } }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `Design detailed outfits for locations: ${locations.join(', ')}.
 # Requirements:
 1. Match the base style: ${signatureOutfitDescription}.
@@ -361,7 +361,7 @@ export const generateOutfitsForLocations = async (characterName: string, gender:
 
 // ─── regenerateOutfitDescription ──────────────────────────────────────────────
 export const regenerateOutfitDescription = async (originalDescription: string, userRequest: string, characterName: string, gender: 'male' | 'female', seed?: number): Promise<{ newDescription: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `Modify outfit. Original: ${originalDescription}, Request: ${userRequest}.
 Keep HEX codes and high physical detail. DO NOT include emotions or expressions.
 Output JSON { "newDescription": "..." } (English Only)`;
@@ -372,7 +372,7 @@ Output JSON { "newDescription": "..." } (English Only)`;
 
 // ─── regenerateImagePrompts ───────────────────────────────────────────────────
 export const regenerateImagePrompts = async (params: { narration: string; sceneSettingPrompt: string; originalImagePrompt: string; characters?: string[]; cameraAngle?: string; }, seed?: number): Promise<{ koreanImagePrompt: string; imagePrompt: string; tokenCount: number; }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `Create high-quality AI prompt. JSON { "koreanImagePrompt": "...", "imagePrompt": "..." }. Context: ${params.narration}`;
     const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
     return { ...parseJsonResponse<{ koreanImagePrompt: string; imagePrompt: string; }>(response, 'regenerateImagePrompts'), tokenCount: getTokenCountFromResponse(response) };
@@ -380,7 +380,7 @@ export const regenerateImagePrompts = async (params: { narration: string; sceneS
 
 // ─── regenerateSceneFromModification ──────────────────────────────────────────
 export const regenerateSceneFromModification = async (currentCut: Cut, elementName: string, elementValue: string, seed?: number): Promise<{ newSceneDescription: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `Regenerate sceneDescription. User changed ${elementName} to "${elementValue}". Context: ${currentCut.location}, ${currentCut.narration}. Focus on physical composition. Output JSON { "newSceneDescription": "..." }`;
     const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
     return { ...parseJsonResponse<{ newSceneDescription: string }>(response, 'regenerateSceneFromModification'), tokenCount: getTokenCountFromResponse(response) };
@@ -388,7 +388,7 @@ export const regenerateSceneFromModification = async (currentCut: Cut, elementNa
 
 // ─── extractFieldsFromSceneDescription ────────────────────────────────────────
 export const extractFieldsFromSceneDescription = async (newSceneDescription: string, currentCut: Cut, seed?: number): Promise<{ characterPose: string; characterEmotionAndExpression: string; characterOutfit: string; locationDescription: string; otherNotes: string; tokenCount: number; }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `Extract fields from: "${newSceneDescription}". JSON Output. Ensure all fields are strings.`;
     const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
     return { ...parseJsonResponse<any>(response, 'extractFieldsFromSceneDescription'), tokenCount: getTokenCountFromResponse(response) };
@@ -398,7 +398,7 @@ export const extractFieldsFromSceneDescription = async (newSceneDescription: str
 
 // ─── verifyAndEnrichCutPrompt ─────────────────────────────────────────────────
 export const verifyAndEnrichCutPrompt = async (cut: EditableCut, characterDescriptions: { [key: string]: CharacterDescription }, seed?: number): Promise<{ newSceneDescription: string; newCharacterOutfit: string; tokenCount: number; }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     // Inject hair DNA directly into outfit field
     let hairContext = "";
@@ -434,7 +434,7 @@ JSON output.`;
 
 // ─── regenerateCutFieldsForCharacterChange ────────────────────────────────────
 export const regenerateCutFieldsForCharacterChange = async (originalCut: Cut, newCharacters: string[], characterDescriptions: { [key: string]: CharacterDescription }, location: string, seed?: number): Promise<{ regeneratedCut: Partial<Cut>, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `Change characters to: ${newCharacters.join(', ')}. JSON output. Ensure 'characterOutfit' is a string with HEX codes.`;
     const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
     return { regeneratedCut: parseJsonResponse<Partial<Cut>>(response, 'regenerateCutFieldsForCharacterChange'), tokenCount: getTokenCountFromResponse(response) };
@@ -442,7 +442,7 @@ export const regenerateCutFieldsForCharacterChange = async (originalCut: Cut, ne
 
 // ─── regenerateCutFieldsForIntentChange ───────────────────────────────────────
 export const regenerateCutFieldsForIntentChange = async (originalCut: Cut | EditableCut, newIntent: string, characterDescriptions: { [key: string]: CharacterDescription }, seed?: number): Promise<{ regeneratedCut: Partial<Cut>, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const narration = 'narration' in originalCut ? originalCut.narration : (originalCut as EditableCut).narrationText;
     const location = originalCut.location;
     const characters = 'characters' in originalCut ? originalCut.characters : (originalCut as EditableCut).character;
@@ -486,7 +486,7 @@ export const regenerateCutFieldsForIntentChange = async (originalCut: Cut | Edit
 
 // ─── purifyImagePromptForSafety ───────────────────────────────────────────────
 export const purifyImagePromptForSafety = async (prompt: string, seed?: number): Promise<{ text: string, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const fullPrompt = `Make SFW: "${prompt}"`;
     const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: fullPrompt, config: { systemInstruction: SFW_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
     return { text: getResponseText(response, 'purifyImagePromptForSafety'), tokenCount: getTokenCountFromResponse(response) };
@@ -494,7 +494,7 @@ export const purifyImagePromptForSafety = async (prompt: string, seed?: number):
 
 // ─── generateSpeech ───────────────────────────────────────────────────────────
 export const generateSpeech = async (narration: string): Promise<{ audioBase64: string; tokenCount: number; }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const response = await ai.models.generateContent({
         model: MODELS.TTS,
         contents: [{ parts: [{ text: narration }] }],
@@ -624,7 +624,7 @@ export const generateCinematicBlueprint = async (
     seed?: number,
     onProgress?: (textLength: number) => void
 ): Promise<{ blueprint: { [cutId: string]: { shot_size: string; camera_angle: string; intent_reason: string; } }, tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     // PDF Page 67 - cinematography planning
     const prompt = `
@@ -688,7 +688,7 @@ export const generateLocationProps = async (
     artStylePrompt: string,
     seed?: number
 ): Promise<{ ambientProps: string[]; keyProps: string[]; contextualProps: string[]; spatialDNA: string; tokenCount: number; }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     let styleGuide = "";
     if (artStylePrompt === 'kyoto') {
@@ -755,7 +755,7 @@ const generateEditableStoryboardChunk = async (
     seed?: number,
     artStyle?: string
 ): Promise<{ scenes: EditableScene[], tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     // Conditional Directing Guidance based on Art Style
     let directingGuide = `
@@ -1185,7 +1185,7 @@ export const formatTextWithSemanticBreaks = async (text: string, seed?: number):
         return { formattedText: text, tokenCount: 0 };
     }
 
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
     const prompt = `
  [시스템 명령]
  설명이나 분석 없이, 아래 입력된 문장을 3단계 줄바꿈 알고리즘을 적용한 '최종 결과물'로만 변환하십시오.
@@ -1218,7 +1218,7 @@ export const formatTextWithSemanticBreaks = async (text: string, seed?: number):
 
 // ─── formatMultipleTextsWithSemanticBreaks ─────────────────────────────────────
 export const formatMultipleTextsWithSemanticBreaks = async (texts: string[], seed?: number): Promise<{ formattedTexts: string[], tokenCount: number }> => {
-    const ai = createGeminiClient();
+    const ai = await createGeminiClient();
 
     // Filter out texts that already have newlines or are empty
     const textsToProcess = texts.map((text, index) => ({ text, index })).filter(item => !item.text.includes('\n') && item.text.trim() !== '');

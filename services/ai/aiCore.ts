@@ -40,7 +40,48 @@ export const SEMANTIC_LINE_BREAK_SYSTEM_INSTRUCTION = `
 `;
 
 // ─── Gemini Client Factory ────────────────────────────────────────────────────
-export const createGeminiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Gemini API key: Tauri → Keychain (cached), Browser → process.env
+let _cachedGeminiKey: string | null = null;
+
+export async function getGeminiApiKey(): Promise<string> {
+    if (_cachedGeminiKey) return _cachedGeminiKey;
+    // Try Tauri Keychain first
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const keys = await invoke<{ gemini: string | null }>('load_api_keys');
+            if (keys.gemini) {
+                _cachedGeminiKey = keys.gemini;
+                return keys.gemini;
+            }
+        } catch {}
+    }
+    // Fallback: env variable or localStorage
+    const envKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+    if (envKey) {
+        _cachedGeminiKey = envKey;
+        return envKey;
+    }
+    // Browser localStorage fallback
+    try {
+        const stored = JSON.parse(localStorage.getItem('api_keys') || '{}');
+        if (stored.gemini) {
+            _cachedGeminiKey = stored.gemini;
+            return stored.gemini;
+        }
+    } catch {}
+    throw new Error('Gemini API Key가 설정되지 않았습니다. API 키 설정에서 입력해주세요.');
+}
+
+// Invalidate cache when keys are updated
+export function invalidateGeminiKeyCache() {
+    _cachedGeminiKey = null;
+}
+
+export const createGeminiClient = async () => {
+    const apiKey = await getGeminiApiKey();
+    return new GoogleGenAI({ apiKey });
+};
 
 // ─── Helper: data URL to Blob ─────────────────────────────────────────────────
 export const dataUrlToBlob = async (dataUrl: string): Promise<{ blob: Blob, mimeType: string }> => {
@@ -347,7 +388,7 @@ export function getTokenCountFromResponse(response: GenerateContentResponse): nu
 // ─── Helper: Analyze global story context ─────────────────────────────────────
 export async function analyzeStoryContext(script: string, seed?: number): Promise<{ context: string, tokenCount: number }> {
     try {
-        const ai = createGeminiClient();
+        const ai = await createGeminiClient();
         const prompt = `
         # Role: Senior Story Editor / Narrative Consultant
         # Task: Analyze the provided script to extract the "Global Narrative Context" for a visual director.
