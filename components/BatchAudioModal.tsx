@@ -16,7 +16,7 @@ interface BatchAudioModalProps {
     onUpdateCut: (cutNumber: string, data: Partial<Cut>) => void;
     generateSpeech: (narration: string) => Promise<{ audioBase64: string; tokenCount: number; }>; 
     addNotification: (message: string, type: Notification['type']) => void;
-    handleAddUsage: (geminiTokens: number, dalleImages: number) => void;
+    handleAddUsage: (tokens: number, source: 'claude' | 'gemini') => void;
 }
 
 type AudioEngine = 'typecast' | 'supertone';
@@ -183,13 +183,13 @@ const AudioCutCard: React.FC<AudioCutCardProps> = ({ cut: initialCut, globalSett
     };
 
     return (
-        <div className="bg-stone-800 border border-stone-700 rounded-lg p-4 flex flex-col gap-4 shadow-xl">
+        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4 shadow-xl">
             <div className="flex justify-between items-center">
                 <div className="flex items-center gap-2">
                     <span className="text-orange-400 font-bold text-sm">CUT #{liveCut.cutNumber}</span>
                     {segmentsInternal.map((seg, idx) => (
                         seg.settings && (
-                            <span key={idx} className={`px-2 py-0.5 text-[8px] font-black rounded border uppercase ${seg.settings.engine === 'typecast' ? 'bg-orange-900/30 border-orange-700 text-orange-400' : 'bg-amber-900/30 border-amber-700 text-amber-400'}`}>
+                            <span key={idx} className={`px-2 py-0.5 text-[8px] font-black rounded border uppercase ${seg.settings.engine === 'typecast' ? 'bg-orange-900/30 border-orange-700 text-orange-400' : 'bg-emerald-900/30 border-emerald-700 text-emerald-400'}`}>
                                 {seg.label}
                             </span>
                         )
@@ -197,10 +197,10 @@ const AudioCutCard: React.FC<AudioCutCardProps> = ({ cut: initialCut, globalSett
                 </div>
                 {presentCharKeys.length >= 2 && (
                     <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-stone-500 font-bold uppercase">2인 컷 화자:</span>
-                        <div className="flex gap-1 bg-stone-900/50 p-1 rounded border border-stone-700">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase">2인 컷 화자:</span>
+                        <div className="flex gap-1 bg-zinc-900/50 p-1 rounded border border-zinc-700">
                             {presentCharKeys.map(key => (
-                                <button key={key} onClick={() => handleUpdate({ dialogueSpeaker: liveCut.dialogueSpeaker === key ? undefined : key })} className={`px-2 py-1 text-[10px] font-bold rounded transition-all ${liveCut.dialogueSpeaker === key ? 'bg-orange-600 text-white shadow-md' : 'text-stone-500 hover:text-stone-300'}`}>
+                                <button key={key} onClick={() => handleUpdate({ dialogueSpeaker: liveCut.dialogueSpeaker === key ? undefined : key })} className={`px-2 py-1 text-[10px] font-bold rounded transition-all ${liveCut.dialogueSpeaker === key ? 'bg-orange-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}>
                                     {characterDescriptions[key]?.koreanName || key}
                                 </button>
                             ))}
@@ -209,19 +209,19 @@ const AudioCutCard: React.FC<AudioCutCardProps> = ({ cut: initialCut, globalSett
                 )}
             </div>
             <textarea
-                className="w-full bg-stone-900/50 border border-stone-600 rounded p-3 text-sm text-white h-20 resize-none focus:ring-1 focus:ring-orange-500 font-medium shadow-inner"
+                className="w-full bg-zinc-900/50 border border-zinc-600 rounded p-3 text-sm text-white h-20 resize-none focus:ring-1 focus:ring-orange-500 font-medium shadow-inner"
                 value={liveCut.narration}
                 onChange={(e) => handleUpdate({ narration: e.target.value })}
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-3">
-                    <label className="text-[10px] text-stone-500 font-bold uppercase block">전용 설정</label>
-                    <select value={liveCut.voiceEmotion || ""} onChange={(e) => handleUpdate({ voiceEmotion: e.target.value || undefined })} className="w-full bg-stone-700 text-xs text-white border-none rounded p-1.5">
+                    <label className="text-[10px] text-zinc-500 font-bold uppercase block">전용 설정</label>
+                    <select value={liveCut.voiceEmotion || ""} onChange={(e) => handleUpdate({ voiceEmotion: e.target.value || undefined })} className="w-full bg-zinc-700 text-xs text-white border-none rounded p-1.5">
                         <option value="">감정: 전역 설정 따름</option>
                         {EMOTIONS.map(emo => <option key={emo} value={emo}>{emo}</option>)}
                     </select>
                     <div className="flex items-center gap-2 mt-1">
-                        <input type="range" min="0.5" max="2.0" step="0.1" value={liveCut.voiceSpeed ?? 1.3} onChange={(e) => handleUpdate({ voiceSpeed: parseFloat(e.target.value) })} className="flex-grow h-1 bg-stone-700 rounded-lg appearance-none accent-orange-500" />
+                        <input type="range" min="0.5" max="2.0" step="0.1" value={liveCut.voiceSpeed ?? 1.3} onChange={(e) => handleUpdate({ voiceSpeed: parseFloat(e.target.value) })} className="flex-grow h-1 bg-zinc-700 rounded-lg appearance-none accent-orange-500" />
                         <span className="text-[10px] font-mono w-8 text-right text-orange-400">{(liveCut.voiceSpeed ?? 1.3).toFixed(1)}x</span>
                     </div>
                 </div>
@@ -230,14 +230,14 @@ const AudioCutCard: React.FC<AudioCutCardProps> = ({ cut: initialCut, globalSett
                     onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); dragCounter.current--; if (dragCounter.current === 0) setIsDragging(false); }}
                     onDrop={handleDrop}
-                    className={`bg-stone-900/50 rounded border p-2 space-y-2 min-h-[5rem] max-h-32 overflow-y-auto relative transition-colors ${isDragging ? 'border-orange-500 ring-2 ring-orange-500/30' : 'border-stone-700'}`}
+                    className={`bg-zinc-900/50 rounded border p-2 space-y-2 min-h-[5rem] max-h-32 overflow-y-auto relative transition-colors ${isDragging ? 'border-orange-500 ring-2 ring-orange-500/30' : 'border-zinc-700'}`}
                 >
                     {isDragging && <div className="absolute inset-0 flex items-center justify-center bg-orange-900/40 text-white font-bold text-[10px] z-10 pointer-events-none rounded animate-pulse">오디오 드롭하기</div>}
                     {liveCut.audioDataUrls?.length ? (
                         liveCut.audioDataUrls.map((url, idx) => (
-                            <div key={idx} className="flex items-center gap-1 bg-stone-800/50 p-1 rounded border border-stone-700/50">
+                            <div key={idx} className="flex items-center gap-1 bg-zinc-800/50 p-1 rounded border border-zinc-700/50">
                                 <audio src={url} className="h-6 flex-grow opacity-80" controls />
-                                <button onClick={() => onRemoveAudio(liveCut.cutNumber, idx)} className="p-1 text-stone-500 hover:text-red-400"><TrashIcon className="w-3.5 h-3.5" /></button>
+                                <button onClick={() => onRemoveAudio(liveCut.cutNumber, idx)} className="p-1 text-zinc-500 hover:text-red-400"><TrashIcon className="w-3.5 h-3.5" /></button>
                             </div>
                         ))
                     ) : (
@@ -245,7 +245,7 @@ const AudioCutCard: React.FC<AudioCutCardProps> = ({ cut: initialCut, globalSett
                     )}
                 </div>
             </div>
-            <button onClick={handleGenerate} disabled={isGenerating} className={`w-full py-3 rounded-lg text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 shadow-lg active:scale-95 ${isGenerating ? 'bg-stone-700 text-stone-400' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}>
+            <button onClick={handleGenerate} disabled={isGenerating} className={`w-full py-3 rounded-lg text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 shadow-lg active:scale-95 ${isGenerating ? 'bg-zinc-700 text-zinc-400' : 'bg-orange-600 hover:bg-orange-500 text-white'}`}>
                 <div className="flex items-center gap-2">{isGenerating ? <SpinnerIcon className="w-4 h-4" /> : <SpeakerWaveIcon className="w-4 h-4" />}<span>{isGenerating ? '생성 중...' : '음성 생성'}</span></div>
                 {isGenerating && <span className="text-[9px] font-mono text-orange-300">{currentGeneratingInfo}</span>}
             </button>
@@ -318,7 +318,7 @@ export const BatchAudioModal: React.FC<BatchAudioModalProps> = ({ isOpen, onClos
         if (win) {
             win.document.title = "Audio Studio - Independent";
             document.querySelectorAll('link, style').forEach(s => win.document.head.appendChild(s.cloneNode(true)));
-            win.document.body.className = "bg-stone-950 m-0 p-0 overflow-hidden";
+            win.document.body.className = "bg-zinc-950 m-0 p-0 overflow-hidden";
             const container = win.document.createElement('div'); container.id = 'popout-root'; win.document.body.appendChild(container);
             setPortalContainer(container); externalWindowRef.current = win; setIsExternal(true);
             win.onbeforeunload = () => { setIsExternal(false); externalWindowRef.current = null; setPortalContainer(null); };
@@ -408,15 +408,15 @@ export const BatchAudioModal: React.FC<BatchAudioModalProps> = ({ isOpen, onClos
     };
 
     const renderContent = () => (
-        <div className={`bg-stone-900 border border-stone-700 shadow-2xl w-full h-full flex flex-col overflow-hidden ${isExternal ? 'rounded-none' : 'rounded-2xl'}`}>
-            <header className="flex justify-between items-center p-6 border-b border-stone-700 bg-stone-800/50 flex-shrink-0">
+        <div className={`bg-zinc-900 border border-zinc-700 shadow-2xl w-full h-full flex flex-col overflow-hidden ${isExternal ? 'rounded-none' : 'rounded-2xl'}`}>
+            <header className="flex justify-between items-center p-6 border-b border-zinc-700 bg-zinc-800/50 flex-shrink-0">
                 <div>
                     <h2 className="text-2xl font-bold flex items-center gap-3 text-white"><SpeakerWaveIcon className="w-8 h-8 text-orange-400" />멀티 AI 음성 스튜디오</h2>
                     {isGeneratingAll && <p className="text-sm text-orange-300 mt-1 font-bold animate-pulse">{progressMessage}</p>}
                 </div>
                 <div className="flex items-center gap-3">
                     {!isExternal && (
-                        <button onClick={handlePopOut} className="p-2 text-stone-400 hover:text-white bg-stone-800 rounded-lg border border-stone-700 transition-colors" title="새 창으로 분리">
+                        <button onClick={handlePopOut} className="p-2 text-zinc-400 hover:text-white bg-zinc-800 rounded-lg border border-zinc-700 transition-colors" title="새 창으로 분리">
                             <ArrowTopRightOnSquareIcon className="w-5 h-5" />
                         </button>
                     )}
@@ -424,47 +424,47 @@ export const BatchAudioModal: React.FC<BatchAudioModalProps> = ({ isOpen, onClos
                         {isGeneratingAll ? <SpinnerIcon className="w-5 h-5" /> : <SparklesIcon className="w-5 h-5" />}
                         <span>{isGeneratingAll ? '일괄 생성 진행 중' : '미생성 컷 모두 생성'}</span>
                     </button>
-                    <button onClick={onClose} className="p-2 rounded-full text-stone-400 hover:bg-stone-700"><XIcon className="w-8 h-8" /></button>
+                    <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700"><XIcon className="w-8 h-8" /></button>
                 </div>
             </header>
-            <div className="border-b border-stone-700 bg-stone-800/30 flex-shrink-0">
-                <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} className="w-full flex justify-between items-center p-4 text-sm font-bold text-stone-300 hover:bg-stone-800/50">
+            <div className="border-b border-zinc-700 bg-zinc-800/30 flex-shrink-0">
+                <button onClick={() => setIsSettingsOpen(!isSettingsOpen)} className="w-full flex justify-between items-center p-4 text-sm font-bold text-zinc-300 hover:bg-zinc-800/50">
                     <div className="flex items-center gap-2"><CogIcon className="w-5 h-5 text-orange-400" />전역 보이스 엔진 설정</div>
                     <ChevronDownIcon className={`w-6 h-6 transition-transform ${isSettingsOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {isSettingsOpen && (
                     <div className="p-6 pt-0 space-y-6 animate-fade-in">
-                        <div className="bg-stone-950/50 p-4 rounded-xl border border-stone-700/50 flex flex-col sm:flex-row items-center justify-between gap-4">
-                            <div className="flex items-center gap-3 text-stone-400"><SparklesIcon className="w-5 h-5 text-amber-400" /><span className="text-xs font-bold uppercase tracking-tight">전체 엔진 일괄 변경:</span></div>
+                        <div className="bg-zinc-950/50 p-4 rounded-xl border border-zinc-700/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+                            <div className="flex items-center gap-3 text-zinc-400"><SparklesIcon className="w-5 h-5 text-orange-400" /><span className="text-xs font-bold uppercase tracking-tight">전체 엔진 일괄 변경:</span></div>
                             <div className="flex gap-3 w-full sm:w-auto">
                                 <button onClick={() => handleBatchEngineChange('typecast')} className="flex-1 sm:flex-initial px-6 py-2.5 text-xs font-black rounded-lg bg-orange-900/30 border border-orange-500/50 text-orange-400 hover:bg-orange-600 hover:text-white transition-all shadow-lg active:scale-95">모든 화자를 TYPECAST로 설정</button>
-                                <button onClick={() => handleBatchEngineChange('supertone')} className="flex-1 sm:flex-initial px-6 py-2.5 text-xs font-black rounded-lg bg-amber-900/30 border border-amber-500/50 text-amber-400 hover:bg-amber-600 hover:text-white transition-all shadow-lg active:scale-95">모든 화자를 SUPERTONE으로 설정</button>
+                                <button onClick={() => handleBatchEngineChange('supertone')} className="flex-1 sm:flex-initial px-6 py-2.5 text-xs font-black rounded-lg bg-emerald-900/30 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-lg active:scale-95">모든 화자를 SUPERTONE으로 설정</button>
                             </div>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                             {Object.keys(globalSettings).map(role => (
-                                <div key={role} className={`space-y-3 p-4 bg-stone-900/80 rounded-xl border transition-colors ${globalSettings[role].engine === 'typecast' ? 'border-orange-500/50' : 'border-amber-500/50'}`}>
+                                <div key={role} className={`space-y-3 p-4 bg-zinc-900/80 rounded-xl border transition-colors ${globalSettings[role].engine === 'typecast' ? 'border-orange-500/50' : 'border-emerald-500/50'}`}>
                                     <div className="flex justify-between items-center">
-                                        <label className={`text-xs font-black uppercase tracking-widest ${role === 'narration' ? 'text-stone-400' : 'text-orange-400'}`}>{globalSettings[role].label}</label>
-                                        <div className="flex bg-stone-800 rounded-md p-1 scale-90 origin-right">
-                                            <button onClick={() => handleEngineChange(role, 'typecast')} className={`px-2 py-0.5 text-[9px] font-bold rounded ${globalSettings[role].engine === 'typecast' ? 'bg-orange-600 text-white shadow' : 'text-stone-500'}`}>Typecast</button>
-                                            <button onClick={() => handleEngineChange(role, 'supertone')} className={`px-2 py-0.5 text-[9px] font-bold rounded ${globalSettings[role].engine === 'supertone' ? 'bg-amber-600 text-white shadow' : 'text-stone-500'}`}>Supertone</button>
+                                        <label className={`text-xs font-black uppercase tracking-widest ${role === 'narration' ? 'text-zinc-400' : 'text-zinc-400'}`}>{globalSettings[role].label}</label>
+                                        <div className="flex bg-zinc-800 rounded-md p-1 scale-90 origin-right">
+                                            <button onClick={() => handleEngineChange(role, 'typecast')} className={`px-2 py-0.5 text-[9px] font-bold rounded ${globalSettings[role].engine === 'typecast' ? 'bg-orange-600 text-white shadow' : 'text-zinc-500'}`}>Typecast</button>
+                                            <button onClick={() => handleEngineChange(role, 'supertone')} className={`px-2 py-0.5 text-[9px] font-bold rounded ${globalSettings[role].engine === 'supertone' ? 'bg-emerald-600 text-white shadow' : 'text-zinc-500'}`}>Supertone</button>
                                         </div>
                                     </div>
                                     <div className="space-y-1">
-                                        <p className="text-[10px] text-stone-500 font-bold uppercase">{globalSettings[role].engine === 'typecast' ? 'Actor ID' : 'Voice ID'}</p>
-                                        <input type="text" value={globalSettings[role].id} onChange={(e) => setGlobalSettings({ ...globalSettings, [role]: { ...globalSettings[role], id: e.target.value } })} className="w-full bg-stone-800 border border-stone-700 rounded px-2 py-1.5 text-xs text-white font-mono focus:border-orange-500 outline-none" />
+                                        <p className="text-[10px] text-zinc-500 font-bold uppercase">{globalSettings[role].engine === 'typecast' ? 'Actor ID' : 'Voice ID'}</p>
+                                        <input type="text" value={globalSettings[role].id} onChange={(e) => setGlobalSettings({ ...globalSettings, [role]: { ...globalSettings[role], id: e.target.value } })} className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-white font-mono focus:border-orange-500 outline-none" />
                                     </div>
                                     <div className="flex gap-2">
                                         <div className="flex-1">
-                                            <p className="text-[10px] text-stone-500 font-bold mb-1 uppercase">기본 감정</p>
-                                            <select value={globalSettings[role].emotion} onChange={(e) => setGlobalSettings({ ...globalSettings, [role]: { ...globalSettings[role], emotion: e.target.value } })} className="w-full bg-stone-800 text-xs text-white border-none rounded p-1.5">
+                                            <p className="text-[10px] text-zinc-500 font-bold mb-1 uppercase">기본 감정</p>
+                                            <select value={globalSettings[role].emotion} onChange={(e) => setGlobalSettings({ ...globalSettings, [role]: { ...globalSettings[role], emotion: e.target.value } })} className="w-full bg-zinc-800 text-xs text-white border-none rounded p-1.5">
                                                 {EMOTIONS.map(emo => <option key={emo} value={emo}>{emo}</option>)}
                                             </select>
                                         </div>
                                         <div className="w-20">
-                                            <p className="text-[10px] text-stone-500 font-bold mb-1 uppercase">속도</p>
-                                            <input type="number" step="0.1" value={globalSettings[role].speed} onChange={(e) => setGlobalSettings({ ...globalSettings, [role]: { ...globalSettings[role], speed: parseFloat(e.target.value) || 1.3 } })} className="w-full bg-stone-800 border-none rounded text-xs text-white p-1.5 font-mono" />
+                                            <p className="text-[10px] text-zinc-500 font-bold mb-1 uppercase">속도</p>
+                                            <input type="number" step="0.1" value={globalSettings[role].speed} onChange={(e) => setGlobalSettings({ ...globalSettings, [role]: { ...globalSettings[role], speed: parseFloat(e.target.value) || 1.3 } })} className="w-full bg-zinc-800 border-none rounded text-xs text-white p-1.5 font-mono" />
                                         </div>
                                     </div>
                                 </div>
@@ -473,13 +473,13 @@ export const BatchAudioModal: React.FC<BatchAudioModalProps> = ({ isOpen, onClos
                     </div>
                 )}
             </div>
-            <main className="flex-grow p-6 overflow-y-auto bg-stone-950 grid grid-cols-1 xl:grid-cols-2 gap-8 pb-24">
+            <main className="flex-grow p-6 overflow-y-auto bg-zinc-950 grid grid-cols-1 xl:grid-cols-2 gap-8 pb-24">
                 {allCuts.map(cut => (
                     <AudioCutCard key={cut.cutNumber} cut={cut} globalSettings={globalSettings} onAttachAudio={onAttachAudio} onRemoveAudio={onRemoveAudio} addNotification={addNotification} />
                 ))}
             </main>
-            <footer className="p-5 bg-stone-900 border-t border-stone-700 flex justify-end flex-shrink-0">
-                <button onClick={onClose} className="px-12 py-3 text-sm font-bold rounded-lg bg-stone-700 hover:bg-stone-600 transition-colors text-white">닫기</button>
+            <footer className="p-5 bg-zinc-900 border-t border-zinc-700 flex justify-end flex-shrink-0">
+                <button onClick={onClose} className="px-12 py-3 text-sm font-bold rounded-lg bg-zinc-700 hover:bg-zinc-600 transition-colors text-white">닫기</button>
             </footer>
         </div>
     );
@@ -489,17 +489,17 @@ export const BatchAudioModal: React.FC<BatchAudioModalProps> = ({ isOpen, onClos
     return (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 sm:p-6 animate-fade-in" aria-modal="true" role="dialog">
             {isExternal ? (
-                <div className="flex flex-col items-center justify-center text-center p-12 bg-stone-900 rounded-3xl border border-stone-700 shadow-2xl max-w-lg">
+                <div className="flex flex-col items-center justify-center text-center p-12 bg-zinc-900 rounded-3xl border border-zinc-700 shadow-2xl max-w-lg">
                     <div className="w-20 h-20 bg-orange-600/20 rounded-full flex items-center justify-center mb-6 border border-orange-500/30">
                         <ArrowTopRightOnSquareIcon className="w-10 h-10 text-orange-400" />
                     </div>
                     <h2 className="text-2xl font-bold text-white mb-2">음성 작업창 분리됨</h2>
-                    <p className="text-stone-400 mb-8 leading-relaxed">멀티 AI 음성 스튜디오가 독립된 창에서 실행 중입니다.<br/>생성된 음성은 메인 창에 실시간으로 반영됩니다.</p>
+                    <p className="text-zinc-400 mb-8 leading-relaxed">멀티 AI 음성 스튜디오가 독립된 창에서 실행 중입니다.<br/>생성된 음성은 메인 창에 실시간으로 반영됩니다.</p>
                     <button onClick={() => { if(externalWindowRef.current) externalWindowRef.current.close(); setIsExternal(false); }} className="w-full py-4 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2">
                         <RefreshIcon className="w-5 h-5" />
                         현재 탭으로 가져오기
                     </button>
-                    <button onClick={onClose} className="w-full mt-3 py-4 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold rounded-xl transition-all">모달 닫기</button>
+                    <button onClick={onClose} className="w-full mt-3 py-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all">모달 닫기</button>
                 </div>
             ) : (
                 <div className="w-full max-w-7xl h-full max-h-[95vh]">

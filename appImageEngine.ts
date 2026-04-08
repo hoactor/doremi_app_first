@@ -1,73 +1,148 @@
-import { NanoModel } from './types';
-import { editImageWithNano } from './services/geminiService';
+// appImageEngine.ts — React 의존 제로
+// 이미지 생성 루프 핵심 로직
 
-// ── Vision model name resolver (extracted from AppContext.getVisionModelName) ──
+import type { AppAction, Cut, GeneratedImage, GeneratedScript, CharacterDescription, ImageEngine } from './types';
+import { editImageWithNano, generateMultiCharacterImage } from './services/geminiService';
+import { IS_TAURI, getGeminiApiKey } from './services/tauriAdapter';
+import { generateMultiCharWithFlux, generateImageWithFlux, getFluxImageSize } from './services/falService';
+import type { PromptContext } from './appStyleEngine';
 
-export function getVisionModelName(selectedNanoModel: NanoModel): string {
-    switch (selectedNanoModel) {
-        case 'nano-3.1':
-            return 'gemini-3.1-flash-image-preview';
-        case 'nano-3pro':
-            return 'gemini-3-pro-image-preview';
-        case 'nano-2.5':
-        default:
-            return 'gemini-2.5-flash-image';
-    }
-}
-
-// ── Retry wrapper for editImageWithNano (extracted from AppContext) ──
-
-export interface EditImageRetryDeps {
-    getArtStylePrompt: (overrideStyle?: any, overrideCustomText?: string) => string;
-    getVisionModelName: () => string;
-    handleAddUsage: (geminiTokens: number, dalleImages: number) => void;
-}
-
-export async function editImageWithNanoWithRetry(
-    deps: EditImageRetryDeps,
+// ─── editImageWithNano 재시도 래퍼 (순수 함수) ──────────────────────
+export async function editImageWithRetry(
     baseImageUrl: string,
     editPrompt: string,
     originalPrompt: string,
-    referenceImageUrl?: string,
+    artStylePrompt: string,
+    modelName: string,
+    imageRatio: string,
+    referenceImageUrls?: string[],
     maskBase64?: string,
     masterStyleImageUrl?: string,
     isCreativeGeneration: boolean = false,
-    artStylePromptOverride?: string,
 ): Promise<{ imageUrl: string; textResponse: string; tokenCount: number }> {
-    const artStylePrompt = artStylePromptOverride || deps.getArtStylePrompt();
-    const modelName = deps.getVisionModelName();
-
-    // Check for API key if using gemini-3-pro-image-preview or gemini-3.1-flash-image-preview
     if (modelName === 'gemini-3-pro-image-preview' || modelName === 'gemini-3.1-flash-image-preview') {
-        if (!(await (window as any).aistudio.hasSelectedApiKey())) {
-            await (window as any).aistudio.openSelectKey();
-        }
+        const geminiKey = IS_TAURI ? await getGeminiApiKey() : (globalThis as any).process?.env?.API_KEY;
+        if (!geminiKey) throw new Error('Gemini API key not configured');
     }
 
     let attempt = 0;
     const maxAttempts = 3;
     while (attempt < maxAttempts) {
         try {
-            const res = await editImageWithNano(
-                baseImageUrl, editPrompt, originalPrompt, artStylePrompt, modelName,
-                referenceImageUrl, maskBase64, masterStyleImageUrl, undefined, isCreativeGeneration,
-            );
-            deps.handleAddUsage(res.tokenCount, 0);
+            const res = await editImageWithNano(baseImageUrl, editPrompt, originalPrompt, artStylePrompt, modelName, referenceImageUrls, maskBase64, masterStyleImageUrl, undefined, isCreativeGeneration, imageRatio);
             return { imageUrl: res.imageUrl, textResponse: res.textResponse, tokenCount: res.tokenCount };
         } catch (error: any) {
             attempt++;
-            const isServerError = error.message && (
-                error.message.includes('500') || error.message.includes('503') ||
-                error.message.includes('429') || error.message.includes('Internal error') ||
-                error.message.includes('Service Unavailable') || error.message.includes('Too Many Requests')
-            );
+            const isServerError = error.message && (error.message.includes('500') || error.message.includes('503') || error.message.includes('429') || error.message.includes('Internal error') || error.message.includes('Service Unavailable') || error.message.includes('Too Many Requests'));
             if (isServerError && attempt < maxAttempts) {
-                console.warn(`[editImageWithNanoWithRetry] Server/Rate limit error encountered. Retrying attempt ${attempt} of ${maxAttempts}...`, error);
                 await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-            } else {
-                throw error;
-            }
+            } else { throw error; }
         }
     }
     throw new Error("Maximum retry attempts reached.");
+}
+
+// ─── 이미지 자동 생성 루프 (단일 컷) ─────────────────────────────────
+export interface CutGenerationContext {
+    characterDescriptions: { [key: string]: CharacterDescription };
+    artStylePrompt: string;
+    modelName: string;
+    imageRatio: string;
+    selectedNanoModel: string;
+    sceneImageMap?: Map<string, string>; // location → 이미 생성된 같은 씬 이미지 URL (인서트 컷 스타일 참조용)
+    engine?: ImageEngine;               // ★ 엔진 선택 (기본 'gemini')
+    promptContext?: PromptContext;       // ★ Flux 프롬프트 빌더용 컨텍스트
+    fluxModel?: string;                 // ★ Flux 모델명 (flux-pro, flux-flex, flux-lora)
+    loraUrls?: { path: string; scale: number }[];  // ★ LoRA URL 목록
+    fluxEndpoint?: string;              // ★ fal 엔드포인트 (fal-ai/flux-2-pro 등)
+}
+
+export async function generateImageForCut(
+    cut: Cut,
+    prompt: string,
+    ctx: CutGenerationContext,
+    editWithRetry: (base: string, prompt: string, orig: string, refs?: string[], mask?: string, master?: string, creative?: boolean, artOverride?: string) => Promise<{ imageUrl: string; textResponse: string; tokenCount: number }>,
+): Promise<{ imageUrl: string; tokenCount: number }> {
+    const { characterDescriptions, artStylePrompt, modelName, imageRatio, selectedNanoModel, sceneImageMap } = ctx;
+
+    // 캐릭터 감지
+    const presentCharKeys = Object.keys(characterDescriptions).filter(key =>
+        cut.characters.some(c => c.includes(characterDescriptions[key].koreanName))
+    );
+
+    const charsToGenerate: { name: string; url: string }[] = [];
+    for (let j = 0; j < presentCharKeys.length; j++) {
+        const key = presentCharKeys[j];
+        const char = characterDescriptions[key];
+        const ref = char.mannequinImageUrl || char.upscaledImageUrl || (char.characterSheetHistory && char.characterSheetHistory[char.characterSheetHistory.length - 1]) || char.sourceImageUrl;
+        if (ref) charsToGenerate.push({ name: char.koreanName || `Char${j + 1}`, url: ref });
+    }
+    if ((cut as any).guestCharacterUrl) {
+        charsToGenerate.push({ name: (cut as any).guestCharacterName || 'Guest', url: (cut as any).guestCharacterUrl });
+    }
+
+    let resultImageUrl = '';
+    let tokenCountUsed = 0;
+
+    if (charsToGenerate.length >= 2) {
+        if (ctx.engine === 'flux' && ctx.fluxModel === 'flux-lora') {
+            // ★ Flux LoRA: txt2img 전용 — 참조 이미지 없이 프롬프트+LoRA만
+            const fluxImageSize = getFluxImageSize(imageRatio);
+            const res = await generateImageWithFlux(prompt, {
+                loraUrls: ctx.loraUrls,
+                imageSize: fluxImageSize,
+                endpoint: ctx.fluxEndpoint || 'fal-ai/flux-2/lora',
+            });
+            resultImageUrl = res.imageUrl;
+            tokenCountUsed = 1;
+        } else if (ctx.engine === 'flux') {
+            // ★ Flux Pro/Flex 다중 캐릭터: IP-Adapter 참조
+            const fluxImageSize = getFluxImageSize(imageRatio);
+            const refUrls = charsToGenerate.map(c => c.url);
+            const res = await generateMultiCharWithFlux(prompt, refUrls, { imageSize: fluxImageSize });
+            resultImageUrl = res.imageUrl;
+            tokenCountUsed = 1;
+        } else {
+            const res = await generateMultiCharacterImage(prompt, charsToGenerate.slice(0, 3), artStylePrompt, modelName, undefined, undefined, imageRatio);
+            resultImageUrl = res.imageUrl;
+            tokenCountUsed = res.tokenCount;
+        }
+    } else if (charsToGenerate.length === 1) {
+        if (ctx.engine === 'flux' && ctx.fluxModel === 'flux-lora') {
+            // ★ Flux LoRA: txt2img 전용 — 레퍼런스 이미지 없이 프롬프트+LoRA로 생성
+            const fluxImageSize = getFluxImageSize(imageRatio);
+            const res = await generateImageWithFlux(prompt, {
+                loraUrls: ctx.loraUrls,
+                imageSize: fluxImageSize,
+                endpoint: ctx.fluxEndpoint || 'fal-ai/flux-2/lora',
+            });
+            resultImageUrl = res.imageUrl;
+            tokenCountUsed = 1;
+        } else {
+            const res = await editWithRetry(charsToGenerate[0].url, prompt, '', undefined, undefined, undefined, true, artStylePrompt);
+            resultImageUrl = res.imageUrl;
+            tokenCountUsed = res.tokenCount;
+        }
+    } else {
+        // [인서트 컷] 캐릭터 없음 → 같은 씬 이미지를 스타일 레퍼런스로 활용
+        if (ctx.engine === 'flux' && ctx.fluxModel === 'flux-lora') {
+            // ★ Flux LoRA: txt2img 전용 — 인서트 컷도 프롬프트+LoRA로 생성
+            const fluxImageSize = getFluxImageSize(imageRatio);
+            const res = await generateImageWithFlux(prompt, {
+                loraUrls: ctx.loraUrls,
+                imageSize: fluxImageSize,
+                endpoint: ctx.fluxEndpoint || 'fal-ai/flux-2/lora',
+            });
+            resultImageUrl = res.imageUrl;
+            tokenCountUsed = 1;
+        } else {
+            const sceneStyleRef = sceneImageMap?.get(cut.location);
+            const baseRef = sceneStyleRef || "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+            const res = await editWithRetry(baseRef, prompt, '', undefined, undefined, undefined, true, artStylePrompt);
+            resultImageUrl = res.imageUrl;
+            tokenCountUsed = res.tokenCount;
+        }
+    }
+
+    return { imageUrl: resultImageUrl, tokenCount: tokenCountUsed };
 }

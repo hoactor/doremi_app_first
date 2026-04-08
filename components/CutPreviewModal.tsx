@@ -19,18 +19,18 @@ export const CutPreviewModal: React.FC<CutPreviewModalProps> = ({ isOpen, onClos
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden animate-slide-up">
-                <div className="flex justify-between items-center p-6 border-b border-stone-800 bg-stone-900/50">
+            <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden animate-slide-up">
+                <div className="flex justify-between items-center p-6 border-b border-zinc-800 bg-zinc-900/50">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         <ScissorsIcon className="w-6 h-6 text-orange-400" />
                         컷 분할 미리보기
                     </h2>
-                    <button onClick={onClose} className="p-2 text-stone-400 hover:text-white hover:bg-stone-800 rounded-lg transition-colors">
+                    <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors">
                         <XIcon className="w-5 h-5" />
                     </button>
                 </div>
                 
-                <div className="p-6 overflow-y-auto flex-1 bg-stone-950">
+                <div className="p-6 overflow-y-auto flex-1 bg-zinc-950">
                     <div className="mb-4 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
                         <p className="text-sm text-orange-300 leading-relaxed">
                             입력하신 대본이 아래와 같이 <strong>{cuts.length}개의 컷</strong>으로 나뉘어 AI에게 전달됩니다. 
@@ -40,27 +40,27 @@ export const CutPreviewModal: React.FC<CutPreviewModalProps> = ({ isOpen, onClos
                     
                     <div className="space-y-3">
                         {cuts.map((cut, index) => (
-                            <div key={index} className="flex gap-4 p-4 bg-stone-900 border border-stone-800 rounded-xl hover:border-stone-700 transition-colors">
-                                <div className="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-stone-800 rounded-lg font-mono text-sm font-bold text-stone-400">
+                            <div key={index} className="flex gap-4 p-4 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-700 transition-colors">
+                                <div className="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-zinc-800 rounded-lg font-mono text-sm font-bold text-zinc-400">
                                     #{index + 1}
                                 </div>
-                                <div className="flex-1 text-sm text-stone-300 leading-relaxed whitespace-pre-wrap">
+                                <div className="flex-1 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
                                     {cut}
                                 </div>
                             </div>
                         ))}
                         {cuts.length === 0 && (
-                            <div className="text-center p-8 text-stone-500">
+                            <div className="text-center p-8 text-zinc-500">
                                 입력된 대본이 없습니다.
                             </div>
                         )}
                     </div>
                 </div>
                 
-                <div className="p-6 border-t border-stone-800 bg-stone-900/50 flex justify-end gap-3">
+                <div className="p-6 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-3">
                     <button 
                         onClick={onClose}
-                        className="px-6 py-2.5 rounded-lg font-semibold text-stone-300 bg-stone-800 hover:bg-stone-700 transition-colors"
+                        className="px-6 py-2.5 rounded-lg font-semibold text-zinc-300 bg-zinc-800 hover:bg-zinc-700 transition-colors"
                     >
                         대본 수정하기
                     </button>

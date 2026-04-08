@@ -33,15 +33,15 @@ export const CutAssignmentModal: React.FC<CutAssignmentModalProps> = ({
       aria-modal="true"
       role="dialog"
     >
-      <div className="bg-stone-800 border border-stone-700 rounded-2xl shadow-xl w-full max-w-2xl h-[85vh] flex flex-col">
-        <header className="flex justify-between items-center p-4 border-b border-stone-700 flex-shrink-0">
+      <div className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-xl w-full max-w-2xl h-[85vh] flex flex-col">
+        <header className="flex justify-between items-center p-4 border-b border-zinc-700 flex-shrink-0">
           <h2 className="text-xl font-bold text-white">{title || '컷 할당'}</h2>
-          <button onClick={onClose} className="p-2 rounded-full text-stone-400 hover:bg-stone-700">
+          <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700">
             <XIcon className="w-6 h-6" />
           </button>
         </header>
 
-        <p className="text-sm text-stone-400 p-4 bg-stone-900/50 flex-shrink-0">
+        <p className="text-sm text-zinc-400 p-4 bg-zinc-900/50 flex-shrink-0">
           {description || '새로 생성된 이미지를 할당할 컷을 선택해주세요.'}
         </p>
         
@@ -54,7 +54,7 @@ export const CutAssignmentModal: React.FC<CutAssignmentModalProps> = ({
                         <button 
                             key={cut.cutNumber} 
                             onClick={() => handleConfirm(cut.cutNumber)}
-                            className="p-2 rounded-md text-center cursor-pointer transition-colors font-mono text-sm bg-stone-800 text-stone-400 border border-stone-600 hover:bg-stone-700 hover:border-stone-500"
+                            className="p-2 rounded-md text-center cursor-pointer transition-colors font-mono text-sm bg-zinc-800 text-zinc-400 border border-zinc-600 hover:bg-zinc-700 hover:border-zinc-500"
                             title={`Cut #${cut.cutNumber}: ${cut.narration}`}
                         >
                             <span>#{cut.cutNumber}</span>
@@ -65,10 +65,10 @@ export const CutAssignmentModal: React.FC<CutAssignmentModalProps> = ({
           ))}
         </main>
 
-        <footer className="p-4 bg-stone-900/50 border-t border-stone-700 flex-shrink-0 flex justify-end">
+        <footer className="p-4 bg-zinc-900/50 border-t border-zinc-700 flex-shrink-0 flex justify-end">
           <button
             onClick={onClose}
-            className="px-6 py-2 text-sm font-semibold rounded-lg bg-stone-600 hover:bg-stone-500 text-white"
+            className="px-6 py-2 text-sm font-semibold rounded-lg bg-zinc-600 hover:bg-zinc-500 text-white"
           >
             취소
           </button>

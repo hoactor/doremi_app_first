@@ -57,7 +57,7 @@ const drawWaveform = (
     
     // Draw waveform
     ctx.lineWidth = 2;
-    ctx.strokeStyle = '#a5b4fc'; // orange-300
+    ctx.strokeStyle = '#fb923c'; // orange-400
     ctx.beginPath();
     const data = audioBuffer.getChannelData(0);
 
@@ -90,7 +90,7 @@ const drawWaveform = (
         if (time >= startTime && time <= endTime) {
             const x = ((time - startTime) / (endTime - startTime)) * width;
             ctx.lineWidth = index === hoveredIndex ? 3 : 1.5;
-            ctx.strokeStyle = index === hoveredIndex ? '#fcd34d' : '#f87171'; // amber-300 for hover, red-400 for normal
+            ctx.strokeStyle = index === hoveredIndex ? '#fb923c' : '#f87171'; // orange-400 for hover, red-400 for normal
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, height);
@@ -363,22 +363,22 @@ export const CutSplitterModal: React.FC<CutSplitterModalProps> = ({ isOpen, onCl
 
     return (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 sm:p-8 animate-fade-in" aria-modal="true" role="dialog">
-            <div className="bg-stone-900 border border-stone-700 rounded-2xl shadow-xl w-full max-w-4xl h-full max-h-[80vh] flex flex-col">
-                <header className="flex justify-between items-center p-4 border-b border-stone-700">
+            <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-xl w-full max-w-4xl h-full max-h-[80vh] flex flex-col">
+                <header className="flex justify-between items-center p-4 border-b border-zinc-700">
                     <h2 className="text-xl font-bold text-white">컷 분할 편집기 (CUT #{cut?.cutNumber})</h2>
-                    <button onClick={onClose} className="p-2 rounded-full text-stone-400 hover:bg-stone-700"><XIcon className="w-6 h-6" /></button>
+                    <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700"><XIcon className="w-6 h-6" /></button>
                 </header>
 
                 <main className="flex-grow p-6 overflow-y-auto space-y-6">
                     {isLoading ? (
-                        <div className="text-center text-stone-400">오디오 로딩 중...</div>
+                        <div className="text-center text-zinc-400">오디오 로딩 중...</div>
                     ) : !audioBuffer ? (
                         <div className="text-center text-red-400">오디오를 불러올 수 없습니다.</div>
                     ) : (
                         <>
                             <div>
-                                <h3 className="text-sm font-semibold text-stone-400 mb-2">오디오 파형 (클릭하여 분할, 드래그하여 수정)</h3>
-                                <div className="bg-stone-800 p-2 rounded-lg">
+                                <h3 className="text-sm font-semibold text-zinc-400 mb-2">오디오 파형 (클릭하여 분할, 드래그하여 수정)</h3>
+                                <div className="bg-zinc-800 p-2 rounded-lg">
                                     <canvas
                                         ref={canvasRef}
                                         width="800"
@@ -390,13 +390,13 @@ export const CutSplitterModal: React.FC<CutSplitterModalProps> = ({ isOpen, onCl
                                         onMouseLeave={handleCanvasMouseLeave}
                                     />
                                     <div className="flex items-center justify-between mt-2">
-                                        <button onClick={togglePlay} className="p-2 bg-stone-700 rounded-full hover:bg-stone-600">
+                                        <button onClick={togglePlay} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600">
                                             {isPlaying ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
                                         </button>
                                         <div className="flex items-center gap-2">
-                                            <button onClick={() => setZoomLevel(z => Math.max(1, z / 1.5))} className="p-2 bg-stone-700 rounded-full hover:bg-stone-600" title="축소"><ZoomOutIcon className="w-5 h-5"/></button>
-                                            <span className="text-xs text-stone-400 w-10 text-center">{zoomLevel.toFixed(1)}x</span>
-                                            <button onClick={() => setZoomLevel(z => Math.min(50, z * 1.5))} className="p-2 bg-stone-700 rounded-full hover:bg-stone-600" title="확대"><ZoomInIcon className="w-5 h-5"/></button>
+                                            <button onClick={() => setZoomLevel(z => Math.max(1, z / 1.5))} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600" title="축소"><ZoomOutIcon className="w-5 h-5"/></button>
+                                            <span className="text-xs text-zinc-400 w-10 text-center">{zoomLevel.toFixed(1)}x</span>
+                                            <button onClick={() => setZoomLevel(z => Math.min(50, z * 1.5))} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600" title="확대"><ZoomInIcon className="w-5 h-5"/></button>
                                         </div>
                                     </div>
                                     {zoomLevel > 1 && (
@@ -407,18 +407,18 @@ export const CutSplitterModal: React.FC<CutSplitterModalProps> = ({ isOpen, onCl
                                             step="0.001"
                                             value={scrollPosition}
                                             onChange={(e) => setScrollPosition(Number(e.target.value))}
-                                            className="w-full h-2 mt-2 bg-stone-700 rounded-lg appearance-none cursor-pointer"
+                                            className="w-full h-2 mt-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
                                             title="파형 스크롤"
                                         />
                                     )}
                                 </div>
                             </div>
                             <div>
-                                <h3 className="text-sm font-semibold text-stone-400 mb-2">나레이션 (클릭하여 분할)</h3>
+                                <h3 className="text-sm font-semibold text-zinc-400 mb-2">나레이션 (클릭하여 분할)</h3>
                                 <div
                                     ref={narrationRef}
                                     onClick={handleTextClick}
-                                    className="p-4 bg-stone-800 rounded-lg text-lg leading-relaxed whitespace-pre-wrap cursor-text"
+                                    className="p-4 bg-zinc-800 rounded-lg text-lg leading-relaxed whitespace-pre-wrap cursor-text"
                                 >
                                     {renderNarrationWithSplits()}
                                 </div>
@@ -427,12 +427,12 @@ export const CutSplitterModal: React.FC<CutSplitterModalProps> = ({ isOpen, onCl
                     )}
                 </main>
 
-                <footer className="p-4 bg-stone-800/50 border-t border-stone-700 flex justify-between items-center">
-                    <p className="text-sm text-stone-400">
+                <footer className="p-4 bg-zinc-800/50 border-t border-zinc-700 flex justify-between items-center">
+                    <p className="text-sm text-zinc-400">
                         {splitPoints.length > 0 ? `이 컷을 ${splitPoints.length + 1}개로 분할합니다.` : '분할 지점을 추가하세요.'}
                     </p>
                     <div className="flex gap-4">
-                        <button onClick={onClose} className="px-6 py-2 text-sm font-semibold rounded-lg bg-stone-600 hover:bg-stone-500 text-white">취소</button>
+                        <button onClick={onClose} className="px-6 py-2 text-sm font-semibold rounded-lg bg-zinc-600 hover:bg-zinc-500 text-white">취소</button>
                         <button
                             onClick={handleConfirm}
                             disabled={isLoading || !audioBuffer || splitPoints.length === 0}

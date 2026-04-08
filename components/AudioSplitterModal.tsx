@@ -469,27 +469,27 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
 
   return (
     <div className="fixed inset-0 bg-black/90 z-[110] flex items-center justify-center p-4 animate-fade-in" role="dialog" aria-modal="true">
-      <div className="bg-stone-900 border border-stone-700 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden">
-        <header className="p-4 border-b border-stone-800 flex justify-between items-center bg-stone-800/50">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden">
+        <header className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-800/50">
           <div className="flex items-center gap-3">
              <div className="p-2 bg-orange-500/20 rounded-lg text-orange-400">
                 <SpeakerWaveIcon className="w-6 h-6" />
              </div>
              <div>
                 <h2 className="text-xl font-bold text-white">통합 스마트 오디오 스플리터</h2>
-                <p className="text-xs text-stone-400">마커 드래그, 휠(줌/스크롤), 클릭(이동), Space(재생)</p>
+                <p className="text-xs text-zinc-400">마커 드래그, 휠(줌/스크롤), 클릭(이동), Space(재생)</p>
              </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full text-stone-400 hover:bg-stone-700 transition-colors">
+          <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700 transition-colors">
             <XIcon className="w-6 h-6" />
           </button>
         </header>
 
-        <main className="flex-grow flex flex-col min-h-0 bg-stone-950">
+        <main className="flex-grow flex flex-col min-h-0 bg-zinc-950">
           {!audioBuffer ? (
             <div className="flex-grow flex items-center justify-center">
                <label 
-                  className={`group w-[80%] h-64 border-4 border-dashed rounded-3xl flex flex-col items-center justify-center cursor-pointer transition-all ${isDraggingFile ? 'border-orange-500 bg-orange-500/10' : 'border-stone-800 hover:border-orange-500 hover:bg-orange-500/5'}`}
+                  className={`group w-[80%] h-64 border-4 border-dashed rounded-3xl flex flex-col items-center justify-center cursor-pointer transition-all ${isDraggingFile ? 'border-orange-500 bg-orange-500/10' : 'border-zinc-800 hover:border-orange-500 hover:bg-orange-500/5'}`}
                   onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
                   onDragLeave={(e) => { 
                       e.preventDefault(); 
@@ -499,11 +499,11 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
                   }}
                   onDrop={handleFileUpload}
                >
-                  <div className={`p-6 rounded-full transition-colors ${isDraggingFile ? 'bg-orange-600' : 'bg-stone-800 group-hover:bg-orange-600'}`}>
-                    <UploadIcon className={`w-12 h-12 transition-colors ${isDraggingFile ? 'text-white' : 'text-stone-400 group-hover:text-white'}`} />
+                  <div className={`p-6 rounded-full transition-colors ${isDraggingFile ? 'bg-orange-600' : 'bg-zinc-800 group-hover:bg-orange-600'}`}>
+                    <UploadIcon className={`w-12 h-12 transition-colors ${isDraggingFile ? 'text-white' : 'text-zinc-400 group-hover:text-white'}`} />
                   </div>
                   <h3 className="mt-6 text-2xl font-bold text-white">전체 오디오 파일 업로드</h3>
-                  <p className="mt-2 text-stone-500">긴 나레이션 녹음 파일을 선택하거나 여기로 드래그하세요.</p>
+                  <p className="mt-2 text-zinc-500">긴 나레이션 녹음 파일을 선택하거나 여기로 드래그하세요.</p>
                   <input type="file" accept="audio/*" onChange={handleFileUpload} className="hidden" />
                </label>
             </div>
@@ -512,34 +512,34 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
                <div className="p-6 pb-0 flex flex-col gap-4">
                   <div className="flex items-center justify-between">
                      <div className="flex items-center gap-3">
-                        <button onClick={togglePlay} className="w-12 h-12 flex items-center justify-center bg-white text-stone-900 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all">
+                        <button onClick={togglePlay} className="w-12 h-12 flex items-center justify-center bg-white text-zinc-900 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all">
                            {isPlaying ? <PauseIcon className="w-6 h-6" /> : <PlayIcon className="w-6 h-6" />}
                         </button>
                         <button onClick={detectSilence} className="px-4 py-2 bg-orange-600/20 border border-orange-500/50 text-orange-400 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-orange-600 hover:text-white transition-all">
                            <SparklesIcon className="w-4 h-4" /> 무음 구간 자동 감지
                         </button>
-                        <span className="text-xl font-mono text-stone-300 ml-4">
+                        <span className="text-xl font-mono text-zinc-300 ml-4">
                            {Math.floor(playbackTime / 60)}:{Math.floor(playbackTime % 60).toString().padStart(2, '0')} / {Math.floor(audioBuffer.duration / 60)}:{Math.floor(audioBuffer.duration % 60).toString().padStart(2, '0')}
                         </span>
                      </div>
                      <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 bg-stone-800 p-1.5 rounded-lg border border-stone-700">
-                           <ScissorsIcon className="w-5 h-5 text-amber-400" />
-                           <span className="text-xs font-bold text-amber-200 uppercase tracking-tighter">SHORTS PACE</span>
+                        <div className="flex items-center gap-2 bg-zinc-800 p-1.5 rounded-lg border border-zinc-700">
+                           <ScissorsIcon className="w-5 h-5 text-orange-400" />
+                           <span className="text-xs font-bold text-orange-200 uppercase tracking-tighter">SHORTS PACE</span>
                            <label className="relative inline-flex items-center cursor-pointer ml-1">
                               <input type="checkbox" checked={shortsPaceMode} onChange={e => setShortsPaceMode(e.target.checked)} className="sr-only peer" />
-                              <div className="w-11 h-6 bg-stone-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                              <div className="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-700"></div>
                            </label>
                         </div>
                         <div className="flex items-center gap-2">
-                           <button onClick={() => setZoom(z => Math.max(1, z - 0.5))} className="p-2 bg-stone-800 rounded-lg hover:bg-stone-700"><ZoomOutIcon className="w-5 h-5" /></button>
-                           <span className="text-xs font-mono text-stone-400 w-10 text-center">{zoom.toFixed(1)}x</span>
-                           <button onClick={() => setZoom(z => Math.min(30, z + 0.5))} className="p-2 bg-stone-800 rounded-lg hover:bg-stone-700"><ZoomInIcon className="w-5 h-5" /></button>
+                           <button onClick={() => setZoom(z => Math.max(1, z - 0.5))} className="p-2 bg-zinc-800 rounded-lg hover:bg-zinc-700"><ZoomOutIcon className="w-5 h-5" /></button>
+                           <span className="text-xs font-mono text-zinc-400 w-10 text-center">{zoom.toFixed(1)}x</span>
+                           <button onClick={() => setZoom(z => Math.min(30, z + 0.5))} className="p-2 bg-zinc-800 rounded-lg hover:bg-zinc-700"><ZoomInIcon className="w-5 h-5" /></button>
                         </div>
                      </div>
                   </div>
 
-                  <div className="relative h-48 bg-stone-900 rounded-xl border border-stone-800 overflow-hidden shadow-inner">
+                  <div className="relative h-48 bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden shadow-inner">
                      <canvas 
                         ref={canvasRef} 
                         width={1200} 
@@ -555,13 +555,13 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
                       <input 
                         type="range" min="0" max="1" step="0.001" value={scroll} 
                         onChange={e => setScroll(parseFloat(e.target.value))}
-                        className="w-full h-1.5 bg-stone-800 rounded-lg appearance-none cursor-pointer accent-orange-500" 
+                        className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-orange-500" 
                       />
                   )}
                </div>
 
                <div className="flex-grow p-6 overflow-hidden flex flex-col gap-3">
-                  <p className="text-xs font-bold text-stone-500 uppercase tracking-widest">컷별 마커 설정 (마커 드래그로 이동)</p>
+                  <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">컷별 마커 설정 (마커 드래그로 이동)</p>
                   <div className="flex-grow overflow-y-auto pr-2 custom-scrollbar grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {allCuts.map((cut) => {
                       const marker = markers.find(m => m.cutNumber === cut.cutNumber);
@@ -569,14 +569,14 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
                       return (
                         <div 
                           key={cut.cutNumber} 
-                          className={`p-4 rounded-xl border transition-all duration-300 relative ${isCurrentlyPlaying ? 'bg-orange-900/40 border-orange-400 ring-4 ring-orange-500/50 scale-[1.02] shadow-xl' : marker ? 'bg-stone-800/40 border-stone-700' : 'bg-stone-900 border-stone-800 opacity-50'}`}
+                          className={`p-4 rounded-xl border transition-all duration-300 relative ${isCurrentlyPlaying ? 'bg-orange-900/40 border-orange-400 ring-4 ring-orange-500/50 scale-[1.02] shadow-xl' : marker ? 'bg-zinc-800/40 border-zinc-700' : 'bg-zinc-900 border-zinc-800 opacity-50'}`}
                         >
                            <div className="flex justify-between items-center mb-3">
                               <span className={`text-xs font-black uppercase tracking-tighter ${isCurrentlyPlaying ? 'text-white' : 'text-orange-400'}`}>CUT #{cut.cutNumber}</span>
                                <div className="flex gap-2">
                                 <button 
                                     onClick={() => { if(marker) { setPlaybackTime(marker.time); startPlayback(marker.time); } }} 
-                                    className={`px-2 py-1 text-[10px] font-bold rounded uppercase transition-all bg-stone-700 text-stone-400 hover:bg-orange-600 hover:text-white`}
+                                    className={`px-2 py-1 text-[10px] font-bold rounded uppercase transition-all bg-zinc-700 text-zinc-400 hover:bg-orange-600 hover:text-white`}
                                     title="이 컷의 시작 위치부터 재생"
                                 >
                                     ▶ 재생
@@ -594,14 +594,14 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
                                             return next.sort((a, b) => a.time - b.time);
                                         });
                                     }} 
-                                    className={`px-2 py-1 text-[10px] font-bold rounded uppercase transition-all ${isCurrentlyPlaying ? 'bg-orange-500 text-white' : 'bg-stone-700 text-stone-400 hover:bg-orange-600 hover:text-white'}`}
+                                    className={`px-2 py-1 text-[10px] font-bold rounded uppercase transition-all ${isCurrentlyPlaying ? 'bg-orange-500 text-white' : 'bg-zinc-700 text-zinc-400 hover:bg-orange-600 hover:text-white'}`}
                                     title="현재 재생 위치를 이 컷의 시작점으로 설정"
                                 >
                                     SET START
                                 </button>
                               </div>
                            </div>
-                           <div className={`flex items-center gap-2 mb-2 p-2 rounded-lg border transition-colors ${isCurrentlyPlaying ? 'bg-stone-900 border-orange-500/50' : 'bg-stone-950 border-stone-800'}`}>
+                           <div className={`flex items-center gap-2 mb-2 p-2 rounded-lg border transition-colors ${isCurrentlyPlaying ? 'bg-zinc-900 border-orange-500/50' : 'bg-zinc-950 border-zinc-800'}`}>
                               <input 
                                 type="number" 
                                 step="0.01" 
@@ -612,9 +612,9 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
                                 }}
                                 className="bg-transparent text-white font-mono text-sm w-full outline-none"
                               />
-                              <span className="text-[10px] font-bold text-stone-600 uppercase">SEC</span>
+                              <span className="text-[10px] font-bold text-zinc-600 uppercase">SEC</span>
                            </div>
-                           <p className={`text-[11px] line-clamp-2 italic transition-colors ${isCurrentlyPlaying ? 'text-stone-200 font-medium' : 'text-stone-400'}`}>"{cut.narration}"</p>
+                           <p className={`text-[11px] line-clamp-2 italic transition-colors ${isCurrentlyPlaying ? 'text-zinc-200 font-medium' : 'text-zinc-400'}`}>"{cut.narration}"</p>
                            {isCurrentlyPlaying && (
                                <div className="absolute top-2 right-2 w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
                            )}
@@ -627,12 +627,12 @@ export const AudioSplitterModal: React.FC<AudioSplitterModalProps> = ({ isOpen, 
           )}
         </main>
 
-        <footer className="p-4 border-t border-stone-800 bg-stone-800/50 flex justify-between items-center flex-shrink-0">
-            <button onClick={() => { setAudioBuffer(null); setFile(null); }} className="flex items-center gap-2 text-sm font-bold text-stone-500 hover:text-stone-300">
+        <footer className="p-4 border-t border-zinc-800 bg-zinc-800/50 flex justify-between items-center flex-shrink-0">
+            <button onClick={() => { setAudioBuffer(null); setFile(null); }} className="flex items-center gap-2 text-sm font-bold text-zinc-500 hover:text-zinc-300">
                <TrashIcon className="w-4 h-4" /> 리셋
             </button>
             <div className="flex gap-3">
-               <button onClick={onClose} className="px-6 py-2.5 text-sm font-bold text-white bg-stone-700 rounded-lg hover:bg-stone-600 transition-all">취소</button>
+               <button onClick={onClose} className="px-6 py-2.5 text-sm font-bold text-white bg-zinc-700 rounded-lg hover:bg-zinc-600 transition-all">취소</button>
                <button 
                   onClick={handleApply} 
                   disabled={!audioBuffer || isProcessing}

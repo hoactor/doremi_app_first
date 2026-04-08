@@ -7,10 +7,22 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Environment variables (API keys)
+.env
+.env.local
+.env.*.local
+
 node_modules
 dist
 dist-ssr
 *.local
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/icons/*.png
+src-tauri/icons/*.ico
+src-tauri/icons/*.icns
 
 # Editor directories and files
 .vscode/*
@@ -22,6 +34,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Tauri
-src-tauri/target/

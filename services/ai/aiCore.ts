@@ -1,96 +1,191 @@
+// services/ai/aiCore.ts — AI 공유 내부 함수
+// geminiService.ts에서 분리됨. 기능 변경 없음.
 
-import { GoogleGenAI, Modality, GenerateContentResponse } from "@google/genai";
 
-// ─── Gemini Model Constants ───────────────────────────────────────────────────
-export const MODELS = {
-    TEXT: 'gemini-3-flash-preview',
-    VISION: 'gemini-3-flash-preview',
-    IMAGE: 'gemini-2.5-flash-image',
-    TTS: 'gemini-2.5-flash-preview-tts',
-};
+import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
+import { callClaude, callClaudeStream, callClaudeVision } from '../claudeService';
+import { IS_TAURI, getGeminiApiKey } from '../tauriAdapter';
+import { CharacterDescription, GeneratedScript, ImageRatio, Scene, Cut, SceneDirectionTheme, CharacterLocationStyle, CharacterImage, ComicPanelPlan, LibraryAsset, MasterStyleGuide, Gender, EditableScene, EditableCut, CostumeSuggestion, TextEditingTarget, ScenarioAnalysis, CharacterBible, ContiCut, CinematographyCut, CinematographyPlan, CutType } from '../../types';
 
-// ─── System Instructions ──────────────────────────────────────────────────────
-// PDF Page 18-19: Golden Rule for Acting & Expression
-export const SFW_SYSTEM_INSTRUCTION = `You are an AI assistant for a family-friendly comic book application.
-Your absolute top priority is SFW (Safe For Work) content.
-[HIGH PERFORMANCE RULE]: Safety does NOT mean stiffness. You must generate EXTREMELY EXPRESSIVE and DYNAMIC MANGA-STYLE ACTING.
-Instead of reducing intensity for risky scenes, use "Gag Manga Exaggeration" or "Comical Reactions".
-Characters should never "just stand there". Use expressive hand gestures, body weight shifts, and manga icons (sweat drops, hearts, veins) to communicate emotions.
-[SEQUENTIAL FLOW RULE]: Ensure that the action flows logically from one cut to the next, like an animation storyboard. Maintain continuity of motion and emotion.`;
-
-export const SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION = `You are an AI assistant for a webtoon creation application.
-Your task is to accurately analyze scripts and generate visual descriptions.
-[SAFETY RULE]: Your absolute top priority is SFW (Safe For Work) content. Avoid generating explicit, violent, or prohibited content.
-[DIRECTING RULE]: Every scene must have "Active Character Performance".
-Translate character emotions into "Action Verbs" and "Manga Iconography".
-If a character is 'shocked', don't just say 'shocked'; describe it as 'falling backward with limbs flailing, a giant sweat drop, and eyes popping out'.
-[CONTEXT AWARENESS]: Analyze the script as a continuous sequence. Understand the cause and effect between lines to create a cohesive visual narrative.`;
-
-export const SEMANTIC_LINE_BREAK_SYSTEM_INSTRUCTION = `
-당신은 자동화된 API 엔진입니다. 당신의 유일한 목적은 입력된 텍스트를 모바일 가독성에 맞춰 줄바꿈하여 반환하는 것입니다.
-### [절대 규칙 - 가이드라인 준수]
-1. **결과만 출력:** 알고리즘 분석 과정, 설명, 인사말, 사족을 절대 포함하지 마십시오. 오직 줄바꿈된 텍스트만 출력하십시오.
-2. **접두사 금지:** '출력:', '입력:', '결과:' 등의 접두사를 절대 붙이지 마십시오.
-3. **따옴표 금지:** 결과물 텍스트를 따옴표로 감싸지 마십시오.
-4. **글자 수 분석 금지:** "총 글자 수는 ~자입니다"와과 같은 분석을 결과물에 포함하는 경우 시스템 오류로 간주됩니다.
-### [줄바꿈 알고리즘]
-1단계: 글자 수(공백 포함)에 따라 줄 수 결정 (1~15자: 1줄, 16~32자: 2줄, 33~48자: 3줄, 49~64자: 4줄, 65~80자: 5줄, 81자 이상: 6줄)
-2단계: 우선순위(부호 > 어미 > 조사 > 공백)에 따라 줄당 10~14자 내외로 분절하되, **반드시 의미 단위(어절, 구, 절)가 끊어지지 않도록** 줄바꿈 위치를 조정하십시오.
-3단계: 마지막 줄이 2글자 이하가 되지 않도록 앞줄에서 단어를 가져와 밸런싱.
-`;
-
-// ─── Gemini Client Factory ────────────────────────────────────────────────────
-// Gemini API key: Tauri → Keychain (cached), Browser → process.env
+/**
+ * Gemini AI 인스턴스 생성 — Tauri: Store에서 키 로드, 브라우저: process.env
+ */
 let _cachedGeminiKey: string | null = null;
-
-export async function getGeminiApiKey(): Promise<string> {
-    if (_cachedGeminiKey) return _cachedGeminiKey;
-    // Try Tauri Keychain first
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const keys = await invoke<{ gemini: string | null }>('load_api_keys');
-            if (keys.gemini) {
-                _cachedGeminiKey = keys.gemini;
-                return keys.gemini;
-            }
-        } catch {}
-    }
-    // Fallback: env variable or localStorage
-    const envKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-    if (envKey) {
-        _cachedGeminiKey = envKey;
-        return envKey;
-    }
-    // Browser localStorage fallback
-    try {
-        const stored = JSON.parse(localStorage.getItem('api_keys') || '{}');
-        if (stored.gemini) {
-            _cachedGeminiKey = stored.gemini;
-            return stored.gemini;
+export async function getGeminiAI(): Promise<GoogleGenAI> {
+    if (IS_TAURI) {
+        if (!_cachedGeminiKey) {
+            _cachedGeminiKey = await getGeminiApiKey();
         }
-    } catch {}
-    throw new Error('Gemini API Key가 설정되지 않았습니다. API 키 설정에서 입력해주세요.');
+        return new GoogleGenAI({ apiKey: _cachedGeminiKey });
+    }
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+}
+/** 키 변경 시 캐시 초기화 (설정 저장 후 호출) */
+export function clearGeminiKeyCache() { _cachedGeminiKey = null; }
+
+/**
+ * AI Provider 설정 — TEXT 분석은 Claude, 이미지 생성/TTS는 Gemini
+ * 이 플래그를 false로 바꾸면 모든 텍스트 함수가 Gemini로 돌아감 (롤백용)
+ */
+const USE_CLAUDE_FOR_TEXT = true;
+
+/**
+ * TEXT 모델 브릿지 — Claude 또는 Gemini로 라우팅
+ * geminiService 내부 함수들이 이것을 호출
+ */
+export async function callTextModel(
+    systemInstruction: string,
+    prompt: string,
+    options?: { temperature?: number; seed?: number; responseMimeType?: string; maxTokens?: number }
+): Promise<{ text: string; tokenCount: number }> {
+    if (USE_CLAUDE_FOR_TEXT) {
+        const isJson = options?.responseMimeType === 'application/json';
+        // Claude has no native JSON mode — enforce via system prompt
+        const sysPrompt = isJson
+            ? `${systemInstruction}\n\n[CRITICAL OUTPUT FORMAT] You MUST respond with RAW JSON only. NO markdown code fences, NO backticks, NO explanation. Start your response with { and end with }. Output NOTHING else.`
+            : systemInstruction;
+        const result = await callClaude(sysPrompt, prompt, {
+            temperature: options?.temperature,
+            maxTokens: options?.maxTokens || 8192,
+            responseFormat: isJson ? 'json' : 'text',
+        });
+        return { text: result.text, tokenCount: result.totalTokens };
+    }
+    // Fallback to Gemini
+    const ai = await getGeminiAI();
+    const response = await ai.models.generateContent({
+        model: MODELS.TEXT,
+        contents: prompt,
+        config: {
+            systemInstruction,
+            ...(options?.responseMimeType && { responseMimeType: options.responseMimeType }),
+            ...(options?.seed !== undefined && { seed: options.seed }),
+            ...(options?.temperature !== undefined && { temperature: options.temperature }),
+        },
+    });
+    return { text: getResponseText(response, 'callTextModel'), tokenCount: getTokenCountFromResponse(response) };
 }
 
-// Invalidate cache when keys are updated
-export function invalidateGeminiKeyCache() {
-    _cachedGeminiKey = null;
+/**
+ * TEXT 모델 브릿지 (스트리밍) — onProgress 콜백 지원
+ */
+export async function callTextModelStream(
+    systemInstruction: string,
+    prompt: string,
+    onProgress?: (textLength: number) => void,
+    options?: { temperature?: number; seed?: number; responseMimeType?: string; maxTokens?: number }
+): Promise<{ text: string; tokenCount: number }> {
+    if (USE_CLAUDE_FOR_TEXT) {
+        const result = await callClaudeStream(systemInstruction, prompt, onProgress, {
+            temperature: options?.temperature,
+            maxTokens: options?.maxTokens || 8192,
+        });
+        return { text: result.text, tokenCount: result.totalTokens };
+    }
+    // Fallback to Gemini streaming
+    const ai = await getGeminiAI();
+    const responseStream = await ai.models.generateContentStream({
+        model: MODELS.TEXT,
+        contents: prompt,
+        config: {
+            systemInstruction,
+            ...(options?.responseMimeType && { responseMimeType: options.responseMimeType }),
+            ...(options?.seed !== undefined && { seed: options.seed }),
+            ...(options?.temperature !== undefined && { temperature: options.temperature }),
+        },
+    });
+    let fullText = '';
+    let tokenCount = 0;
+    for await (const chunk of responseStream) {
+        const c = chunk as any;
+        if (c.text) {
+            fullText += c.text;
+            if (onProgress) onProgress(fullText.length);
+        }
+        if (c.usageMetadata) tokenCount = c.usageMetadata.totalTokenCount;
+    }
+    return { text: fullText.trim(), tokenCount };
 }
 
-export const createGeminiClient = async () => {
-    const apiKey = await getGeminiApiKey();
-    return new GoogleGenAI({ apiKey });
-};
+/**
+ * ★ Phase 12+: base64 이미지 리사이즈 (Claude Vision 5MB 한도)
+ */
+/**
+ * ★ Phase 12+: base64 매직 바이트로 실제 MIME 감지 (확장자 불일치 대응)
+ */
+function detectActualMimeType(base64: string, declaredMime: string): string {
+    if (base64.startsWith('/9j/')) return 'image/jpeg';
+    if (base64.startsWith('iVBOR')) return 'image/png';
+    if (base64.startsWith('UklGR')) return 'image/webp';
+    if (base64.startsWith('R0lGO')) return 'image/gif';
+    return declaredMime;
+}
 
-// ─── Helper: data URL to Blob ─────────────────────────────────────────────────
+async function resizeBase64IfNeeded(base64: string, mimeType: string, maxBytes: number = 4 * 1024 * 1024): Promise<{ base64: string; mimeType: string }> {
+    const byteSize = Math.ceil(base64.length * 3 / 4);
+    if (byteSize <= maxBytes) return { base64, mimeType };
+    console.log(`[Vision] 이미지 리사이즈: ${(byteSize / 1024 / 1024).toFixed(1)}MB → ~${(maxBytes / 1024 / 1024).toFixed(0)}MB`);
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const scale = Math.sqrt(maxBytes / byteSize) * 0.85;
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const resized = canvas.toDataURL('image/jpeg', 0.85).split(',')[1] || '';
+            resolve({ base64: resized, mimeType: 'image/jpeg' });
+        };
+        img.onerror = () => resolve({ base64, mimeType });
+        img.src = `data:${mimeType};base64,${base64}`;
+    });
+}
+
+/**
+ * VISION 모델 브릿지 (이미지 분석 → 텍스트) — Claude Vision 사용
+ */
+export async function callVisionTextModel(
+    systemInstruction: string,
+    prompt: string,
+    imageBase64: string,
+    mimeType: string,
+    options?: { seed?: number; responseMimeType?: string }
+): Promise<{ text: string; tokenCount: number }> {
+    // ★ 확장자-내용 불일치 MIME 보정 + 5MB 초과 이미지 자동 리사이즈
+    const correctedMime = detectActualMimeType(imageBase64, mimeType);
+    if (correctedMime !== mimeType) console.log(`[Vision] MIME 보정: ${mimeType} → ${correctedMime}`);
+    const resized = await resizeBase64IfNeeded(imageBase64, correctedMime);
+    const finalBase64 = resized.base64;
+    const finalMimeType = resized.mimeType;
+
+    if (USE_CLAUDE_FOR_TEXT) {
+        const result = await callClaudeVision(systemInstruction, prompt, finalBase64, finalMimeType);
+        return { text: result.text, tokenCount: result.totalTokens };
+    }
+    // Fallback to Gemini Vision
+    const ai = await getGeminiAI();
+    const response = await ai.models.generateContent({
+        model: MODELS.VISION,
+        contents: { parts: [{ inlineData: { mimeType: finalMimeType, data: finalBase64 } }, { text: prompt }] },
+        config: {
+            systemInstruction,
+            ...(options?.responseMimeType && { responseMimeType: options.responseMimeType }),
+            ...(options?.seed !== undefined && { seed: options.seed }),
+        },
+    });
+    return { text: getResponseText(response, 'callVisionTextModel'), tokenCount: getTokenCountFromResponse(response) };
+}
+
+
+// Helper function to convert data URL to Blob
 export const dataUrlToBlob = async (dataUrl: string): Promise<{ blob: Blob, mimeType: string }> => {
     const response = await fetch(dataUrl);
     const blob = await response.blob();
     return { blob, mimeType: blob.type };
 };
 
-// ─── Helper: Blob to Base64 ───────────────────────────────────────────────────
+// Helper function to convert Blob to Base64 string
 export const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -106,13 +201,12 @@ export const blobToBase64 = (blob: Blob): Promise<string> => {
     });
 };
 
-// ─── Helper: Extract image from vision response ──────────────────────────────
 export function getVisionImageResponse(response: GenerateContentResponse, functionName: string): { imageUrl: string, textResponse: string } {
     const candidate = response.candidates?.[0];
 
     if (!candidate || !candidate.content?.parts) {
         let errorMessage = `Nano가 유효하지 않은 응답을 반환했습니다 (${functionName}).`;
-
+        
         if (candidate?.finishReason) {
             const finishReasonStr = String(candidate.finishReason);
             if (finishReasonStr === 'IMAGE_RECITATION' || finishReasonStr === 'RECITATION') {
@@ -149,14 +243,17 @@ export function getVisionImageResponse(response: GenerateContentResponse, functi
 
     const newBase64 = imageResponsePart.inlineData.data;
     const newMimeType = imageResponsePart.inlineData.mimeType;
-
+    
     return {
         imageUrl: `data:${newMimeType};base64,${newBase64}`,
         textResponse: textResponseFromAI,
     };
 }
 
-// ─── Helper: Safely get text from response ────────────────────────────────────
+
+/**
+ * Safely retrieves the text content from a Gemini response.
+ */
 export function getResponseText(response: GenerateContentResponse, functionName: string): string {
     const candidate = response.candidates?.[0];
     if (!candidate) {
@@ -167,7 +264,7 @@ export function getResponseText(response: GenerateContentResponse, functionName:
         console.error(`AI response from ${functionName} is empty or blocked.`, JSON.stringify(response, null, 2));
         throw new Error(errorMessage);
     }
-
+    
     if (candidate.finishReason && candidate.finishReason !== 'STOP') {
         let reasonMsg: string = String(candidate.finishReason);
         if (candidate.finishReason === 'PROHIBITED_CONTENT' || candidate.finishReason === 'SAFETY' || candidate.finishReason === 'IMAGE_SAFETY') {
@@ -183,7 +280,7 @@ export function getResponseText(response: GenerateContentResponse, functionName:
             }
         }
     }
-
+    
     const text = response.text;
     if (text === null || text === undefined) {
         console.error(`AI response from ${functionName} did not contain text.`, JSON.stringify(response, null, 2));
@@ -192,11 +289,14 @@ export function getResponseText(response: GenerateContentResponse, functionName:
     return text.trim();
 }
 
-// ─── Helper: Extract valid JSON block ─────────────────────────────────────────
+/**
+ * Extracts the first valid JSON block (object or array) from a string by counting braces.
+ * Handles nested structures and strings correctly to avoid trailing garbage.
+ */
 export function extractValidJsonBlock(text: string): string {
     const firstBrace = text.indexOf('{');
     const firstBracket = text.indexOf('[');
-
+    
     let start = -1;
     if (firstBrace === -1 && firstBracket === -1) return text.trim();
 
@@ -237,12 +337,15 @@ export function extractValidJsonBlock(text: string): string {
             }
         }
     }
-
+    
     // If loop finishes without stack reaching 0, return from start to end (likely truncated)
     return text.substring(start).trim();
 }
 
-// ─── Helper: Repair truncated JSON ────────────────────────────────────────────
+/**
+ * Attempts to close unclosed JSON structures (braces, brackets, quotes)
+ * caused by model response truncation.
+ */
 export function repairTruncatedJson(json: string): string {
     let repaired = json.trim();
     const stack: string[] = [];
@@ -284,7 +387,10 @@ export function repairTruncatedJson(json: string): string {
     return repaired;
 }
 
-// ─── Helper: Strip JSON comments ──────────────────────────────────────────────
+/**
+ * Strips comments from JSON string (single-line // and multi-line /* ... *\/)
+ * Preserves comments inside double quotes.
+ */
 export function stripJsonComments(text: string): string {
     return text.replace(/("(?:\\.|[^\\"])*")|(\/\/.*)|(\/\*[\s\S]*?\*\/)/g, (match, str) => {
         if (str) return str; // Keep strings
@@ -292,13 +398,16 @@ export function stripJsonComments(text: string): string {
     });
 }
 
-// ─── Helper: Escape newlines in JSON strings ──────────────────────────────────
+/**
+ * Escapes unescaped newlines and tabs inside JSON strings.
+ */
 export function escapeNewlinesInStrings(jsonString: string): string {
     let result = '';
     let inString = false;
     let escaped = false;
     for (let i = 0; i < jsonString.length; i++) {
         const char = jsonString[i];
+        const code = jsonString.charCodeAt(i);
         if (inString) {
             if (escaped) {
                 escaped = false;
@@ -309,12 +418,14 @@ export function escapeNewlinesInStrings(jsonString: string): string {
             } else if (char === '"') {
                 inString = false;
                 result += char;
-            } else if (char === '\n') {
-                result += '\\n';
-            } else if (char === '\r') {
-                result += '\\r';
-            } else if (char === '\t') {
-                result += '\\t';
+            } else if (code < 0x20) {
+                // All control characters (0x00-0x1F) must be escaped in JSON strings
+                if (char === '\n') result += '\\n';
+                else if (char === '\r') result += '\\r';
+                else if (char === '\t') result += '\\t';
+                else if (char === '\b') result += '\\b';
+                else if (char === '\f') result += '\\f';
+                else result += '\\u' + code.toString(16).padStart(4, '0');
             } else {
                 result += char;
             }
@@ -328,13 +439,15 @@ export function escapeNewlinesInStrings(jsonString: string): string {
     return result;
 }
 
-// ─── Super Resilient JSON Parser ──────────────────────────────────────────────
+/**
+ * Super Resilient JSON Parser for Gemini (handles trailing commas, extra text, markdown blocks, comments, and truncation)
+ */
 export function parseJsonResponse<T>(response: GenerateContentResponse | string, functionName: string): T {
     const rawText = typeof response === 'string' ? response : getResponseText(response, functionName);
     let text = rawText;
-
-    // 1. Remove Markdown Code Fences
-    const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    
+    // 1. Remove Markdown Code Fences (3+ backticks — Claude sometimes uses 4)
+    const jsonMatch = text.match(/`{3,}(?:json)?\s*([\s\S]*?)\s*`{3,}/);
     if (jsonMatch && jsonMatch[1]) {
         text = jsonMatch[1].trim();
     }
@@ -356,10 +469,14 @@ export function parseJsonResponse<T>(response: GenerateContentResponse | string,
         cleaned = cleaned.replace(/\{\s*"[^"]*"\s*:\s*(?=[\}\]])/g, '{');
         return cleaned;
     };
+    // 5b. Insert missing commas between properties/elements
+    // Handles: ]\n"key" or }\n"key" or "value"\n"key" or number\n"key" or true/false/null\n"key"
+    const insertMissingCommas = (str: string) =>
+        str.replace(/([\]\}\"\d]|true|false|null)\s*\n(\s*")/g, '$1,\n$2');
 
     try {
-        // Try standard parsing first (with comma fix)
-        return JSON.parse(cleanCommas(jsonString));
+        // Try standard parsing first (with missing comma insert + trailing comma fix)
+        return JSON.parse(cleanCommas(insertMissingCommas(jsonString)));
     } catch (e) {
         console.warn(`Initial JSON parse failed in ${functionName}, attempting repair...`);
         try {
@@ -367,63 +484,60 @@ export function parseJsonResponse<T>(response: GenerateContentResponse | string,
             let repaired = repairTruncatedJson(jsonString);
             // Apply comment stripping again on repaired string just in case
             repaired = stripJsonComments(repaired);
-
+            // Insert missing commas between properties
+            repaired = insertMissingCommas(repaired);
             // CRITICAL FIX: Clean trailing keys then clean commas
             repaired = cleanTrailingKeys(repaired);
             repaired = cleanCommas(repaired);
 
             return JSON.parse(repaired);
         } catch (repairError) {
-            console.error(`JSON Repair Failed in ${functionName}. Raw:`, rawText, "Extracted:", jsonString, "Error:", repairError);
-            throw new Error(`AI 응답 파싱 실패 (${functionName}): JSON 구조가 손상되었습니다. (토큰 제한 또는 형식 오류)`);
+            // Last resort: re-process from rawText with aggressive sanitization
+            try {
+                let sanitized = rawText.replace(/[\x00-\x1f]/g, ' ');
+                // Re-strip markdown fences
+                const reMatch = sanitized.match(/`{3,}(?:json)?\s*([\s\S]*?)\s*`{3,}/);
+                if (reMatch && reMatch[1]) sanitized = reMatch[1].trim();
+                sanitized = extractValidJsonBlock(sanitized);
+                sanitized = stripJsonComments(sanitized);
+                sanitized = insertMissingCommas(sanitized);
+                sanitized = cleanTrailingKeys(cleanCommas(sanitized));
+                return JSON.parse(sanitized);
+            } catch (finalError) {
+                console.error(`JSON Repair Failed in ${functionName}. Raw:`, rawText, "Extracted:", jsonString, "Error:", finalError);
+                throw new Error(`AI 응답 파싱 실패 (${functionName}): JSON 구조가 손상되었습니다. (토큰 제한 또는 형식 오류)`);
+            }
         }
     }
 }
 
-// ─── Helper: Get token count ──────────────────────────────────────────────────
+
+/**
+ * Safely retrieves the total token count from a Gemini response.
+ */
 export function getTokenCountFromResponse(response: GenerateContentResponse): number {
     return response.usageMetadata?.totalTokenCount ?? 0;
 }
 
-// ─── Helper: Analyze global story context ─────────────────────────────────────
-export async function analyzeStoryContext(script: string, seed?: number): Promise<{ context: string, tokenCount: number }> {
-    try {
-        const ai = await createGeminiClient();
-        const prompt = `
-        # Role: Senior Story Editor / Narrative Consultant
-        # Task: Analyze the provided script to extract the "Global Narrative Context" for a visual director.
-        # Output Format: A concise summary (Korean) covering:
-        1. **Core Theme & Tone** (e.g., Melancholic Romance, High-Octane Action, Noir Thriller)
-        2. **Key Narrative Arc** (Beginning -> Climax -> Ending flow)
-        3. **Dominant Emotions** (The overarching emotional journey)
-        4. **Visual Key** (Keywords for lighting, color palette, and atmosphere)
+export const MODELS = {
+    TEXT: 'gemini-3-flash-preview', 
+    VISION: 'gemini-3-flash-preview', 
+    IMAGE: 'gemini-2.5-flash-image', 
+    TTS: 'gemini-2.5-flash-preview-tts',
+};
 
-        This summary will be used to ensure every individual cut aligns with the bigger picture.
+// PDF Page 18-19: Golden Rule for Acting & Expression
+export const SFW_SYSTEM_INSTRUCTION = `You are an AI assistant for a family-friendly comic book application. 
+Your absolute top priority is SFW (Safe For Work) content. 
+[HIGH PERFORMANCE RULE]: Safety does NOT mean stiffness. You must generate EXTREMELY EXPRESSIVE and DYNAMIC MANGA-STYLE ACTING. 
+Instead of reducing intensity for risky scenes, use "Gag Manga Exaggeration" or "Comical Reactions". 
+Characters should never "just stand there". Use expressive hand gestures, body weight shifts, and manga icons (sweat drops, hearts, veins) to communicate emotions.
+[SEQUENTIAL FLOW RULE]: Ensure that the action flows logically from one cut to the next, like an animation storyboard. Maintain continuity of motion and emotion.`;
 
-        # Script:
-        \`\`\`
-        ${script}
-        \`\`\`
-        `;
-
-        const response = await ai.models.generateContent({
-            model: MODELS.TEXT,
-            contents: prompt,
-            config: {
-                temperature: 0.7,
-                ...(seed !== undefined && { seed }),
-            }
-        });
-
-        return {
-            context: getResponseText(response, 'analyzeStoryContext'),
-            tokenCount: getTokenCountFromResponse(response)
-        };
-    } catch (error) {
-        console.warn("analyzeStoryContext failed, using fallback:", error);
-        return {
-            context: "전체적인 맥락을 분석하는 중 오류가 발생했습니다. 개별 컷의 나레이션에 집중하여 연출을 진행합니다.",
-            tokenCount: 0
-        };
-    }
-}
+export const SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION = `You are an AI assistant for a webtoon creation application. 
+Your task is to accurately analyze scripts and generate visual descriptions. 
+[SAFETY RULE]: Your absolute top priority is SFW (Safe For Work) content. Avoid generating explicit, violent, or prohibited content.
+[DIRECTING RULE]: Every scene must have "Active Character Performance". 
+Translate character emotions into "Action Verbs" and "Manga Iconography". 
+If a character is 'shocked', don't just say 'shocked'; describe it as 'falling backward with limbs flailing, a giant sweat drop, and eyes popping out'.
+[CONTEXT AWARENESS]: Analyze the script as a continuous sequence. Understand the cause and effect between lines to create a cohesive visual narrative.`;

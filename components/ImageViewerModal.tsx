@@ -54,7 +54,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ isOpen, onCl
                     {/* Fixed Close Button for easy access */}
                     <button 
                         onClick={handleClose} 
-                        className="fixed top-6 right-6 z-[160] p-3 rounded-full text-white bg-stone-800/80 hover:bg-stone-700 border border-stone-600 shadow-2xl transition-all hover:scale-110 hover:rotate-90 backdrop-blur-md group"
+                        className="fixed top-6 right-6 z-[160] p-3 rounded-full text-white bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-600 shadow-2xl transition-all hover:scale-110 hover:rotate-90 backdrop-blur-md group"
                         aria-label="Close"
                         title="닫기 (ESC)"
                     >
@@ -62,7 +62,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ isOpen, onCl
                     </button>
 
                     {/* Image Container */}
-                    <div className="overflow-hidden rounded-2xl shadow-2xl border border-stone-800/50 bg-black">
+                    <div className="overflow-hidden rounded-2xl shadow-2xl border border-zinc-800/50 bg-black">
                         <img 
                             src={imageUrl!} 
                             alt={altText || 'Enlarged view'} 
@@ -72,13 +72,13 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ isOpen, onCl
                     
                     {/* Prompt Container */}
                     {prompt && (
-                        <div className="p-8 bg-stone-900/90 rounded-2xl border border-stone-700/50 backdrop-blur-xl shadow-2xl">
+                        <div className="p-8 bg-zinc-900/90 rounded-2xl border border-zinc-700/50 backdrop-blur-xl shadow-2xl">
                             <h4 className="text-sm font-black text-orange-400 mb-4 uppercase tracking-[0.2em] flex items-center gap-4">
                                 <span>Generation Prompt</span>
                                 <div className="h-px flex-grow bg-gradient-to-r from-orange-500/50 to-transparent"></div>
                             </h4>
-                            <div className="bg-black/30 p-6 rounded-xl border border-stone-800/50">
-                                <p className="text-base text-stone-300 font-medium whitespace-pre-wrap break-words leading-loose font-mono selection:bg-orange-500/30 selection:text-white">
+                            <div className="bg-black/30 p-6 rounded-xl border border-zinc-800/50">
+                                <p className="text-base text-zinc-300 font-medium whitespace-pre-wrap break-words leading-loose font-mono selection:bg-orange-500/30 selection:text-white">
                                     {prompt}
                                 </p>
                             </div>

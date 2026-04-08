@@ -1,55 +1,41 @@
+// appNormalizationActions.ts — 정규화 + 스토리보드 의상적용 액션 (AppContext에서 분리)
 
-import {
-    regenerateCutFieldsForIntentChange, formatMultipleTextsWithSemanticBreaks,
-} from './services/geminiService';
-import {
-    AppAction, Cut, EditableScene, EditableCut, GeneratedScript, Scene,
-} from './types';
-import { UIState } from './appTypes';
-
-// --- Helper types ---
+import type { AppAction, Cut, EditableScene, EditableCut, Scene, GeneratedScript, GeneratedImage, CharacterDescription, ArtStyle } from './types';
+import { createGeneratedImage, buildMechanicalOutfit } from './appUtils';
+import { formatMultipleTextsWithSemanticBreaks, regenerateCutFieldsForIntentChange, convertContiToEditableStoryboard } from './services/geminiService';
 
 export interface NormalizationActionHelpers {
-    dispatch: React.Dispatch<AppAction>;
+    dispatch: (action: AppAction) => void;
     stateRef: { current: any };
-    addNotification: (message: string, type: 'success' | 'error' | 'info') => void;
-    handleAddUsage: (geminiTokens: number, dalleImages: number) => void;
-    updateUIState: (update: Partial<UIState>) => void;
-    calculateFinalPrompt: (cut: Cut | EditableCut) => string;
+    addNotification: (msg: string, type: 'success' | 'error' | 'info' | 'warning') => void;
+    handleAddUsage: (tokens: number, source: 'gemini' | 'claude') => void;
+    updateUIState: (update: any) => void;
+    calculateFinalPrompt: (cut: any) => string;
+    handleOpenReviewModalForEdit: () => void;
 }
 
-// --- Factory ---
+/** API 호출 타임아웃 헬퍼 */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>(resolve => setTimeout(() => {
+            console.warn(`[withTimeout] Timeout after ${ms}ms`);
+            resolve(fallback);
+        }, ms))
+    ]);
+}
 
 export function createNormalizationActions(h: NormalizationActionHelpers) {
-    const {
-        dispatch,
-        stateRef,
-        addNotification,
-        handleAddUsage,
-        updateUIState,
-        calculateFinalPrompt,
-    } = h;
+    const { dispatch, stateRef, addNotification, handleAddUsage, updateUIState, calculateFinalPrompt, handleOpenReviewModalForEdit } = h;
 
-    // ---- handleRunNormalization ----
     const handleRunNormalization = async (updatedScenes: EditableScene[], modifiedCutIds: Set<string>) => {
         dispatch({ type: 'START_LOADING', payload: 'AI 연출 엔진이 변경된 설정을 처리하고 있습니다...' });
-
-        // Helper: API 호출 타임아웃 처리
-        const withTimeout = <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<T> => {
-            return Promise.race([
-                promise,
-                new Promise<T>(resolve => setTimeout(() => {
-                    console.warn(`[handleRunNormalization] Timeout after ${ms}ms`);
-                    resolve(fallback);
-                }, ms))
-            ]);
-        };
 
         try {
             const { characterDescriptions, locationVisualDNA, generatedContent, generatedImageHistory } = stateRef.current;
             const originalCutsMap = new Map<string, Cut>();
             if (generatedContent && generatedContent.scenes) {
-                generatedContent.scenes.flatMap((s: Scene) => s.cuts || []).forEach((c: Cut) => originalCutsMap.set(c.cutNumber, c));
+                generatedContent.scenes.flatMap((s: any) => s.cuts || []).forEach((c: Cut) => originalCutsMap.set(c.cutNumber, c));
             }
 
             const reconstructedScenes: EditableScene[] = [];
@@ -62,91 +48,50 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
                     const isModified = modifiedCutIds.has(cut.id);
                     const original = originalCutsMap.get(cut.id);
                     const intentChanged = isModified && (!original || original.directorialIntent !== cut.directorialIntent) && !!cut.directorialIntent?.trim();
-                    if (intentChanged) {
-                        totalNeedsAI++;
-                    }
+                    if (intentChanged) totalNeedsAI++;
                 }
             }
 
-            console.log(`[handleRunNormalization] Starting normalization. Total cuts needing AI: ${totalNeedsAI}`);
-            console.log(`[handleRunNormalization] Modified cut IDs:`, Array.from(modifiedCutIds));
+            console.log(`[handleRunNormalization] Starting. Total cuts needing AI: ${totalNeedsAI}`);
 
             for (const scene of updatedScenes) {
                 const reconstructedCuts: EditableCut[] = [];
                 for (const cut of scene.cuts) {
                     const isModified = modifiedCutIds.has(cut.id);
-                    console.log(`[handleRunNormalization] Processing cut ${cut.id}. isModified: ${isModified}`);
 
-                    // --- [정규화 1단계] 기계적 의상/헤어 동기화 (Master DNA Sync) ---
-                    const profileOutfitParts: string[] = [];
-                    (cut.character || []).forEach((name: string) => {
-                        // Dynamic lookup by koreanName
-                        const key = Object.keys(characterDescriptions).find((k: string) => characterDescriptions[k].koreanName === name);
-                        if (key && characterDescriptions[key]) {
-                            // 헤어 DNA 강제 주입 및 리터럴 복사 적용
-                            const hair = characterDescriptions[key].hairStyleDescription ? `(${characterDescriptions[key].hairStyleDescription}) ` : '';
-                            // NOTE: Using 'locations' (English) as source of truth
-                            const outfitText = characterDescriptions[key].locations?.[cut.location] || characterDescriptions[key].locations?.['기본 의상'] || characterDescriptions[key].baseAppearance || 'standard outfit';
-                            profileOutfitParts.push(`[${name}: ${hair}${outfitText}]`);
-                        } else {
-                            // Fallback for unknown characters to ensure outfit prompt exists
-                            profileOutfitParts.push(`[${name}: standard outfit]`);
-                        }
-                    });
-                    const mechanicalOutfit = profileOutfitParts.join(' ');
+                    // --- [정규화 1단계] 기계적 의상/헤어 동기화 ---
+                    const mechanicalOutfit = buildMechanicalOutfit(cut.character || [], characterDescriptions, cut.location, { fallbackUnknown: true });
 
-                    // --- [정규화 2단계] 장소 설명 자동 완성 (Spatial DNA Sync) ---
+                    // --- [정규화 2단계] 장소 설명 자동 완성 ---
                     let finalLocationDescription = cut.locationDescription;
                     if (!finalLocationDescription || finalLocationDescription.trim().length < 5) {
                         finalLocationDescription = locationVisualDNA[cut.location] || 'Consistent visual background.';
                     }
 
-                    // Only use AI regeneration if the directorialIntent was explicitly changed by the user
                     const original = originalCutsMap.get(cut.id);
                     const intentChanged = isModified && (!original || original.directorialIntent !== cut.directorialIntent) && !!cut.directorialIntent?.trim();
-                    const needsAI = intentChanged;
 
-                    if (needsAI) {
+                    if (intentChanged) {
                         processedModifiedCount++;
                         dispatch({ type: 'SET_LOADING_DETAIL', payload: `[정규화 3단계] 컷 #${cut.cutNumber} 연출 설계 중... (${processedModifiedCount}/${totalNeedsAI || 1})` });
                         try {
-                            console.log(`[handleRunNormalization] Regenerating intent for cut ${cut.id}`);
                             const { regeneratedCut, tokenCount } = await withTimeout(
                                 regenerateCutFieldsForIntentChange(cut, cut.directorialIntent || '', characterDescriptions),
-                                20000, // 20초 타임아웃
-                                { regeneratedCut: {}, tokenCount: 0 }
+                                20000, { regeneratedCut: {}, tokenCount: 0 }
                             );
-                            handleAddUsage(tokenCount, 0);
+                            handleAddUsage(tokenCount, 'claude');
 
                             let finalOutfit = String(regeneratedCut.characterOutfit || "").trim();
-                            const missingCharacterInAIResult = cut.character.some((name: string) => !finalOutfit.includes(name));
-                            const isTooShort = finalOutfit.length < 10;
+                            const missingChar = cut.character.some((name: string) => !finalOutfit.includes(name));
+                            if (missingChar || finalOutfit.length < 10) finalOutfit = mechanicalOutfit;
 
-                            if (missingCharacterInAIResult || isTooShort) {
-                                finalOutfit = mechanicalOutfit;
-                            }
-
-                            reconstructedCuts.push({
-                                ...cut,
-                                ...regeneratedCut,
-                                characterOutfit: finalOutfit,
-                                locationDescription: finalLocationDescription
-                            });
-                        } catch (e) {
-                            reconstructedCuts.push({
-                                ...cut,
-                                characterOutfit: mechanicalOutfit,
-                                locationDescription: finalLocationDescription
-                            });
+                            reconstructedCuts.push({ ...cut, ...regeneratedCut, characterOutfit: finalOutfit, locationDescription: finalLocationDescription });
+                        } catch {
+                            reconstructedCuts.push({ ...cut, characterOutfit: mechanicalOutfit, locationDescription: finalLocationDescription });
                         }
                     } else {
-                        // For unmodified cuts, keep existing outfit if it's substantial, otherwise use mechanical
                         const existingOutfit = String(cut.characterOutfit || "").trim();
-                        reconstructedCuts.push({
-                            ...cut,
-                            characterOutfit: existingOutfit.length > 5 ? existingOutfit : mechanicalOutfit,
-                            locationDescription: finalLocationDescription
-                        });
+                        reconstructedCuts.push({ ...cut, characterOutfit: existingOutfit.length > 5 ? existingOutfit : mechanicalOutfit, locationDescription: finalLocationDescription });
                     }
                 }
                 reconstructedScenes.push({ ...scene, cuts: reconstructedCuts });
@@ -160,8 +105,7 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
                 cuts: editableScene.cuts.map(editableCut => {
                     const original = originalCutsMap.get(editableCut.id);
                     const isModified = modifiedCutIds.has(editableCut.id);
-
-                    const historyImages = generatedImageHistory.filter((img: any) => img.sourceCutNumber === editableCut.id);
+                    const historyImages = generatedImageHistory.filter((img: GeneratedImage) => img.sourceCutNumber === editableCut.id);
                     const latestHistoryImage = historyImages[0];
 
                     const tempCut: Cut = {
@@ -175,9 +119,10 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
                         characterEmotionAndExpression: editableCut.characterEmotionAndExpression,
                         characterPose: editableCut.characterPose,
                         characterOutfit: String(editableCut.characterOutfit),
+                        characterIdentityDNA: editableCut.characterIdentityDNA || '',
                         locationDescription: editableCut.locationDescription,
                         otherNotes: editableCut.otherNotes,
-                        imageUrls: historyImages.length > 0 ? historyImages.map((img: any) => img.imageUrl) : (original ? original.imageUrls : []),
+                        imageUrls: historyImages.length > 0 ? historyImages.map((img: GeneratedImage) => img.imageUrl) : (original ? original.imageUrls : []),
                         imageLoading: false,
                         selectedImageId: latestHistoryImage ? latestHistoryImage.id : (original ? original.selectedImageId : null),
                         directorialIntent: editableCut.directorialIntent,
@@ -193,59 +138,33 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
                 })
             }));
 
-            // --- [정규화 4단계] 나레이션 자동 줄바꿈 처리 ---
+            // --- [정규화 4단계] 나레이션 자동 줄바꿈 ---
             const allCutsForFormatting = finalScenes.flatMap(s => s.cuts);
-
-            // 포맷팅이 필요한 컷이 있는지 먼저 확인
-            const cutsNeedingFormatting = allCutsForFormatting.filter(cut => {
-                const original = originalCutsMap.get(cut.cutNumber);
-                const isModified = modifiedCutIds.has(cut.cutNumber);
-                // 첫 생성 시(original이 없을 때)는 무조건 포맷팅 대상(true)으로 간주
-                const hasNarrationChanged = original ? original.narration !== cut.narration : true;
-                return hasNarrationChanged && cut.narration && cut.narration.trim() && !cut.narration.includes('\n');
-            });
-
-            if (cutsNeedingFormatting.length > 0) {
-                dispatch({ type: 'SET_LOADING_DETAIL', payload: `[정규화 4단계] 나레이션 자동 최적화 중... (0/${cutsNeedingFormatting.length})` });
-            }
-
-            let formattedCount = 0;
-            const formattedCuts: Cut[] = [];
-
-            // Batch processing for semantic line breaks
             const cutsToFormat: { cut: Cut, index: number }[] = [];
+            const formattedCuts: Cut[] = [];
 
             for (let i = 0; i < allCutsForFormatting.length; i++) {
                 const cut = allCutsForFormatting[i];
                 const original = originalCutsMap.get(cut.cutNumber);
-                const isModified = modifiedCutIds.has(cut.cutNumber);
-                // 첫 생성 시(original이 없을 때)는 무조건 포맷팅 대상(true)으로 간주
                 const hasNarrationChanged = original ? original.narration !== cut.narration : true;
-
                 if (hasNarrationChanged && cut.narration && cut.narration.trim() && !cut.narration.includes('\n')) {
                     cutsToFormat.push({ cut, index: i });
                 }
-                formattedCuts.push(cut); // Initial push, will be updated later
+                formattedCuts.push(cut);
             }
 
             if (cutsToFormat.length > 0) {
+                dispatch({ type: 'SET_LOADING_DETAIL', payload: `[정규화 4단계] 나레이션 자동 최적화 중... (0/${cutsToFormat.length})` });
                 try {
-                    console.log(`[handleRunNormalization] Formatting narrations for ${cutsToFormat.length} cuts in batch`);
                     const textsToFormat = cutsToFormat.map(c => c.cut.narration);
                     const { formattedTexts, tokenCount } = await withTimeout(
                         formatMultipleTextsWithSemanticBreaks(textsToFormat),
-                        15000, // 15초 타임아웃
-                        { formattedTexts: textsToFormat, tokenCount: 0 }
+                        15000, { formattedTexts: textsToFormat, tokenCount: 0 }
                     );
-
-                    handleAddUsage(tokenCount, 0);
-
+                    handleAddUsage(tokenCount, 'claude');
                     cutsToFormat.forEach((item, i) => {
-                        if (formattedTexts[i]) {
-                            formattedCuts[item.index] = { ...item.cut, narration: formattedTexts[i] };
-                        }
+                        if (formattedTexts[i]) formattedCuts[item.index] = { ...item.cut, narration: formattedTexts[i] };
                     });
-
                     dispatch({ type: 'SET_LOADING_DETAIL', payload: `[정규화 4단계] 나레이션 자동 최적화 완료 (${cutsToFormat.length}/${cutsToFormat.length})` });
                 } catch (e) {
                     console.error("Batch formatting failed:", e);
@@ -253,21 +172,16 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
             }
 
             const formattedCutsMap = new Map(formattedCuts.map(c => [c.cutNumber, c]));
-
             const finalContent: GeneratedScript = {
-                scenes: finalScenes.map(s => ({
-                    ...s,
-                    cuts: s.cuts.map(c => formattedCutsMap.get(c.cutNumber) || c)
-                }))
+                scenes: finalScenes.map(s => ({ ...s, cuts: s.cuts.map(c => formattedCutsMap.get(c.cutNumber) || c) }))
             };
 
-            // 최종 상태 반영
             dispatch({ type: 'SET_GENERATED_CONTENT', payload: finalContent });
             dispatch({ type: 'SET_APP_STATE', payload: 'storyboardGenerated' });
+            dispatch({ type: 'SET_PIPELINE_CHECKPOINT', payload: 'complete' });
             dispatch({ type: 'SET_EDITABLE_STORYBOARD', payload: null });
             updateUIState({ isStoryboardReviewModalOpen: false });
-            addNotification(modifiedCutIds.size > 0 ? `${modifiedCutIds.size}개의 컷이 성공적으로 업데이트되었습니다.` : '검수 완료', 'success');
-
+            addNotification(modifiedCutIds.size > 0 ? `${modifiedCutIds.size}개의 컷이 업데이트되었습니다.` : '검수 완료', 'success');
         } catch (error) {
             console.error(error);
             addNotification('스토리보드 업데이트 중 오류 발생', 'error');
@@ -276,47 +190,56 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
         }
     };
 
-    // ---- handleApplyCharacterChangesToAllCuts ----
-    const handleApplyCharacterChangesToAllCuts = async () => {
-        const { generatedContent, characterDescriptions } = stateRef.current;
-        if (!generatedContent) return;
+    const handleGenerateStoryboardWithCustomCostumes = async () => {
+        let { editableStoryboard, characterDescriptions } = stateRef.current;
 
-        // 1. Update generatedContent with new outfit descriptions
-        const updatedScenes = generatedContent.scenes.map((scene: Scene) => ({
-            ...scene,
-            cuts: scene.cuts.map((cut: Cut) => {
-                const profileOutfitParts: string[] = [];
-                (cut.characters || []).forEach((name: string) => {
-                    const key = Object.keys(characterDescriptions).find((k: string) => characterDescriptions[k].koreanName === name);
-                    if (key && characterDescriptions[key]) {
-                        const hair = characterDescriptions[key].hairStyleDescription || 'Standard';
-                        const outfitText = characterDescriptions[key].locations?.[cut.location] || characterDescriptions[key].locations?.['기본 의상'] || characterDescriptions[key].baseAppearance || 'standard outfit';
-                        profileOutfitParts.push(`[${name}: (${hair}) ${outfitText}]`);
-                    }
-                });
+        if (!editableStoryboard) {
+            const { contiCuts, cinematographyPlan, characterBibles } = stateRef.current;
+            if (contiCuts && cinematographyPlan && characterBibles) {
+                editableStoryboard = convertContiToEditableStoryboard(contiCuts, cinematographyPlan, characterBibles);
+                dispatch({ type: 'SET_EDITABLE_STORYBOARD', payload: editableStoryboard });
+            }
+        }
 
-                // If no characters found, keep original outfit, otherwise update
-                const newOutfit = profileOutfitParts.length > 0 ? profileOutfitParts.join(' ') : cut.characterOutfit;
+        // 캐릭터 시트 → 스튜디오 연동
+        const getFinalImg = (key: string) => {
+            const char = characterDescriptions[key];
+            if (!char) return null;
+            const url = char.mannequinImageUrl || char.upscaledImageUrl || (char.characterSheetHistory?.[char.characterSheetHistory.length - 1]);
+            if (!url) return null;
+            return createGeneratedImage({
+                id: `char-sheet-${key}-${Date.now()}`,
+                imageUrl: url,
+                sourceCutNumber: 'character-sheet',
+                prompt: char.baseAppearance || 'Character Sheet Base',
+                model: stateRef.current.selectedNanoModel,
+            });
+        };
 
-                // Update cut with new outfit
-                const updatedCut = { ...cut, characterOutfit: newOutfit };
-
-                // Recalculate prompt
-                updatedCut.imagePrompt = calculateFinalPrompt(updatedCut);
-
-                return updatedCut;
-            })
-        }));
-
-        dispatch({ type: 'SET_GENERATED_CONTENT', payload: { ...generatedContent, scenes: updatedScenes } });
+        const charKeys = Object.keys(characterDescriptions);
+        if (charKeys.length > 0) {
+            const imgA = getFinalImg(charKeys[0]);
+            if (imgA) {
+                dispatch({ type: 'SET_ORIGINAL_IMAGE', payload: { studioId: 'a', image: imgA } });
+                dispatch({ type: 'LOAD_IMAGE_INTO_STUDIO', payload: { studioId: 'a', image: imgA } });
+            }
+        }
+        if (editableStoryboard) {
+            const syncedDraft = editableStoryboard.map((scene: any) => ({
+                ...scene,
+                cuts: scene.cuts.map((cut: any) => {
+                    return { ...cut, characterOutfit: buildMechanicalOutfit(cut.character || [], characterDescriptions, cut.location) };
+                })
+            }));
+            dispatch({ type: 'SET_EDITABLE_STORYBOARD', payload: syncedDraft });
+        }
+        dispatch({ type: 'SET_PIPELINE_CHECKPOINT', payload: 'costume_done' });
         updateUIState({ isCostumeModalOpen: false });
-
-        // 2. Add a notification to inform the user that changes were applied
-        addNotification('의상 변경사항이 적용되었습니다. 원하는 컷을 선택하여 다시 생성해주세요.', 'success');
+        handleOpenReviewModalForEdit();
     };
 
     return {
         handleRunNormalization,
-        handleApplyCharacterChangesToAllCuts,
+        handleGenerateStoryboardWithCustomCostumes,
     };
 }

@@ -1,29 +1,48 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "https://raw.githubusercontent.com/nicegoodboy/test-tauri-v2/main/src-tauri/.schema/capabilities-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "도레미썰 스튜디오 기본 권한",
   "windows": [
-    "main"
+    "main",
+    "asset-catalog"
   ],
   "permissions": [
     "core:default",
-    "fs:default",
-    "fs:allow-read-file",
-    "fs:allow-write-file",
-    "fs:allow-exists",
-    "fs:allow-mkdir",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        { "path": "$HOME/**" },
-        { "path": "$APPDATA/**" },
-        { "path": "$DOWNLOAD/**" }
-      ]
-    },
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
+    "fs:default",
+    "fs:allow-read",
+    "fs:allow-write",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "fs:allow-copy-file",
+    "fs:scope-home",
+    "fs:scope-desktop",
+    "fs:scope-document",
+    "fs:scope-download",
+    "fs:scope-appdata",
     "shell:default",
-    "shell:allow-open"
+    "shell:allow-open",
+    "fs:allow-write-text-file",
+    "fs:allow-read-text-file",
+    "fs:allow-write-file",
+    "fs:allow-read-file",
+    "fs:allow-app-write",
+    "fs:allow-app-write-recursive",
+    "fs:allow-app-read",
+    "fs:allow-app-read-recursive",
+    "fs:allow-desktop-write",
+    "fs:allow-desktop-read",
+    "fs:allow-download-write",
+    "fs:allow-download-read",
+    "fs:allow-document-write",
+    "fs:allow-document-read",
+    "fs:allow-home-write",
+    "fs:allow-home-read",
+    "core:window:allow-set-size",
+    "core:window:allow-center"
   ]
 }

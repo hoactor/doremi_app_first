@@ -1,85 +1,75 @@
+// appUtils.ts — 프로젝트 공통 유틸리티 (중복 제거)
 
-import { StudioSession, AppDataState, GeneratedImage, NanoModel } from './types';
+import type { GeneratedImage, CharacterDescription, NanoModel } from './types';
 
-// Factory for independent studio session objects
-export const createInitialStudioSession = (): StudioSession => ({
-    originalImage: null,
-    currentImage: null,
-    history: [],
-    referenceImageUrl: null,
-    editPrompt: '',
-    zoom: 1,
-    pan: { x: 0, y: 0 },
-    sourceCutForNextEdit: null,
-});
+// ── 1. 엔진 판별 (14곳 중복 제거) ──
 
-export const sanitizeState = (state: AppDataState): AppDataState => {
-    const sanitized = JSON.parse(JSON.stringify(state)) as AppDataState;
-
-    // Clean up global transient states
-    sanitized.isLoading = false;
-    sanitized.loadingMessage = '';
-    sanitized.loadingMessageDetail = '';
-    sanitized.isZipping = false;
-    sanitized.zippingProgress = null;
-    sanitized.isAutoGenerating = false;
-    sanitized.isGeneratingSRT = false;
-    sanitized.failedCutNumbers = [];
-
-    // Clean up UI states that shouldn't persist across sessions
-    sanitized.isAssetLibraryOpen = false;
-    sanitized.isCutSplitterOpen = false;
-    sanitized.backgroundReplacementTargetCutNumber = null;
-    sanitized.backgroundReplacementSourceUrl = null;
-    sanitized.guestSelectionTargetCutNumber = null;
-    sanitized.cutToSplit = null;
-
-    // Clean up character transient states
-    if (sanitized.characterDescriptions) {
-        Object.values(sanitized.characterDescriptions).forEach(char => {
-            delete char.isEditingSheet;
-            delete char.imageLoading;
-            delete char.isRemovingBackground;
-            delete char.isGeneratingAPose;
-            delete char.isRegeneratingPrompt;
-            delete char.isAutoGenerating;
-            delete char.isRefiningAppearance;
-            delete char.isGeneratingLocationOutfits;
-        });
-    }
-
-    // Clean up cut transient states
-    if (sanitized.generatedContent && sanitized.generatedContent.scenes) {
-        sanitized.generatedContent.scenes.forEach(scene => {
-            if (scene.cuts) {
-                scene.cuts.forEach(cut => {
-                    delete cut.imageLoading;
-                    delete cut.isUpdatingIntent;
-                    delete cut.isFormattingNarration;
-                });
-            }
-        });
-    }
-
-    return sanitized;
-};
-
-// Derive the engine name from the selected nano model
-export const getEngineFromModel = (model: NanoModel): 'nano' | 'nano-v3' => {
+export function getEngineFromModel(model: NanoModel | string): 'nano-v3' | 'nano' {
     return (model === 'nano-3pro' || model === 'nano-3.1') ? 'nano-v3' : 'nano';
-};
+}
 
-// Create a GeneratedImage object with standard defaults
-export const createGeneratedImage = (params: {
+// ── 2. GeneratedImage 팩토리 (11곳+ 중복 제거) ──
+
+export function createGeneratedImage(params: {
     imageUrl: string;
     sourceCutNumber: string;
     prompt: string;
-    model: NanoModel;
-}): GeneratedImage => ({
-    id: window.crypto.randomUUID(),
-    imageUrl: params.imageUrl,
-    sourceCutNumber: params.sourceCutNumber,
-    prompt: params.prompt,
-    engine: getEngineFromModel(params.model),
-    createdAt: new Date().toISOString(),
-});
+    model: NanoModel | string;
+    tag?: 'rough' | 'normal' | 'hq';
+    localPath?: string;
+    id?: string;
+}): GeneratedImage {
+    const { imageUrl, sourceCutNumber, prompt, model, tag = 'hq', localPath, id } = params;
+    return {
+        id: id || window.crypto.randomUUID(),
+        imageUrl,
+        localPath,
+        sourceCutNumber,
+        prompt,
+        engine: getEngineFromModel(model),
+        tag,
+        model: model as NanoModel,
+        createdAt: new Date().toISOString(),
+    };
+}
+
+// ── 3. 의상 조립 (6곳 중복 제거) ──
+
+export interface OutfitBuildOptions {
+    /** characterDescriptions에 없는 캐릭터 폴백: true → `[name: standard outfit]` (기본 false → skip) */
+    fallbackUnknown?: boolean;
+    /** 한국어 의상 사용 (StoryboardReviewModal용): true → koreanLocations/koreanBaseAppearance */
+    useKorean?: boolean;
+}
+
+export function buildMechanicalOutfit(
+    names: string[],
+    characterDescriptions: { [key: string]: CharacterDescription },
+    location: string,
+    options: OutfitBuildOptions = {},
+): string {
+    const { fallbackUnknown = false, useKorean = false } = options;
+    const parts: string[] = [];
+
+    names.forEach(name => {
+        const key = Object.keys(characterDescriptions).find(k => {
+            const cd = characterDescriptions[k];
+            return (cd.canonicalName && cd.canonicalName === name) || cd.koreanName === name;
+        });
+        if (key && characterDescriptions[key]) {
+            const desc = characterDescriptions[key];
+
+            let outfitText: string;
+            if (useKorean) {
+                outfitText = desc.koreanLocations?.[location] || desc.koreanBaseAppearance || '기본 의상';
+            } else {
+                outfitText = desc.locations?.[location] || desc.locations?.['기본 의상'] || desc.baseAppearance || 'standard outfit';
+            }
+            parts.push(`[${name}: ${outfitText}]`);
+        } else if (fallbackUnknown) {
+            parts.push(`[${name}: standard outfit]`);
+        }
+    });
+
+    return parts.join(' ');
+}

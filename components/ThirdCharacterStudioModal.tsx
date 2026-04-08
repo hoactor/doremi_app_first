@@ -2,6 +2,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import { GeneratedImage } from '../types';
+import { getEngineFromModel, createGeneratedImage } from '../appUtils';
 import { XIcon, SparklesIcon, UploadIcon, UsersIcon, SpinnerIcon } from './icons';
 
 interface ThirdCharacterStudioModalProps {
@@ -22,7 +23,7 @@ const ImageDropZone: React.FC<{
     children?: React.ReactNode;
 }> = ({ onDrop, onClick, isDragging, setIsDragging, image, title, subtitle, children }) => (
     <div
-        className={`w-full h-full bg-stone-900/50 rounded-lg flex items-center justify-center relative shadow-inner transition-all border-2 border-dashed ${isDragging ? 'border-orange-500 bg-orange-900/50' : 'border-stone-700'}`}
+        className={`w-full h-full bg-zinc-900/50 rounded-lg flex items-center justify-center relative shadow-inner transition-all border-2 border-dashed ${isDragging ? 'border-orange-500 bg-orange-900/50' : 'border-zinc-700'}`}
         onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
         onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -31,7 +32,7 @@ const ImageDropZone: React.FC<{
         {image ? (
             <img src={image.imageUrl} alt={title} className="max-w-full max-h-full object-contain rounded-md" />
         ) : (
-            <div className="text-center text-stone-500" onClick={onClick}>
+            <div className="text-center text-zinc-500" onClick={onClick}>
                 <UploadIcon className="w-10 h-10 mx-auto mb-2" />
                 <p className="font-semibold">{title}</p>
                 <p className="text-xs">{subtitle}</p>
@@ -70,14 +71,7 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     const url = event.target?.result as string;
-                    const newImage: GeneratedImage = {
-                        id: window.crypto.randomUUID(),
-                        imageUrl: url,
-                        sourceCutNumber: 'user-upload',
-                        prompt: `User uploaded: ${file.name}`,
-                        engine: (state.selectedNanoModel === 'nano-3pro' || state.selectedNanoModel === 'nano-3.1') ? 'nano-v3' : 'nano',
-                        createdAt: new Date().toISOString(),
-                    };
+                    const newImage = createGeneratedImage({ imageUrl: url, sourceCutNumber: 'user-upload', prompt: `User uploaded: ${file.name}`, model: state.selectedNanoModel });
                     if (type === 'base') setBaseImage(newImage);
                     else setReferenceImage(newImage);
                 };
@@ -95,14 +89,7 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
           const reader = new FileReader();
           reader.onload = (event) => {
             const url = event.target?.result as string;
-             const newImage: GeneratedImage = {
-                id: window.crypto.randomUUID(),
-                imageUrl: url,
-                sourceCutNumber: 'user-upload',
-                prompt: `User uploaded: ${file.name}`,
-                engine: (state.selectedNanoModel === 'nano-3pro' || state.selectedNanoModel === 'nano-3.1') ? 'nano-v3' : 'nano',
-                createdAt: new Date().toISOString(),
-            };
+             const newImage = createGeneratedImage({ imageUrl: url, sourceCutNumber: 'user-upload', prompt: `User uploaded: ${file.name}`, model: state.selectedNanoModel });
             setReferenceImage(newImage);
           };
           reader.readAsDataURL(file);
@@ -129,10 +116,10 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
     return (
         <div className="fixed inset-0 bg-black/80 z-[90] flex items-center justify-center p-4 animate-fade-in">
             <input type="file" ref={refFileInputRef} className="hidden" accept="image/*" onChange={handleRefFileChange} />
-            <div className="bg-stone-800 border border-stone-700 rounded-2xl shadow-xl w-full max-w-5xl h-[85vh] flex flex-col">
-                <header className="flex justify-between items-center p-4 border-b border-stone-700">
+            <div className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-xl w-full max-w-5xl h-[85vh] flex flex-col">
+                <header className="flex justify-between items-center p-4 border-b border-zinc-700">
                     <h2 className="text-xl font-bold text-white flex items-center gap-3"><UsersIcon className="w-6 h-6 text-orange-400" />제3인물 수정 스튜디오</h2>
-                    <button onClick={onClose} className="p-2 rounded-full text-stone-400 hover:bg-stone-700"><XIcon className="w-6 h-6" /></button>
+                    <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700"><XIcon className="w-6 h-6" /></button>
                 </header>
                 
                 <main className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-6 p-6 overflow-y-auto">
@@ -142,11 +129,11 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
                         <div className="flex items-start gap-4">
                             <div className="flex flex-col items-center">
                                 <div className="w-8 h-8 rounded-full bg-orange-600 text-white font-bold flex items-center justify-center">1</div>
-                                <div className="w-px h-full bg-stone-700 mt-2"></div>
+                                <div className="w-px h-full bg-zinc-700 mt-2"></div>
                             </div>
                             <div className="flex-grow">
                                 <h3 className="font-bold text-lg text-white">컷 이미지 선택</h3>
-                                <p className="text-sm text-stone-400 mb-2">수정할 이미지를 우측 생성 히스토리에서 드래그하여 아래 영역에 놓으세요.</p>
+                                <p className="text-sm text-zinc-400 mb-2">수정할 이미지를 우측 생성 히스토리에서 드래그하여 아래 영역에 놓으세요.</p>
                                 <div className="h-64">
                                     <ImageDropZone
                                         onDrop={(e) => handleDrop(e, 'base')}
@@ -167,7 +154,7 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
                             </div>
                             <div className="flex-grow">
                                 <h3 className="font-bold text-lg text-white">제3인물 레퍼런스 등록</h3>
-                                <p className="text-sm text-stone-400 mb-2">제3인물의 기준 이미지를 등록하세요. (히스토리에서 드래그 또는 파일 업로드)</p>
+                                <p className="text-sm text-zinc-400 mb-2">제3인물의 기준 이미지를 등록하세요. (히스토리에서 드래그 또는 파일 업로드)</p>
                                 <div className="h-64">
                                     <ImageDropZone
                                         onDrop={(e) => handleDrop(e, 'ref')}
@@ -186,7 +173,7 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
                     {/* Right Side: History Gallery */}
                     <div className="flex flex-col gap-4">
                         <h3 className="font-bold text-lg text-white">생성 히스토리</h3>
-                        <div className="flex-grow bg-stone-900/50 p-3 rounded-lg border border-stone-700 overflow-y-auto">
+                        <div className="flex-grow bg-zinc-900/50 p-3 rounded-lg border border-zinc-700 overflow-y-auto">
                              <div className="grid grid-cols-3 gap-3">
                                 {generatedImageHistory.map(image => (
                                     <div 
@@ -210,16 +197,16 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
                     </div>
                 </main>
                 
-                <footer className="p-4 bg-stone-900/50 border-t border-stone-700 flex justify-between items-center">
+                <footer className="p-4 bg-zinc-900/50 border-t border-zinc-700 flex justify-between items-center">
                     <div className="flex items-center gap-2">
-                        <label htmlFor="character-name-input" className="text-sm font-semibold text-stone-300">교체할 인물 이름:</label>
+                        <label htmlFor="character-name-input" className="text-sm font-semibold text-zinc-300">교체할 인물 이름:</label>
                         <input
                             id="character-name-input"
                             type="text"
                             value={characterToReplace}
                             onChange={(e) => setCharacterToReplace(e.target.value)}
                             placeholder="예: 도둑"
-                            className="p-2 bg-stone-700 rounded-md border border-stone-600 text-sm text-white w-48"
+                            className="p-2 bg-zinc-700 rounded-md border border-zinc-600 text-sm text-white w-48"
                         />
                     </div>
                     <button

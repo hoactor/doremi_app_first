@@ -41,8 +41,8 @@ interface ImageEditorModalProps {
 
 // Tool section component
 const ToolSection: React.FC<{ title: React.ReactNode, children: React.ReactNode }> = ({ title, children }) => (
-    <div className="p-4 border border-stone-700 rounded-lg bg-stone-800/60">
-        <h3 className="font-semibold mb-3 text-stone-200 flex items-center gap-2">{title}</h3>
+    <div className="p-4 border border-zinc-700 rounded-lg bg-zinc-800/60">
+        <h3 className="font-semibold mb-3 text-zinc-200 flex items-center gap-2">{title}</h3>
         <div className="space-y-3">
             {children}
         </div>
@@ -111,7 +111,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   
   // Tool state
   const [editPrompt, setEditPrompt] = useState('');
-  const [referenceImageUrl, setReferenceImageUrl] = useState<string | undefined>(undefined);
+  const [referenceImageUrls, setReferenceImageUrls] = useState<string[]>([]);
   const [selectedCharacterKey, setSelectedCharacterKey] = useState<string | null>(null);
 
 
@@ -191,7 +191,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
 
   const handleClearReference = () => {
-    setReferenceImageUrl(undefined);
+    setReferenceImageUrls([]);
     setSelectedCharacterKey(null);
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -200,9 +200,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
   const handleSelectCharacter = (key: string | null) => {
     setSelectedCharacterKey(key);
-    // Clear any existing reference when a character is picked,
-    // forcing the user to explicitly choose A-Pose or Background.
-    setReferenceImageUrl(undefined);
+    setReferenceImageUrls([]);
     if (fileInputRef.current) {
         fileInputRef.current.value = '';
     }
@@ -224,7 +222,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
             imageSrc,
             editPrompt,
             targetImage.prompt,
-            referenceImageUrl,
+            referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
             undefined // No mask
         );
         updateImage(newImageUrl);
@@ -376,7 +374,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       const reader = new FileReader();
       reader.onload = (event) => {
         const url = event.target?.result as string;
-        setReferenceImageUrl(url);
+        setReferenceImageUrls(prev => prev.length < 5 ? [...prev, url] : prev);
         setSelectedCharacterKey(null);
       };
       reader.readAsDataURL(file);
@@ -387,43 +385,38 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
 
   const shotPresets = [
     { name: '인물 확대', prompt: 'Re-frame the shot to be much closer to the character(s), making them fill most of the screen to clearly show their facial expressions. Do not change their pose or the background.', color: 'bg-orange-500' },
-    { name: '상반신 샷', prompt: 'Re-frame the shot to show the character(s) from the waist up. They should be large and prominent in the frame.', color: 'bg-amber-600' },
-    { name: '가슴 위 샷', prompt: 'Re-frame the shot to show the character(s) from the chest up, filling the frame.', color: 'bg-amber-600' },
-    { name: '전신 샷', prompt: 'Re-frame the shot to show the character\'s full body, from head to toe. Ensure they are still the main focus and not too small in the frame.', color: 'bg-orange-600' },
+    { name: '상반신 샷', prompt: 'Re-frame the shot to show the character(s) from the waist up. They should be large and prominent in the frame.', color: 'bg-cyan-600' },
+    { name: '가슴 위 샷', prompt: 'Re-frame the shot to show the character(s) from the chest up, filling the frame.', color: 'bg-cyan-600' },
+    { name: '전신 샷', prompt: 'Re-frame the shot to show the character\'s full body, from head to toe. Ensure they are still the main focus and not too small in the frame.', color: 'bg-zinc-700' },
   ];
 
   const anglePresets = [
-    { name: '하이 앵글', prompt: 'Redraw the scene from a high angle, looking down at the character.', color: 'bg-orange-600' },
+    { name: '하이 앵글', prompt: 'Redraw the scene from a high angle, looking down at the character.', color: 'bg-zinc-700' },
     { name: '로우 앵글', prompt: 'Redraw the scene from a low angle, looking up at the character.', color: 'bg-red-600' },
-    { name: '아이 레벨', prompt: 'Redraw the scene from an eye-level angle.', color: 'bg-stone-700' },
-    { name: '사선 앵글', prompt: 'Redraw the scene using a Dutch angle (canted angle) for a dramatic effect.', color: 'bg-amber-600' },
+    { name: '아이 레벨', prompt: 'Redraw the scene from an eye-level angle.', color: 'bg-zinc-700' },
+    { name: '사선 앵글', prompt: 'Redraw the scene using a Dutch angle (canted angle) for a dramatic effect.', color: 'bg-zinc-700' },
   ];
   
-  const getReferenceImageLabel = () => {
-    if (!referenceImageUrl) return '';
-    if (selectedCharacterKey && allCharacterDescriptions[selectedCharacterKey]) {
-        if (referenceImageUrl === allCharacterDescriptions[selectedCharacterKey].aPoseImageUrl) {
-            return `${allCharacterDescriptions[selectedCharacterKey].koreanName} (A-Pose)`;
-        }
-    }
-    if (referenceImageUrl === masterStyleSourceImageUrl) {
-        return '마스터 배경';
-    }
-    return '업로드된 파일';
+  const addReferenceUrl = (url: string | undefined) => {
+    if (url) setReferenceImageUrls(prev => prev.length < 5 ? [...prev, url] : prev);
+  };
+
+  const removeReferenceAt = (idx: number) => {
+    setReferenceImageUrls(prev => prev.filter((_, i) => i !== idx));
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 animate-fade-in">
       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
-      <div className="bg-stone-900 border border-stone-700 rounded-2xl shadow-xl w-full max-w-screen-xl h-[90vh] flex flex-col">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-xl w-full max-w-screen-xl h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex justify-between items-center p-3 border-b border-stone-700 flex-shrink-0">
+        <div className="flex justify-between items-center p-3 border-b border-zinc-700 flex-shrink-0">
           <h2 className="text-xl font-bold text-white">Nano Image Editor</h2>
           <div className="flex items-center gap-3">
             <button onClick={() => handleSaveWrapper(url => { onSave(url); onClose(); })} disabled={isLoading} className="px-4 py-2 text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50">
               저장 & 닫기
             </button>
-            <button onClick={onClose} className="p-2 rounded-full text-stone-400 hover:bg-stone-700">
+            <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700">
               <XIcon className="w-6 h-6" />
             </button>
           </div>
@@ -432,30 +425,31 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         {/* Main Content */}
         <div className="flex-grow flex overflow-hidden">
           {/* Left Sidebar */}
-          <div className="w-[380px] p-4 overflow-y-auto space-y-4 bg-stone-800/50 border-r border-stone-700 flex-shrink-0">
+          <div className="w-[380px] p-4 overflow-y-auto space-y-4 bg-zinc-800/50 border-r border-zinc-700 flex-shrink-0">
             <ToolSection title={<><PencilIcon className="w-5 h-5 text-orange-400"/><span>텍스트로 편집</span></>}>
                 <textarea
                     value={editPrompt}
                     onChange={(e) => setEditPrompt(e.target.value)}
                     rows={4}
-                    className="w-full p-2 text-sm bg-stone-900/50 rounded-md border border-stone-600 focus:ring-orange-500"
+                    className="w-full p-2 text-sm bg-zinc-900/50 rounded-md border border-zinc-600 focus:ring-orange-500"
                     placeholder="예: '캐릭터에게 안경을 씌워줘'"
                 />
-                <label className="text-sm font-semibold text-stone-300">참조 이미지 (선택)</label>
+                <label className="text-sm font-semibold text-zinc-300">참조 이미지 ({referenceImageUrls.length}/5)</label>
                 <div className="grid grid-cols-2 gap-2">
                     <select
                         value={selectedCharacterKey || ''}
                         onChange={(e) => handleSelectCharacter(e.target.value || null)}
-                        className="w-full p-2.5 text-sm bg-stone-700 rounded-md border border-stone-600 appearance-none focus:ring-orange-500"
+                        className="w-full p-2.5 text-sm bg-zinc-700 rounded-md border border-zinc-600 appearance-none focus:ring-orange-500"
                     >
-                        <option value="">참조 없음</option>
+                        <option value="">캐릭터 선택</option>
                         {Object.keys(allCharacterDescriptions).map(key => (
                            <option key={key} value={key}>{allCharacterDescriptions[key].koreanName}</option>
                         ))}
                     </select>
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="p-2.5 bg-stone-700 hover:bg-stone-600 rounded-md flex items-center justify-center"
+                        disabled={referenceImageUrls.length >= 5}
+                        className="p-2.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded-md flex items-center justify-center"
                         title="파일에서 참조 이미지 업로드"
                     >
                         <UploadIcon className="w-5 h-5" />
@@ -465,37 +459,36 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                 {selectedCharacterKey && allCharacterDescriptions[selectedCharacterKey] && (
                     <div className="grid grid-cols-2 gap-2">
                         <button
-                            onClick={() => setReferenceImageUrl(allCharacterDescriptions[selectedCharacterKey].aPoseImageUrl)}
-                            disabled={!allCharacterDescriptions[selectedCharacterKey].aPoseImageUrl}
-                            className={`p-2 text-xs font-semibold rounded-md transition-colors ${referenceImageUrl === allCharacterDescriptions[selectedCharacterKey].aPoseImageUrl ? 'bg-orange-600 text-white' : 'bg-stone-700 hover:bg-stone-600 text-stone-300 disabled:opacity-50'}`}
+                            onClick={() => addReferenceUrl(allCharacterDescriptions[selectedCharacterKey].aPoseImageUrl)}
+                            disabled={!allCharacterDescriptions[selectedCharacterKey].aPoseImageUrl || referenceImageUrls.length >= 5}
+                            className="p-2 text-xs font-semibold rounded-md transition-colors bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50"
                         >
-                            A-Pose 참조
+                            + A-Pose 참조
                         </button>
                         <button
-                            onClick={() => setReferenceImageUrl(masterStyleSourceImageUrl || undefined)}
-                            disabled={!masterStyleSourceImageUrl}
-                            className={`p-2 text-xs font-semibold rounded-md transition-colors ${referenceImageUrl === masterStyleSourceImageUrl ? 'bg-orange-600 text-white' : 'bg-stone-700 hover:bg-stone-600 text-stone-300 disabled:opacity-50'}`}
+                            onClick={() => addReferenceUrl(masterStyleSourceImageUrl || undefined)}
+                            disabled={!masterStyleSourceImageUrl || referenceImageUrls.length >= 5}
+                            className="p-2 text-xs font-semibold rounded-md transition-colors bg-zinc-700 hover:bg-zinc-600 text-zinc-300 disabled:opacity-50"
                         >
-                            마스터 배경 참조
+                            + 마스터 배경 참조
                         </button>
                     </div>
                 )}
 
-                {referenceImageUrl && (
-                     <div className="relative w-full p-1 border border-dashed border-stone-600 rounded-md mt-2">
-                        <img 
-                            src={referenceImageUrl} 
-                            alt="Reference Preview" 
-                            className="w-full h-auto max-h-40 object-contain rounded" 
-                        />
-                        <div className="absolute top-1 left-1 bg-black/50 text-white text-xs px-2 py-1 rounded">
-                            {getReferenceImageLabel()}
-                        </div>
-                        <button 
-                            onClick={handleClearReference}
-                            className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full p-1" title="참조 이미지 제거"
-                        >
-                            <XIcon className="w-3 h-3" />
+                {referenceImageUrls.length > 0 && (
+                    <div className="flex gap-1.5 flex-wrap mt-2">
+                        {referenceImageUrls.map((url, idx) => (
+                            <div key={idx} className="relative w-[60px] h-[60px] rounded-lg overflow-hidden border border-zinc-600 group">
+                                <img src={url} alt={`참조 ${idx + 1}`} className="w-full h-full object-cover" />
+                                <button onClick={() => removeReferenceAt(idx)}
+                                    className="absolute top-0.5 right-0.5 p-0.5 bg-red-600 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <XIcon className="w-2.5 h-2.5" />
+                                </button>
+                                <span className="absolute bottom-0.5 left-0.5 text-[6px] bg-black/60 text-zinc-300 px-0.5 rounded">{idx + 1}</span>
+                            </div>
+                        ))}
+                        <button onClick={handleClearReference} className="w-[60px] h-[60px] rounded-lg border border-zinc-700 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:border-red-500/50 transition-colors" title="전체 삭제">
+                            <TrashIcon className="w-4 h-4" />
                         </button>
                     </div>
                 )}
@@ -509,13 +502,13 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                 </button>
             </ToolSection>
 
-            <ToolSection title={<><SparklesIcon className="w-5 h-5 text-amber-400"/><span>AI 아웃페인팅</span></>}>
+            <ToolSection title={<><SparklesIcon className="w-5 h-5 text-orange-400"/><span>AI 아웃페인팅</span></>}>
                  <div className="grid grid-cols-3 gap-2 mb-2">
                     <div />
                     <button 
                         onClick={() => handleDirectionalOutpaint('up')}
                         disabled={isLoading}
-                        className="p-2 flex items-center justify-center bg-stone-700 hover:bg-stone-600 rounded-md text-white disabled:opacity-50"
+                        className="p-2 flex items-center justify-center bg-zinc-700 hover:bg-zinc-600 rounded-md text-white disabled:opacity-50"
                         title="위로 확장"
                     >
                         <ArrowUpIcon className="w-5 h-5" />
@@ -525,7 +518,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     <button 
                         onClick={() => handleDirectionalOutpaint('left')}
                         disabled={isLoading}
-                        className="p-2 flex items-center justify-center bg-stone-700 hover:bg-stone-600 rounded-md text-white disabled:opacity-50"
+                        className="p-2 flex items-center justify-center bg-zinc-700 hover:bg-zinc-600 rounded-md text-white disabled:opacity-50"
                         title="왼쪽으로 확장"
                     >
                         <ArrowLeftIcon className="w-5 h-5" />
@@ -534,7 +527,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     <button
                         onClick={handleSmartFill}
                         disabled={isLoading}
-                        className="p-2 flex items-center justify-center bg-amber-600 hover:bg-amber-500 rounded-md text-white disabled:opacity-50"
+                        className="p-2 flex items-center justify-center bg-zinc-700 hover:bg-zinc-600 rounded-md text-white disabled:opacity-50"
                         title="빈 공간 채우기 (블랙 영역)"
                     >
                         <ArrowsUpDownLeftRightIcon className="w-5 h-5" />
@@ -543,7 +536,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     <button 
                         onClick={() => handleDirectionalOutpaint('right')}
                         disabled={isLoading}
-                        className="p-2 flex items-center justify-center bg-stone-700 hover:bg-stone-600 rounded-md text-white disabled:opacity-50"
+                        className="p-2 flex items-center justify-center bg-zinc-700 hover:bg-zinc-600 rounded-md text-white disabled:opacity-50"
                         title="오른쪽으로 확장"
                     >
                         <ChevronRightIcon className="w-5 h-5" />
@@ -553,14 +546,14 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                     <button 
                         onClick={() => handleDirectionalOutpaint('down')}
                         disabled={isLoading}
-                        className="p-2 flex items-center justify-center bg-stone-700 hover:bg-stone-600 rounded-md text-white disabled:opacity-50"
+                        className="p-2 flex items-center justify-center bg-zinc-700 hover:bg-zinc-600 rounded-md text-white disabled:opacity-50"
                         title="아래로 확장"
                     >
                         <ArrowDownIcon className="w-5 h-5" />
                     </button>
                     <div />
                  </div>
-                 <p className="text-[10px] text-stone-400 text-center">방향을 선택하여 이미지를 확장하거나<br/>가운데 버튼으로 검은 영역(줌아웃)을 채우세요.</p>
+                 <p className="text-[10px] text-zinc-400 text-center">방향을 선택하여 이미지를 확장하거나<br/>가운데 버튼으로 검은 영역(줌아웃)을 채우세요.</p>
             </ToolSection>
 
             <ToolSection title="샷 변경">
@@ -603,7 +596,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
               )}
               <div
                   ref={containerRef}
-                  className="w-full h-full bg-stone-900/50 overflow-hidden relative shadow-lg rounded-md"
+                  className="w-full h-full bg-zinc-900/50 overflow-hidden relative shadow-lg rounded-md"
                   onWheel={handleWheel}
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
@@ -629,19 +622,19 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
           </div>
           
           {/* Right Sidebar (History) */}
-          <div className="w-[240px] p-4 overflow-y-auto space-y-3 bg-stone-800/50 border-l border-stone-700 flex-shrink-0">
-            <h3 className="font-semibold text-stone-200 mb-2">작업 내역</h3>
+          <div className="w-[240px] p-4 overflow-y-auto space-y-3 bg-zinc-800/50 border-l border-zinc-700 flex-shrink-0">
+            <h3 className="font-semibold text-zinc-200 mb-2">작업 내역</h3>
             {history.map((url, index) => (
                 <div key={index} className="relative flex-shrink-0 group">
                     <img
                         src={url}
                         alt={`History ${index}`}
                         onClick={() => handleHistoryClick(index)}
-                        className={`w-full aspect-square object-cover rounded-md cursor-pointer border-2 transition-all ${imageSrc === url ? 'border-orange-500 scale-105' : 'border-stone-700 hover:border-stone-500'}`}
+                        className={`w-full aspect-square object-cover rounded-md cursor-pointer border-2 transition-all ${imageSrc === url ? 'border-orange-500 scale-105' : 'border-zinc-700 hover:border-zinc-500'}`}
                     />
                     <span className="absolute bottom-1 right-1 text-xs font-bold text-white bg-black/50 px-1.5 py-0.5 rounded">{index + 1}</span>
                     {index > 0 && (
-                        <button onClick={() => handleHistoryClick(index-1)} className="absolute top-1 right-1 p-1 bg-stone-800/70 rounded-full opacity-0 group-hover:opacity-100" title="이 버전으로 되돌리기">
+                        <button onClick={() => handleHistoryClick(index-1)} className="absolute top-1 right-1 p-1 bg-zinc-800/70 rounded-full opacity-0 group-hover:opacity-100" title="이 버전으로 되돌리기">
                             <UndoIcon className="w-4 h-4 text-white"/>
                         </button>
                     )}

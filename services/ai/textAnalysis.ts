@@ -1,164 +1,427 @@
+// services/ai/textAnalysis.ts — 텍스트 분석 함수
+// geminiService.ts에서 분리됨. 파이프라인/수정/포맷은 별도 파일로 재분리.
 
-import { Modality } from "@google/genai";
-import { CharacterDescription, Gender, Scene, Cut, EditableScene, EditableCut } from '../../types';
-import {
-    MODELS,
-    SFW_SYSTEM_INSTRUCTION,
-    SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-    SEMANTIC_LINE_BREAK_SYSTEM_INSTRUCTION,
-    createGeminiClient,
-    dataUrlToBlob,
-    blobToBase64,
-    getResponseText,
-    getTokenCountFromResponse,
-    parseJsonResponse,
-    analyzeStoryContext,
-} from './aiCore';
+import { CharacterDescription, Scene, Cut, Gender, EditableScene, EditableCut, EnrichedBeat } from '../../types';
+import { callTextModel, callTextModelStream, callVisionTextModel, parseJsonResponse, SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, SFW_SYSTEM_INSTRUCTION, dataUrlToBlob, blobToBase64 } from './aiCore';
 
-// ─── analyzeHairStyle ─────────────────────────────────────────────────────────
 export const analyzeHairStyle = async (imageDataUrl: string, characterName: string, seed?: number): Promise<{ hairDescription: string, facialFeatures: string, tokenCount: number }> => {
-    const ai = await createGeminiClient();
     const { blob, mimeType } = await dataUrlToBlob(imageDataUrl);
     const imageBase64 = await blobToBase64(blob);
 
     const prompt = `
-    # Role: Character Visual DNA Extractor
-    # Task: Analyze the hairstyle of the character in the image and provide a VERY MINIMAL English description.
+# Role: Character Visual DNA Extractor (Style-Independent)
+# Task: Extract ONLY the features that must remain consistent across different art styles.
+# DO NOT describe art style, body proportions, face shape, or eye size — these change with art style.
 
-    # CRITICAL RULES (IDENTITY PRESERVATION):
-    1. Focus ONLY on physical features of the hair: Color, simple length, shape, and ANY accessories like ribbons or pins.
-    2. Example: "short black hair", "long pink ponytail with a white ribbon".
-    3. Max 4-6 words. ABSOLUTELY NO stylistic descriptions like "beautiful", "manga style".
-    4. Format: A single phrase. No full sentences.
+Analyze this character image and return JSON:
 
-    Character Name: ${characterName}
-    `;
+{
+  "hair": "Detailed hair description: color with HEX code, cut type (bob/ponytail/pixie/etc), length, bangs style, texture (straight/wavy/curly), and ANY hair accessories (ribbons, pins, clips) with their color and position. Example: 'Chin-length black (#1A1A2E) bob, blunt cut, side-swept bangs covering right eyebrow, straight texture, small red hairpin on left side above ear'",
+  "colorPalette": {
+    "hair": "#hexcode",
+    "eyes": "#hexcode",
+    "skin": "#hexcode"
+  },
+  "distinctiveMarks": "Comma-separated list of: moles (with position), glasses (shape+color), scars, piercings, freckles, birthmarks, tattoos. Write 'none' if no distinctive marks."
+}
 
-    const response = await ai.models.generateContent({
-        model: MODELS.VISION,
-        contents: {
-            parts: [
-                { inlineData: { mimeType, data: imageBase64 } },
-                { text: prompt }
-            ]
-        },
-        config: {
-            systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-        }
-    });
+CRITICAL RULES:
+1. Hair description: 15-30 words. Include HEX color code. Be specific about cut and accessories.
+2. HEX codes: Extract from the LARGEST AREA of base color, NOT from highlights or light reflections.
+3. Distinctive marks: Be precise about POSITION (left/right, above/below).
+4. DO NOT mention: art style, body type, face shape, eye size, proportions, clothing.
+5. Respond with ONLY the JSON object. No markdown, no explanation.
+6. ANIME/CHIBI COLOR RULES: In anime, chibi, or cartoon-style images, blue/purple highlights on dark hair are artistic convention for lighting — NOT the actual hair color. Ignore these highlights entirely.
+7. BLACK vs DARK BROWN: If the hair appears very dark with no clearly visible brown tone, classify as black (#1A1A2E or similar). Only use "dark brown" when the brown tone is clearly and obviously visible across the main hair area, not just in highlights or edges.
+8. HIGHLIGHT AWARENESS: Glow effects, sparkle overlays, and rim lighting can make black hair appear brown or warm-toned. Always judge color from the shadowed/mid-tone areas of the hair, not the brightest spots.
 
-    const tokenCount = getTokenCountFromResponse(response);
-    const hairDescription = getResponseText(response, 'analyzeHairStyle');
+Character Name: ${characterName}
+`;
 
-    return {
-        hairDescription: hairDescription,
-        facialFeatures: 'Preserve facial visage',
-        tokenCount
-    };
+    const result = await callVisionTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, prompt, imageBase64, mimeType, { seed });
+
+    try {
+        const parsed = JSON.parse(result.text.replace(/```json\n?|```/g, '').trim());
+        const hairDesc = parsed.hair || 'Standard hairstyle';
+        const palette = parsed.colorPalette || {};
+        const marks = parsed.distinctiveMarks || 'none';
+
+        const colorInfo = palette.hair ? `Hair:${palette.hair} Eyes:${palette.eyes || 'N/A'} Skin:${palette.skin || 'N/A'}` : '';
+        const featuresStr = marks !== 'none' ? `${colorInfo}. Distinctive: ${marks}` : colorInfo;
+
+        return {
+            hairDescription: hairDesc,
+            facialFeatures: featuresStr || 'Match reference image facial features exactly',
+            tokenCount: result.tokenCount
+        };
+    } catch {
+        return {
+            hairDescription: result.text.trim().substring(0, 200),
+            facialFeatures: 'Match reference image facial features exactly',
+            tokenCount: result.tokenCount
+        };
+    }
 };
+
 
 export const analyzeCharacterVisualDNA = analyzeHairStyle;
 
-// ─── enrichScriptWithDirections ───────────────────────────────────────────────
-export const enrichScriptWithDirections = async (script: string, seed?: number, artStyle: string = 'normal', onProgress?: (textLength: number) => void): Promise<{ enrichedScript: string, tokenCount: number }> => {
-    const ai = await createGeminiClient();
+// [NEW] Helper function to analyze global story context
+async function analyzeStoryContext(script: string, seed?: number): Promise<{ context: string, tokenCount: number }> {
+    try {
+        const prompt = `
+        # Role: Senior Story Editor / Narrative Consultant
+        # Task: Analyze the provided script to extract the "Global Narrative Context" for a visual director.
+        # Output Format: A concise summary (Korean) covering:
+        1. **Core Theme & Tone** (e.g., Melancholic Romance, High-Octane Action, Noir Thriller)
+        2. **Key Narrative Arc** (Beginning -> Climax -> Ending flow)
+        3. **Dominant Emotions** (The overarching emotional journey)
+        4. **Visual Key** (Keywords for lighting, color palette, and atmosphere)
 
-    // [Step 1] Analyze Global Context first
-    const { context: storyContext, tokenCount: contextTokenCount } = await analyzeStoryContext(script, seed);
+        This summary will be used to ensure every individual cut aligns with the bigger picture.
 
-    let styleStrategy = "";
+        # Script:
+        \`\`\`
+        ${script}
+        \`\`\`
+        `;
 
-    if (artStyle === 'moe' || artStyle === 'dalle-chibi') {
-        styleStrategy = `
-### 🎀 [스타일 가이드: 모에/치비]
-1. **표정 연출:** "눈물이 쏟아짐(ㅠㅠ)", "눈이 반짝반짝 빛남(✨)", "볼을 빵빵하게 부풀림(뿌우)".
-2. **행동 묘사:** "두 주먹을 꽉 쥐고 파닥거림", "총총걸음으로 다가옴", "고개를 갸웃거리며 물음표 띄움".
+        const result = await callTextModel('You are a senior story editor and narrative consultant.', prompt, {
+            temperature: 0.7,
+            seed,
+        });
+
+        return { context: result.text, tokenCount: result.tokenCount };
+    } catch (error) {
+        console.warn("analyzeStoryContext failed, using fallback:", error);
+        return {
+            context: "전체적인 맥락을 분석하는 중 오류가 발생했습니다. 개별 컷의 나레이션에 집중하여 연출을 진행합니다.",
+            tokenCount: 0
+        };
+    }
+}
+
+
+export const enrichScriptWithDirections = async (
+    script: string,
+    characterProfilesString?: string,
+    locationRegistry?: string[],
+    logline?: string,
+    contentFormat?: 'ssul-shorts' | 'webtoon' | 'anime',  // ★ 콘텐츠 포맷
+    seed?: number,
+    onProgress?: (textLength: number) => void
+): Promise<{ enrichedScript: string, enrichedBeats: EnrichedBeat[], tokenCount: number }> => {
+
+    // ── 모드 자동 감지 ──
+    const isDetailed = /\(등장인물:|이미지프롬프트:|연출의도:\)/i.test(script);
+
+    const format = contentFormat || 'ssul-shorts';
+
+    const SSUL_SHORTS_MISSION = `
+# 썰쇼츠 연출 감독 (DoReMiSsul Director)
+
+## 미션
+유튜브 쇼츠 60초 안에:
+- 3초 안에 시청자를 잡고 (Hook)
+- 감정을 에스컬레이트하며 이탈을 막고 (Escalate)
+- 엔딩에서 좋아요/공유/댓글을 유도한다 (Punch Out)
+
+## 타겟
+20~50대 남성. 공감 포인트: 연애, 직장, 가족, 자존심, 허세와 현실의 갭.
+톤: 과도한 소녀 감성 ❌ → 쿨하고 건조한 나레이션. 담담하게 깔다가 한방.
+반응 유도: "아 나도 저래ㅋㅋ" / "와 사이다" / "미쳤다 진짜"
+
+## 표현 수위
+만화적 과장이 기본. 과장된 리액션, 만화 기호(땀방울, 느낌표, 물음표), 빠른 감정 전환.
+모든 표정/포즈는 "유튜브 썸네일에 쓸 수 있을 정도로" 강하고 명확해야 함.
 `;
-    } else if (artStyle === 'kyoto') {
-        styleStrategy = `
-### ✨ [스타일 가이드: 교토 애니메이션 (Vivid)]
-1. **빛과 감정의 동기화:** 인물의 감정이 고조될 때 '역광(Backlight)'이나 '렌즈 플레어', '보케(Bokeh)' 효과를 적극적으로 지시하십시오.
-2. **섬세한 제스처:** "머리카락을 귀 뒤로 넘김", "바람에 치마가 살짝 날림", "눈동자가 흔들림" 등 미세한 움직임을 포착하십시오.
-3. **배경 강조:** 인물의 심리 상태를 대변하는 '청량한 하늘', '반짝이는 수면', '흩날리는 벚꽃' 등의 배경 요소를 컷에 포함시키십시오.
+
+    const WEBTOON_MISSION = `
+# 웹툰 연출 감독 (DoReMiSsul Director — Webtoon Mode)
+
+## 미션
+세로스크롤 웹툰의 1화분을 연출:
+- 첫 3컷 안에 상황을 세팅하고
+- 대사 중심으로 캐릭터 간 텐션을 빌드업하며
+- 마지막 컷에서 다음화가 궁금하게 끊는다
+
+## 타겟
+10~40대 남녀. 장르에 따라 유동적.
+톤: 캐릭터 대사가 주도. 나레이션은 장면 전환/내면 독백에만.
+
+## 표현 수위
+미묘한 표정 변화가 핵심. 눈, 입술, 손의 미세한 연기.
+과장된 만화 기호는 코미디 장면에만 선별적으로.
+클로즈업이 많고, 배경은 감정에 집중하기 위해 단순화.
+대사 없는 무음 컷의 임팩트가 가장 중요.
+`;
+
+    const ANIME_MISSION = `
+# 애니메이션 연출 감독 (DoReMiSsul Director — Anime Mode)
+
+## 미션
+극장판 애니메이션 품질의 시퀀스를 연출:
+- 환경과 분위기 설정에 시간을 투자하고
+- 캐릭터의 감정을 대사보다 "보이는 공기"로 전달하며
+- 매 컷이 스크린샷으로 쓸 수 있는 작화 품질
+
+## 타겟
+애니메이션 팬. 작화/연출 감상이 핵심.
+톤: 시네마틱. 빛, 바람, 공기, 소리가 감정을 전달.
+
+## 표현 수위
+미세한 표정과 환경 연출이 핵심. 바람에 날리는 머리카락, 창문 밖 빛의 변화.
+만화 기호 최소화 (서늘한 시선만으로 긴장을 표현).
+establish 컷(환경/장소)을 적극 활용. 배경이 캐릭터만큼 중요.
+카메라 무브먼트 지시가 상세해야 함 (트래킹, 패닝, 줌인 속도).
+`;
+
+    const missionStatement = format === 'webtoon' ? WEBTOON_MISSION
+        : format === 'anime' ? ANIME_MISSION
+        : SSUL_SHORTS_MISSION;
+
+    const directionGrammar = `
+## 연출 문법 4원칙
+
+1. 보여주고 설명해서 확인사살 (Show → Tell → Kill)
+   - 나레이션 전에 시각으로 먼저 보여줌 (인서트/리액션 삽입 지시)
+   - 나레이션이 뒤에서 설명하며 확인사살
+   - 충격 대사 직전에 무음 리액션으로 뜸 들이기
+   예: [인서트: 남자들 시선 2컷] → "남자들이 노려봐" → [인서트: 배 클로즈업] → "뱃살이 좀 있고"
+
+2. 감정 롤러코스터 (Emotional Whiplash)
+   - 연속 컷의 감정 낙차를 의도적으로 극대화
+   - 자랑 직후 민망, 행복 직후 충격
+   - 갭이 클수록 웃기거나 충격적
+   예: 여주 자신만만 머리 넘기기 [Sparkling] → 바로 남주 배 클로즈업 [Gloom]
+
+3. 3초 낚시, 떡밥, 감정 빵 엔딩 (Hook → Bait → Punch Out)
+   오프닝: 첫 1~2줄에 가장 자극적/궁금한 장면 배치 (쇼츠 3초 룰)
+   떡밥: 씬 전환 시 불안 요소 하나 남기기
+   엔딩: 썰의 핵심 감정을 가장 강하게 터뜨리며 끝냄
+   - 코믹: 가장 웃긴 장면 마지막 + 과장 극대화
+   - 감동: 가장 애틋한 순간 + 슬로우 클로즈업
+   - 사이다: 통쾌한 한마디 + 로우앵글 파워샷
+   핵심: 마지막 표정이 영상의 여운 = 좋아요/댓글 유도
+
+4. 숨 고르기 (Tension Rhythm)
+   - 긴장: 짧은 컷 연속 (클로즈업, 빠른 전환)
+   - 이완: 긴 컷 (와이드, 호흡)
+   - 시간 점프: 인서트 몽타주 2~3컷
+   - 클라이맥스 직전 가장 짧은 컷 연사 → 정적 1컷 브레이크
+`;
+
+    const characterContext = characterProfilesString
+        ? `\n## 캐릭터 의상 데이터 (참조용 — 의상 키워드 활용)\n\`\`\`json\n${characterProfilesString}\n\`\`\``
+        : '';
+
+    const locationContext = (locationRegistry && locationRegistry.length > 0)
+        ? `\n## 장소 레지스트리 (참조용)\n연출 설계 시 장소명은 다음 목록을 그대로 사용하라:\n${locationRegistry.join(', ')}\n`
+        : '';
+
+    const loglineContext = logline?.trim() ? `\n## 이 썰의 핵심: ${logline}\n` : '';
+
+    // ★ 포맷별 emotion 가이드
+    const emotionGuide = format === 'webtoon' ? `
+- emotion: 감정 비트 — 웹툰 감정 목록에서 선택:
+  기본: "일상", "긴장", "충격", "분노", "슬픔", "기쁨", "Comedy"
+  미묘한 연기: "미세떨림", "서늘", "잔잔한분노", "체념", "의미심장", "씁쓸"
+  ★ 웹툰에서는 과장된 감정("Sparkling", "Shock")보다 미묘한 감정이 기본.
+  ★ 모든 emotion은 direction에 구체적 표정 묘사를 동반:
+    ❌ "슬픔" + direction: "슬픈 표정" (추상적)
+    ✅ "슬픔" + direction: "고개 숙인, 입술 살짝 깨문, 눈 밑 그림자, 클로즈업" (물리적)
+` : format === 'anime' ? `
+- emotion: 감정 비트 — 애니메이션 감정 목록에서 선택:
+  기본: "일상", "Tension", "Shock", "Relief", "Comedy", "Gloom"
+  시네마틱: "여운", "공기감", "적막", "온기", "서늘한빛", "황혼", "감정급반전"
+  ★ 애니메이션에서는 감정을 "빛/공기/환경"으로 표현:
+    "여운" → direction에 "석양빛, 느린 페이드, 바람에 날리는 머리카락"
+    "공기감" → direction에 "먼지 입자 보이는 역광, 정적, 깊은 피사계심도"
+    "적막" → direction에 "와이드샷, 캐릭터 작게, 넓은 배경, 차가운 색온도"
+  ★ 만화 기호(땀방울, 느낌표) 최소화. 대신 조명/카메라/환경으로 감정 전달.
+` : `
+- emotion: 감정 비트 — 아래 목록에서 선택. ★ 각 감정의 "시각 연기"를 direction에 반드시 반영하라.
+  기본: "Sparkling", "Gloom", "Shock", "Comedy", "Tension", "Relief", "일상"
+  캐릭터 연기 (★ 쿨/도발적 캐릭터 전용 — Sparkling 대신 사용):
+    "능청" → direction에 "과장된 한쪽 smirk, 턱 살짝 올린, 반쯤 감은 눈, 자신만만한 자세" 포함
+    "장난/지배" → direction에 "능글맞은 표정, 턱 까딱, 명령하는 손짓, 로우앵글 파워샷" 포함
+    "단호" → direction에 "날카로운 눈빛, 팔짱, 입 꾹 다문, 정면 응시" 포함
+    "추궁" → direction에 "눈 가늘게 뜬, 고개 살짝 숙여 올려다보는, 서늘한 시선" 포함
+    "소유욕" → direction에 "소유하듯 어깨에 손, 영역 표시하는 자세, 도발적 미소" 포함
+  공통: "체념", "감정급반전"
+  ★ "Sparkling" 사용 기준: 순수한 설렘, 기쁨, 감탄에만. 쿨/도발적 캐릭터가 "잘해주는" 장면 ≠ Sparkling.
+  ★ 모든 emotion은 direction에 최소 1개의 구체적 표정/포즈 묘사를 동반해야 함.
+    ❌ direction: "능청스러운 톤" (추상적 — 이미지 AI가 해석 못함)
+    ✅ direction: "한쪽 입꼬리만 올린 smirk, 턱 살짝 들어올린, 클로즈업" (물리적 — 이미지 AI가 그림)
+`;
+
+    // ★ Phase 12: JSON 구조화 출력 공통 형식
+    const jsonOutputFormat = `
+## [중요] 출력 형식 — JSON 배열 (반드시 준수)
+아래 형식의 JSON 배열만 출력하라. 설명이나 마크다운 코드펜스 없이 순수 JSON만.
+
+각 항목의 필드:
+- id: 1부터 시작하는 순번 (number)
+- type: "narration" (원본 대사) | "insert" (인서트컷) | "reaction" (리액션컷)
+- text: narration이면 원본 대사 그대로, insert/reaction이면 시각 묘사 (한국어)
+- beat: 구조 태그 — "훅/설정", "Show→Tell", "Whiplash→감정", "Bait/떡밥", "PunchOut", "브레이크", "설정" 등
+${emotionGuide}
+- direction: 연출 노트 — 앵글, FX, 소품, 구체적 표정/포즈 묘사 (없으면 빈 문자열)
+  ★ insert 컷(사물/화면만)에는 반드시 "NO characters" 포함
+  ★ 캐릭터가 쿨/도발적 성격이면 "NOT warm, NOT gentle" 네거티브 추가
+  ★ 당황/놀람이지만 빨개지면 안 되는 경우 "NO blushing" 추가
+
+### direction 작성의 철학 — "감정을 쓰지 말고 물리적 묘사를 써라"
+AI 이미지 생성 모델은 "도도한", "슬픈", "자신만만한" 같은 추상 감정을 이해하지 못한다.
+반드시 신체 동작, 표정 근육, 자세, 소품, 만화 기호로 변환해서 기술하라.
+
+❌ 나쁜 예 (추상적 — 이미지 AI가 해석 못함):
+- "당황한 표정" / "서늘한 시선" / "능청스러운 톤" / "쿨한 표정"
+
+✅ 좋은 예 (물리적 — 이미지 AI가 그대로 그림):
+- "눈을 최대한 크게 뜨고 입이 벌어진 채 양손을 벌리고 땀방울이 사방으로 튀는"
+- "눈을 반쯤 감고 한쪽 입꼬리만 올린 smirk, 턱을 살짝 들어올리고 팔짱 낀 자세"
+- "눈썹을 찌푸리고 입을 꾹 다물고 팔짱, 정면 응시, ゴゴゴ menacing aura"
+- "고개를 푹 숙이고 어깨를 축 늘어뜨린, 머리 위에 먹구름 만화 효과"
+
+### 만화 기호(만푸) 적극 활용 — 썰쇼츠의 핵심 표현 도구:
+- 놀람: !, ?, 땀방울, 눈 하얗게, 소용돌이 눈
+- 분노: 혈관 마크, ゴゴゴ, 어두운 오라, 눈 빨갛게
+- 당황: 땀방울 폭발, 세로줄, 식은땀, ???? 물음표
+- 자신만만: 반짝이, 전구, 파워 포즈 후광
+- 슬픔/체념: 먹구름, 영혼 빠져나가는 효과, 파란 세로선
+- 코미디: 소용돌이 눈, 과장된 입 O자, $$$ 기호, 넘어지는 포즈
+
+예시:
+[
+  { "id": 1, "type": "narration", "beat": "훅/설정", "text": "남친이랑 데이트를 하면", "emotion": "일상", "direction": "미디엄 트래킹샷, 번화가 네온" },
+  { "id": 2, "type": "insert", "beat": "Show→Tell", "text": "지나가는 남자1 시선 — 여주를 훑어보는 눈", "emotion": "Tension", "direction": "클로즈업, 시선 추적" },
+  { "id": 3, "type": "narration", "beat": "Show→Tell", "text": "남자들이 죄다 쟤를 노려봐", "emotion": "Tension", "direction": "카메라 여주 POV→주변 남자들" },
+  { "id": 4, "type": "narration", "beat": "Sparkling", "text": "내가 좀 이쁜 편이거든", "emotion": "자신만만", "direction": "로우앵글, 머리 넘기기, Sparkling Aura" },
+  { "id": 5, "type": "insert", "beat": "Whiplash→Gloom", "text": "남친 배 클로즈업", "emotion": "감정급반전", "direction": "클로즈업, Vertical Gloom Lines" },
+  { "id": 6, "type": "narration", "beat": "PunchOut", "text": "근데 그게 좋아", "emotion": "반전감동", "direction": "남주 표정 클로즈업, Soft Bloom" }
+]
+`;
+
+    let modePrompt: string;
+
+    if (isDetailed) {
+        modePrompt = `
+## 모드: 상세대본 검수 (Review & Enhance)
+이미 연출 태그가 포함된 대본입니다.
+4원칙 기준으로 검수하고 부족한 부분만 보완하십시오.
+
+### 검수 체크리스트:
+1. [Hook 검사] 첫 1~2줄이 충분히 자극적/궁금한가?
+2. [Whiplash 검사] 연속 항목 간 감정 대비가 충분한가?
+3. [Punch Out 검사] 엔딩이 감정을 강하게 터뜨리는가?
+4. [Rhythm 검사] 긴장-이완 리듬이 단조롭지 않은가?
+
+### 규칙:
+- 잘 된 부분은 절대 건드리지 않음
+- 원본 대사 텍스트(text 필드)는 단 한 글자도 수정하지 마십시오
+- 보완이 필요하면 beat/emotion/direction만 보강하거나, 새 insert/reaction 항목을 삽입
+- 인서트/리액션은 전체의 30% 이하로 유지
 `;
     } else {
-        styleStrategy = `
-### 💋 [스타일 가이드: 로맨스 웹툰]
-1. **신체 라인 강조 (SFW):** 가녀린 목선, 깊게 패인 쇄골 라인, 잘록한 허리와 골반으로 이어지는 S라인.
-2. **플러팅 제스처:** 머리카락을 귀 뒤로 넘기기, 상체를 살짝 숙여 눈 맞추기, 입술을 살짝 깨물기.
+        modePrompt = `
+## 모드: 기본대본 → 상세 연출 대본 변환 (Full Direction)
+뼈대만 있는 대본입니다. 4원칙을 적용해서 구조화 연출 대본으로 변환하십시오.
+
+### 변환 규칙:
+1. 각 원본 대사 줄마다 beat/emotion/direction을 채워서 narration 항목으로 생성
+2. 필요한 곳에 insert/reaction 항목을 새로 삽입
+3. 원본 대사 텍스트는 단 한 글자도 수정하지 마십시오
+4. 메타데이터 줄('(', '['로 시작하는 장소/인물 정보)은 무시하고 출력에 포함하지 마라
+5. 인서트/리액션은 전체의 30% 이하로 유지
+6. 60초 쇼츠 기준 총 항목 수가 과도하지 않게 조절 (원본 줄 수 × 1.5 이하)
 `;
     }
 
+    // ★ 포맷별 추가 규칙
+    const formatRules = format === 'webtoon' ? `
+### 웹툰 추가 규칙:
+- 대사가 스토리를 주도. 나레이션은 장면 전환과 내면 독백에만 사용
+- 대사 핑퐁 허용 (3연속 이상도 OK — 웹툰은 대사가 엔진)
+- 무음 reaction 컷을 감정 전환점에 적극 배치 (대사 없이 표정만으로 1컷)
+- 총 항목 수 제한 없음 (웹툰은 세로스크롤이라 분량 자유)
+` : format === 'anime' ? `
+### 애니메이션 추가 규칙:
+- establish 컷(환경/장소 와이드샷)을 장면 전환마다 반드시 삽입
+- insert 컷으로 환경 디테일(바람, 빛, 소품) 적극 활용
+- 클라이맥스 직전에 "정적" 브레이크 컷 필수 (무음 + 와이드)
+- direction에 카메라 무브먼트를 상세히 (트래킹 속도, 줌인 타이밍 등)
+- 인서트/리액션은 전체의 40% 이하로 유지
+- 총 항목 수: 원본 줄 수 × 2.5 이하
+` : `
+### direction 네거티브 규칙 (AI 이미지 생성용 — 필수):
+- insert 컷(사물/화면/소품만 보여주는 컷)의 direction에는 반드시 "NO characters" 포함
+- reaction 컷에서 캐릭터가 "넋나간/멍한/굳은" 표정이면 direction에 "NO blushing, NO open mouth, frozen expression" 포함
+- 쿨/도발적 캐릭터의 direction에는 "NOT warm, NOT gentle, NOT soft, smirk NOT smile" 포함
+- 당황하는 남성 캐릭터의 direction에는 "NO blushing, NO red cheeks" 포함
+
+### 캐릭터 감정 일관성 (★ 가장 중요):
+- 대본 첫 줄부터 마지막 줄까지 캐릭터의 emotion/direction 톤이 일관되어야 함
+- 특히 엔딩 PunchOut 구간에서 갑자기 "달콤한", "로맨틱한", "따뜻한" 톤으로 전환하지 마라
+- 쿨한 캐릭터는 엔딩에서도 쿨해야 함
+`;
+
+    modePrompt += formatRules;
+
     const prompt = `
-# Persona: 웹툰 총감독 및 각색가 (Script Doctor)
-당신은 대본의 '숨은 의미'를 파악하여 시각적 연출 지시문을 작성하는 전문가입니다.
+${missionStatement}
+${directionGrammar}
+${characterContext}
+${locationContext}
+${loglineContext}
+${modePrompt}
+${jsonOutputFormat}
 
-# [GLOBAL CONTEXT - MUST READ]
-The following is the overall context of the story. You MUST use this to ensure every cut contributes to the whole.
-${storyContext}
-
-# 핵심 미션:
-사용자가 입력한 대본의 행간을 읽어, 이를 시청자에게 강렬하게 전달할 수 있는 **[카메라 앵글, 상징적 소품, 웹툰 전용 효과]**를 설계하십시오.
-# 연출 원칙 (MANDATORY):
-1. **심리적 구도 자동화:**
- - 인물이 절망, 슬픔, 고립감을 느낄 때 -> 반드시 **'High Angle (부감)'**을 제안하여 인물을 초라하게 만드십시오.
- - 인물이 자신감, 위압감을 가질 때 -> **'Low Angle (앙금)'**을 제안하십시오.
-2. **스토리텔링 소품 (Symbolic Props):**
- - 대본에 언급된 금전적 가치나 상황적 아이러니를 소품으로 시각화하십시오. (예: "5만원 커피" -> "한 모금만 마신 비싼 커피잔과 덩그러니 남겨진 계산서")
-3. **웹툰 전용 효과 (Visual FX):**
- - 분위기에 따라 다음 중 하나를 반드시 선택하십시오: [Vertical Gloom Lines, Speed Lines, Soft Bloom, Sparkling Aura].
-# 규칙 (ABSOLUTE):
-- **1줄 1컷:** 원본 대본의 각 줄은 하나의 독립된 컷입니다.
-- **원본 불변:** 대본 텍스트는 단 한 글자도 수정하지 마십시오.
-- **형식:** "원본 문장 [앵글, 소품, 효과]" 형태로 출력하십시오.
-- **메타데이터 보존:** 만약 문장이 '(', '['로 시작하면 이는 메타데이터이므로 연출을 붙이지 말고 그대로 출력하십시오.
-${styleStrategy}
 # 원본 대본:
 \`\`\`
 ${script}
 \`\`\`
 `;
 
-    const responseStream = await ai.models.generateContentStream({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-            temperature: 0.7,
-        },
+    const systemInstruction = `You are the DoReMiSsul Director — a YouTube Shorts directing AI specialized in 썰(ssul/story) content.
+You MUST respond with a raw JSON array only. No markdown fences, no backticks, no explanation.
+Start with [ and end with ]. Every original narration line must appear in your output text field exactly as written.`;
+
+    const result = await callTextModel(systemInstruction, prompt, {
+        responseMimeType: 'application/json',
+        temperature: 0.7,
+        seed,
+        maxTokens: 16384,
     });
 
-    let enrichedScript = '';
-    let tokenCount = 0;
+    if (onProgress) onProgress(result.text.length);
 
-    for await (const chunk of responseStream) {
-        const c = chunk as any;
-        if (c.text) {
-            enrichedScript += c.text;
-            if (onProgress) {
-                onProgress(enrichedScript.length);
-            }
-        }
-        if (c.usageMetadata) {
-            tokenCount = c.usageMetadata.totalTokenCount;
-        }
-    }
+    // ★ JSON 파싱 + 안전 정규화
+    const raw = parseJsonResponse<EnrichedBeat[] | { beats: EnrichedBeat[] }>(result.text, 'enrichScriptWithDirections');
+    const beats: EnrichedBeat[] = (Array.isArray(raw) ? raw : (raw as any).beats || []).map((b: any, i: number) => ({
+        id: b.id ?? (i + 1),
+        type: (['narration', 'insert', 'reaction'].includes(b.type) ? b.type : 'narration') as EnrichedBeat['type'],
+        text: String(b.text || ''),
+        beat: String(b.beat || ''),
+        emotion: String(b.emotion || ''),
+        direction: String(b.direction || ''),
+    }));
 
-    return {
-        enrichedScript: enrichedScript.trim(),
-        tokenCount: tokenCount + contextTokenCount,
-    };
+    // 레거시 호환: enrichedScript (텍스트 형태)
+    const enrichedScript = beats.map(b => {
+        const prefix = b.type === 'insert' ? `[인서트: ${b.text}]` : b.type === 'reaction' ? `[리액션: ${b.text}]` : `[${b.beat}] ${b.text}`;
+        return `${prefix} [${b.emotion}]${b.direction ? ` [연출: ${b.direction}]` : ''}`;
+    }).join('\n');
+
+    return { enrichedScript, enrichedBeats: beats, tokenCount: result.tokenCount };
 };
 
-// ─── regenerateSingleCutDraft ─────────────────────────────────────────────────
+
 export const regenerateSingleCutDraft = async (
     cut: EditableCut,
     gender: Gender,
     seed?: number
 ): Promise<Partial<EditableCut> & { tokenCount: number }> => {
-    const ai = await createGeminiClient();
     const prompt = `
 # Role: YouTube Shorts Visual Director (Cinematographer)
 # Task: Propose a DIFFERENT and SPECIFIC visual direction for this cut.
@@ -170,48 +433,22 @@ export const regenerateSingleCutDraft = async (
 {
 "directorialIntent": "string (Specific Visual Direction: [Angle/Lighting] + Action. NO abstract emotions)",
 "sceneDescription": "string (Detailed Korean visual description including camera and lighting)",
-"characterPose": "string (New dynamic pose with body weight shift)",
+"characterPose": "string (Specific body position: describe limb placement, head direction, weight center, hand position. Match the scene mood.)",
 "characterEmotionAndExpression": "string (New exaggerated facial expression)",
 "otherNotes": "string (New camera angle/technique)"
 }
 `;
-
-    const response = await ai.models.generateContent({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-            temperature: 0.8,
-        },
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, prompt, {
+        responseMimeType: 'application/json',
+        seed,
+        temperature: 0.8,
     });
-
-    const tokenCount = getTokenCountFromResponse(response);
-    const data = parseJsonResponse<Partial<EditableCut>>(response, 'regenerateSingleCutDraft');
-    return { ...data, tokenCount };
+    const data = parseJsonResponse<Partial<EditableCut>>(result.text, 'regenerateSingleCutDraft');
+    return { ...data, tokenCount: result.tokenCount };
 };
 
-// ─── analyzeCharacters ────────────────────────────────────────────────────────
-export const analyzeCharacters = async (script: string, gender: Gender, artStylePrompt: string, selectedArtStyle: string, isDetailedScript: boolean = false, seed?: number, onProgress?: (textLength: number) => void): Promise<{ characters: { [key: string]: CharacterDescription }, firstScenePrompt: string, title: string, tokenCount: number }> => {
 
-    const ai = await createGeminiClient();
-
-    let styleContext = "";
-    if (selectedArtStyle === 'kyoto') {
-        styleContext = `
-# [ART STYLE CONSTRAINT: Kyoto Animation / Vivid]
-- Character descriptions must emphasize "Crystal Clear Eyes", "Delicate Hair Strands", and "Soft, Emotional Expressions".
-- Avoid rugged or gritty descriptions. Focus on "Beautiful", "Clean", and "High-Detail" visuals.
-- Base appearance should mention: "High-quality anime style, detailed light reflections in eyes".
-`;
-    } else if (selectedArtStyle === 'moe' || selectedArtStyle === 'dalle-chibi') {
-        styleContext = `
-# [ART STYLE CONSTRAINT: Moe / Chibi]
-- Character descriptions should focus on "Cute", "Round", and "Simple" features.
-- Emphasize distinct traits that translate well to SD (Super Deformed) proportions (Large eyes, small body).
-`;
-    }
+export const analyzeCharacters = async (script: string, gender: Gender, isDetailedScript: boolean = false, seed?: number, onProgress?: (textLength: number) => void): Promise<{ characters: { [key: string]: CharacterDescription }, firstScenePrompt: string, title: string, tokenCount: number }> => {
 
     let sceneAnalysisInstruction = `
 3. Design detailed outfits for EVERY UNIQUE SCENE/LOCATION identified in the script.
@@ -237,7 +474,6 @@ Please analyze the following webtoon script.
 1. Identify ALL characters (Protagonists, Supporting roles).
 2. Create profiles for each identified character.
 ${sceneAnalysisInstruction}
-${styleContext}
 # IDENTITY PRESERVATION PROTOCOL (CRITICAL):
 - **OUTFIT STRING REUSE:** Once an outfit is defined for a character in a specific context (e.g., school uniform, military uniform), you MUST reuse the EXACT same detailed description string for every scene where they wear that outfit.
 - **DO NOT SUMMARIZE:** Never simplify "Navy blue school blazer with gold buttons" to "school uniform".
@@ -269,259 +505,131 @@ ${script}
 \`\`\`
 `;
 
-    // Use generateContentStream to avoid hanging and show progress
-    const responseStream = await ai.models.generateContentStream({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-        },
-    });
-
-    let fullText = '';
-    let tokenCount = 0;
-    let finishReason: string | undefined = undefined;
-
-    for await (const chunk of responseStream) {
-        const c = chunk as any;
-        if (c.text) {
-            fullText += c.text;
-            if (onProgress) {
-                onProgress(fullText.length);
-            }
-        }
-        if (c.usageMetadata) {
-            tokenCount = c.usageMetadata.totalTokenCount;
-        }
-        if (c.candidates && c.candidates[0] && c.candidates[0].finishReason) {
-            finishReason = c.candidates[0].finishReason;
-        }
-    }
-
-    // Mock response object for parseJsonResponse
-    const mockResponse: any = {
-        text: fullText,
-        candidates: [{
-            content: { parts: [{ text: fullText }] },
-            finishReason: finishReason || 'STOP'
-        }]
-    };
-
-    const parsedJson = parseJsonResponse<{ characters: { [key: string]: CharacterDescription }, firstScenePrompt: string, title: string }>(mockResponse, 'analyzeCharacters');
-
+    // Use Claude streaming for progress feedback
+    const result = await callTextModelStream(
+        SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nYou MUST respond with valid JSON only, no markdown fences.',
+        prompt,
+        onProgress,
+        { seed, responseMimeType: 'application/json', maxTokens: 16384 }
+    );
+    
+    const parsedJson = parseJsonResponse<{ characters: { [key: string]: CharacterDescription }, firstScenePrompt: string, title: string }>(result.text, 'analyzeCharacters');
+    
     return {
         characters: parsedJson.characters,
         firstScenePrompt: parsedJson.firstScenePrompt,
         title: parsedJson.title,
-        tokenCount,
+        tokenCount: result.tokenCount,
     };
 };
 
-// ─── generateTitleSuggestions ──────────────────────────────────────────────────
+
 export const generateTitleSuggestions = async (script: string, seed?: number): Promise<{ titles: string[], tokenCount: number }> => {
-    const ai = await createGeminiClient();
     const prompt = `Analyze the script and generate 3 catchy viral YouTube-style Korean titles. Output JSON: { "titles": ["...", "...", "..."] }. Script: ${script}`;
-    const response = await ai.models.generateContent({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            systemInstruction: SFW_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-        },
-    });
-    const tokenCount = getTokenCountFromResponse(response);
-    const parsedJson = parseJsonResponse<{ titles: string[] }>(response, 'generateTitleSuggestions');
-    return { titles: parsedJson.titles, tokenCount };
+    const result = await callTextModel(SFW_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    const parsedJson = parseJsonResponse<{ titles: string[] }>(result.text, 'generateTitleSuggestions');
+    return { titles: parsedJson.titles, tokenCount: result.tokenCount };
 };
 
-// ─── generateOutfitsForLocations ──────────────────────────────────────────────
+
+
 export const generateOutfitsForLocations = async (characterName: string, gender: Gender, signatureOutfitDescription: string, locations: string[], seed?: number): Promise<{ tokenCount: number, locationOutfits: { [location: string]: string } }> => {
-    const ai = await createGeminiClient();
-    const prompt = `Design detailed outfits for locations: ${locations.join(', ')}.
+    const prompt = `Design detailed outfits for locations: ${locations.join(', ')}. 
 # Requirements:
-1. Match the base style: ${signatureOutfitDescription}.
+1. Match the base style: ${signatureOutfitDescription}. 
 2. Include HEX codes for every item.
 3. Describe fabric textures and garment fit.
 4. ABSOLUTELY NO mention of facial expressions, poses, or emotions. Describe the OUTFIT only.
 5. **LITERAL CONSISTENCY:** Ensure the core elements of the uniform (blazer, tie, etc.) use the EXACT same words across all locations unless a change is logically required by the environment.
 6. **ENGLISH ONLY:** Return descriptions ONLY in English.
 7. Output JSON { "locationOutfits": { "Loc": "English description" } }`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SFW_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-
-    // Explicitly typing the response to match the single string structure
-    const result = parseJsonResponse<{ locationOutfits: { [location: string]: string } }>(response, 'generateOutfitsForLocations');
-
-    // Map to the expected structure of { korean, english } where both are English, to satisfy existing interfaces if needed,
-    // OR change the return type. Changing return type to simplify.
-    return { locationOutfits: result.locationOutfits, tokenCount: getTokenCountFromResponse(response) };
+    const result = await callTextModel(SFW_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    const parsed = parseJsonResponse<{ locationOutfits: { [location: string]: string } }>(result.text, 'generateOutfitsForLocations');
+    return { locationOutfits: parsed.locationOutfits, tokenCount: result.tokenCount };
 };
 
-// ─── regenerateOutfitDescription ──────────────────────────────────────────────
+
 export const regenerateOutfitDescription = async (originalDescription: string, userRequest: string, characterName: string, gender: 'male' | 'female', seed?: number): Promise<{ newDescription: string, tokenCount: number }> => {
-    const ai = await createGeminiClient();
-    const prompt = `Modify outfit. Original: ${originalDescription}, Request: ${userRequest}.
-Keep HEX codes and high physical detail. DO NOT include emotions or expressions.
+    const prompt = `Modify outfit. Original: ${originalDescription}, Request: ${userRequest}. 
+Keep HEX codes and high physical detail. DO NOT include emotions or expressions. 
 Output JSON { "newDescription": "..." } (English Only)`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SFW_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-    const result = parseJsonResponse<{ newDescription: string; }>(response, 'regenerateOutfitDescription');
-    return { newDescription: result.newDescription, tokenCount: getTokenCountFromResponse(response) };
+    const result = await callTextModel(SFW_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    const parsed = parseJsonResponse<{ newDescription: string; }>(result.text, 'regenerateOutfitDescription');
+    return { newDescription: parsed.newDescription, tokenCount: result.tokenCount };
 };
 
-// ─── regenerateImagePrompts ───────────────────────────────────────────────────
+
+
+
 export const regenerateImagePrompts = async (params: { narration: string; sceneSettingPrompt: string; originalImagePrompt: string; characters?: string[]; cameraAngle?: string; }, seed?: number): Promise<{ koreanImagePrompt: string; imagePrompt: string; tokenCount: number; }> => {
-    const ai = await createGeminiClient();
     const prompt = `Create high-quality AI prompt. JSON { "koreanImagePrompt": "...", "imagePrompt": "..." }. Context: ${params.narration}`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-    return { ...parseJsonResponse<{ koreanImagePrompt: string; imagePrompt: string; }>(response, 'regenerateImagePrompts'), tokenCount: getTokenCountFromResponse(response) };
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    return { ...parseJsonResponse<{ koreanImagePrompt: string; imagePrompt: string; }>(result.text, 'regenerateImagePrompts'), tokenCount: result.tokenCount };
 };
 
-// ─── regenerateSceneFromModification ──────────────────────────────────────────
-export const regenerateSceneFromModification = async (currentCut: Cut, elementName: string, elementValue: string, seed?: number): Promise<{ newSceneDescription: string, tokenCount: number }> => {
-    const ai = await createGeminiClient();
-    const prompt = `Regenerate sceneDescription. User changed ${elementName} to "${elementValue}". Context: ${currentCut.location}, ${currentCut.narration}. Focus on physical composition. Output JSON { "newSceneDescription": "..." }`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-    return { ...parseJsonResponse<{ newSceneDescription: string }>(response, 'regenerateSceneFromModification'), tokenCount: getTokenCountFromResponse(response) };
-};
 
-// ─── extractFieldsFromSceneDescription ────────────────────────────────────────
-export const extractFieldsFromSceneDescription = async (newSceneDescription: string, currentCut: Cut, seed?: number): Promise<{ characterPose: string; characterEmotionAndExpression: string; characterOutfit: string; locationDescription: string; otherNotes: string; tokenCount: number; }> => {
-    const ai = await createGeminiClient();
-    const prompt = `Extract fields from: "${newSceneDescription}". JSON Output. Ensure all fields are strings.`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-    return { ...parseJsonResponse<any>(response, 'extractFieldsFromSceneDescription'), tokenCount: getTokenCountFromResponse(response) };
-};
-
-// ─── regenerateSingleCutDraft (already above) ─────────────────────────────────
-
-// ─── verifyAndEnrichCutPrompt ─────────────────────────────────────────────────
-export const verifyAndEnrichCutPrompt = async (cut: EditableCut, characterDescriptions: { [key: string]: CharacterDescription }, seed?: number): Promise<{ newSceneDescription: string; newCharacterOutfit: string; tokenCount: number; }> => {
-    const ai = await createGeminiClient();
-
-    // Inject hair DNA directly into outfit field
-    let hairContext = "";
-    let profileOutfitFallback = "";
-    (cut.character || []).forEach(name => {
-        const key = Object.keys(characterDescriptions).find(k => characterDescriptions[k].koreanName === name);
-        if (key && characterDescriptions[key]) {
-             if (characterDescriptions[key].hairStyleDescription) {
-                hairContext += `${name} has ${characterDescriptions[key].hairStyleDescription}. `;
-             }
-             // Get the location-based outfit from the profile as a fallback (using 'locations' English now)
-             const outfitFromProfile = characterDescriptions[key].locations?.[cut.location];
-             if (outfitFromProfile) {
-                profileOutfitFallback += `[${name}'s base outfit for ${cut.location}: ${outfitFromProfile}] `;
-             }
-        }
-    });
-
-    // PDF Page 61 - Golden consistency logic
-    const prompt = `Continuity check. Location: ${cut.location}, Characters: ${cut.character.join(', ')}.
-# Goal:
-1. Ensure 'characterOutfit' is a detailed physical description with HEX codes.
-2. IMPORTANT: Prepend the hair descriptions into the start of 'characterOutfit'.
-3. **LITERAL PRESERVATION:** If you update the outfit, you MUST use the provided Profile Outfit Fallback as your base string. DO NOT SUMMARIZE IT.
-# Reference Hair DNA:
-${hairContext}
-# Profile Outfit Fallback (MANDATORY SOURCE):
-${profileOutfitFallback}
-JSON output.`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-    return { ...parseJsonResponse<{ newSceneDescription: string; newCharacterOutfit: string; }>(response, 'verifyAndEnrichCutPrompt'), tokenCount: getTokenCountFromResponse(response) };
-};
-
-// ─── regenerateCutFieldsForCharacterChange ────────────────────────────────────
-export const regenerateCutFieldsForCharacterChange = async (originalCut: Cut, newCharacters: string[], characterDescriptions: { [key: string]: CharacterDescription }, location: string, seed?: number): Promise<{ regeneratedCut: Partial<Cut>, tokenCount: number }> => {
-    const ai = await createGeminiClient();
-    const prompt = `Change characters to: ${newCharacters.join(', ')}. JSON output. Ensure 'characterOutfit' is a string with HEX codes.`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: prompt, config: { responseMimeType: "application/json", systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-    return { regeneratedCut: parseJsonResponse<Partial<Cut>>(response, 'regenerateCutFieldsForCharacterChange'), tokenCount: getTokenCountFromResponse(response) };
-};
-
-// ─── regenerateCutFieldsForIntentChange ───────────────────────────────────────
-export const regenerateCutFieldsForIntentChange = async (originalCut: Cut | EditableCut, newIntent: string, characterDescriptions: { [key: string]: CharacterDescription }, seed?: number): Promise<{ regeneratedCut: Partial<Cut>, tokenCount: number }> => {
-    const ai = await createGeminiClient();
-    const narration = 'narration' in originalCut ? originalCut.narration : (originalCut as EditableCut).narrationText;
-    const location = originalCut.location;
-    const characters = 'characters' in originalCut ? originalCut.characters : (originalCut as EditableCut).character;
+export const generateLocationProps = async (
+    location: string,
+    characterProfiles: string,
+    scriptContext: string,
+    seed?: number
+): Promise<{ ambientProps: string[]; keyProps: string[]; contextualProps: string[]; spatialDNA: string; tokenCount: number; }> => {
 
     const prompt = `
-# Persona: Master Webtoon Visual Director
-# Task: Update ONLY the ACTING and SCENE fields for a cut based on the user's "Directorial Intent".
-# [중요] 역동적 연기 프로토콜 (DYNAMIC PERFORMANCE):
-- 인물의 포즈('characterPose')를 설계할 때 "평범한 자세 금지" 원칙을 적용하십시오.
-- 인물의 감정이 온몸으로 표현되도록 하십시오. (예: "좌절하여 바닥을 치며 절규함", "기뻐서 발꿈치를 들고 한 바퀴 돎")
-- 만화적 기호를 표정 묘사에 반드시 포함하십시오.
-# CRITICAL RULE (DO NOT CHANGE IDENTITY):
-- DO NOT generate descriptions for clothing or hair. The 'characterOutfit' field is handled by a separate system and MUST NOT be part of your output.
-- Your ONLY job is to describe the character's PERFORMANCE (pose, expression) and the ENVIRONMENT (scene, location details).
-# Context:
+# Persona: AI Art Director & Set Dresser
+# Task: Generate a detailed list of props for a specific location in a webtoon.
+# Contextual Information:
 - **Location:** ${location}
-- **Characters:** ${characters.join(', ')}
-- **Narration:** "${narration}"
-- **User's Directorial Intent:** "${newIntent}"
-# Output JSON Schema (STRICTLY adhere to this schema, DO NOT include characterOutfit):
+- **Character Profiles:** ${characterProfiles}
+- **Script Snippets (Crucial for symbolic props):**
+${scriptContext}
+# Logic Pipeline:
+1. **Analyze Context:** Based on the location name, character personalities, and ESPECIALLY the script snippets, brainstorm suitable props.
+2. **Identify Symbolic Items:** Look for specific objects mentioned in the script or implied by the dialogue (e.g., "expensive coffee", "bill", "abandoned ring").
+3. **Categorize Props:**
+ * **ambientProps:** General background items. List 3-4 items.
+ * **keyProps:** Items essential for potential character actions in this location (e.g., monitor, chair for a desk scene). List 2-3 items.
+ * **contextualProps:** "Signature" items that reveal character personality, story irony, or emotional weight. Be creative and specific. (e.g., "a single luxury coffee cup", "a discarded receipt for a large amount"). List 1-2 unique items.
+4. **Format Output:** Provide the result as a clean JSON object.
+# Output JSON Schema:
 {
-"sceneDescription": "string",
-"characterPose": "string (Dynamic, action-oriented manga pose)",
-"characterEmotionAndExpression": "string (Exaggerated facial expression with Manpu)",
-"locationDescription": "string",
-"otherNotes": "string"
+"ambientProps": ["string"],
+"keyProps": ["string"],
+"contextualProps": ["string"],
+"spatialDNA": "string"
 }
+# IMPORTANT: All string values MUST be on a single line. Do NOT use unescaped newlines inside strings.
 `;
-    const response = await ai.models.generateContent({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-            temperature: 0.1
-        }
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, {
+        responseMimeType: 'application/json',
+        seed,
+        temperature: 0.5,
     });
-    return { regeneratedCut: parseJsonResponse<Partial<Cut>>(response, 'regenerateCutFieldsForIntentChange'), tokenCount: getTokenCountFromResponse(response) };
+
+    const parsed = parseJsonResponse<{ ambientProps: string[]; keyProps: string[]; contextualProps: string[]; spatialDNA: string; }>(result.text, 'generateLocationProps');
+    return { ...parsed, tokenCount: result.tokenCount };
 };
 
-// ─── purifyImagePromptForSafety ───────────────────────────────────────────────
-export const purifyImagePromptForSafety = async (prompt: string, seed?: number): Promise<{ text: string, tokenCount: number }> => {
-    const ai = await createGeminiClient();
-    const fullPrompt = `Make SFW: "${prompt}"`;
-    const response = await ai.models.generateContent({ model: MODELS.TEXT, contents: fullPrompt, config: { systemInstruction: SFW_SYSTEM_INSTRUCTION, ...(seed !== undefined && { seed }) } });
-    return { text: getResponseText(response, 'purifyImagePromptForSafety'), tokenCount: getTokenCountFromResponse(response) };
-};
+// ── [LEGACY] generateEditableStoryboardChunk + mergeMetaLines → textAnalysis.legacy.ts로 분리 (Phase 9) ──
 
-// ─── generateSpeech ───────────────────────────────────────────────────────────
-export const generateSpeech = async (narration: string): Promise<{ audioBase64: string; tokenCount: number; }> => {
-    const ai = await createGeminiClient();
-    const response = await ai.models.generateContent({
-        model: MODELS.TTS,
-        contents: [{ parts: [{ text: narration }] }],
-        config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } } },
-        },
-    });
-    const audioPart = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!audioPart) throw new Error("TTS API Error");
-    return { audioBase64: audioPart, tokenCount: getTokenCountFromResponse(response) };
-};
+/**
+ * Normalizes a script so that each logical cut is exactly one line.
+ * This prevents issues where "Cut 18" and the dialogue are treated as separate cuts.
+ */
 
-// ─── normalizeScriptCuts ──────────────────────────────────────────────────────
 export const normalizeScriptCuts = (script: string): string => {
     if (!script) return "";
-
+    
     const isCutMarker = (line: string) => {
         const t = line.trim();
         return /^(컷|cut|#)\s*\d+/i.test(t) || /^\d+\.$/.test(t);
     };
-
+    
     const isSceneContext = (line: string) => {
         const t = line.trim();
         if (/^(scene|s#|씬)\s*\d+/i.test(t)) return true;
         if (/^\[?(장소|시간|배경)\s*[:：]/i.test(t)) return true;
-
+        
         if (t.startsWith('[') && t.endsWith(']')) {
              if (/(등장인물|연출의도|이미지프롬프트)/.test(t)) return false;
              return true;
@@ -537,7 +645,7 @@ export const normalizeScriptCuts = (script: string): string => {
     };
 
     const lines = script.split('\n').map(l => l.trim()).filter(l => l !== '');
-
+    
     let hasCutMarkers = false;
     for (const line of lines) {
         if (isCutMarker(line)) {
@@ -552,7 +660,7 @@ export const normalizeScriptCuts = (script: string): string => {
 
     if (hasCutMarkers) {
         let currentCut = "";
-
+        
         for (const line of lines) {
             if (isCutMarker(line)) {
                 if (currentCut) {
@@ -618,553 +726,58 @@ export const normalizeScriptCuts = (script: string): string => {
     return normalizedBlocks.join('\n');
 };
 
-// ─── generateCinematicBlueprint ───────────────────────────────────────────────
-export const generateCinematicBlueprint = async (
-    enrichedScript: string,
-    seed?: number,
-    onProgress?: (textLength: number) => void
-): Promise<{ blueprint: { [cutId: string]: { shot_size: string; camera_angle: string; intent_reason: string; } }, tokenCount: number }> => {
-    const ai = await createGeminiClient();
 
-    // PDF Page 67 - cinematography planning
-    const prompt = `
-# Persona: 천재 영화 촬영 감독
-당신은 '연출 강화 대본'에 포함된 연출 태그([ ])를 완벽하게 데이터화하여 촬영 계획을 수립합니다.
-# 미션:
-1. 입력된 대본의 줄 수 및 순서와 똑같은 수의 컷 계획을 수립하십시오.
-2. **연출 태그 최우선 반영:** 대본 문장 뒤의 \`[ ]\` 태그 안에 명시된 앵글이나 상황이 있다면 이를 'camera_angle' 및 'intent_reason'에 정확히 반영하십시오.
-3. 예: "커피값 5만원 [부감, 아이러니 소품]" -> camera_angle: "High Angle (부감)", intent_reason: "화려한 배경 속 비참함을 강조하기 위한 부감 연출 및 아이러니 소품 배치"
-# 장소 필드 작성 원칙 (CRITICAL):
-- 'camera_angle'이나 'shot_size' 지침을 절대 'location' 정보로 취급하지 마십시오.
-- 장소는 항상 물리적 환경이어야 합니다.
-# 입력 대본:
-\`\`\`
-${enrichedScript}
-\`\`\`
-# 출력 형식 (MANDATORY JSON):
-{
-"blueprint": {
- "cut_1": { "shot_size": "...", "camera_angle": "...", "intent_reason": "..." },
- ...
-}
-}
-`;
 
-    const responseStream = await ai.models.generateContentStream({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-        },
-    });
+// ── [LEGACY] generateEditableStoryboard → textAnalysis.legacy.ts로 분리 (Phase 9) ──
 
-    let fullText = '';
-    let tokenCount = 0;
 
-    for await (const chunk of responseStream) {
-        const c = chunk as any;
-        if (c.text) {
-            fullText += c.text;
-            if (onProgress) {
-                onProgress(fullText.length);
-            }
-        }
-        if (c.usageMetadata) {
-            tokenCount = c.usageMetadata.totalTokenCount;
-        }
-    }
-
-    const parsed = parseJsonResponse<{ blueprint: { [cutId: string]: { shot_size: string; camera_angle: string; intent_reason: string; } } }>(fullText, 'generateCinematicBlueprint');
-    return { blueprint: parsed.blueprint, tokenCount };
+export const regenerateSceneFromModification = async (currentCut: Cut, elementName: string, elementValue: string, seed?: number): Promise<{ newSceneDescription: string, tokenCount: number }> => {
+    const prompt = `Regenerate sceneDescription. User changed ${elementName} to "${elementValue}". Context: ${currentCut.location}, ${currentCut.narration}. Focus on physical composition. Output JSON { "newSceneDescription": "..." }`;
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    return { ...parseJsonResponse<{ newSceneDescription: string }>(result.text, 'regenerateSceneFromModification'), tokenCount: result.tokenCount };
 };
 
-// ─── generateLocationProps ────────────────────────────────────────────────────
-export const generateLocationProps = async (
-    location: string,
-    characterProfiles: string,
-    scriptContext: string,
-    artStylePrompt: string,
-    seed?: number
-): Promise<{ ambientProps: string[]; keyProps: string[]; contextualProps: string[]; spatialDNA: string; tokenCount: number; }> => {
-    const ai = await createGeminiClient();
 
-    let styleGuide = "";
-    if (artStylePrompt === 'kyoto') {
-        styleGuide = `
-[ART STYLE: Kyoto Animation / Vivid]
-- **Lighting & Atmosphere:** Emphasize "Crystal Clear Lighting", "Lens Flare", "Dappled Sunlight (Komorebi)". The space should feel airy and vibrant.
-- **Detail Level:** Ultra-detailed background art. Every prop should have a "lived-in" but polished look.
-- **Color Palette:** High saturation, avoid dull greys.
-`;
-    }
-
-    const prompt = `
-# Persona: AI Art Director & Set Dresser
-# Task: Generate a detailed list of props for a specific location in a webtoon.
-# Contextual Information:
-- **Location:** ${location}
-- **Character Profiles:** ${characterProfiles}
-- **Script Snippets (Crucial for symbolic props):**
-${scriptContext}
-- **Art Style/Genre:** ${artStylePrompt}
-${styleGuide}
-# Logic Pipeline:
-1. **Analyze Context:** Based on the location name, character personalities, and ESPECIALLY the script snippets, brainstorm suitable props.
-2. **Identify Symbolic Items:** Look for specific objects mentioned in the script or implied by the dialogue (e.g., "expensive coffee", "bill", "abandoned ring").
-3. **Categorize Props:**
- * **ambientProps:** General background items. List 3-4 items.
- * **keyProps:** Items essential for potential character actions in this location (e.g., monitor, chair for a desk scene). List 2-3 items.
- * **contextualProps:** "Signature" items that reveal character personality, story irony, or emotional weight. Be creative and specific. (e.g., "a single luxury coffee cup", "a discarded receipt for a large amount"). List 1-2 unique items.
-4. **Format Output:** Provide the result as a clean JSON object.
-# Output JSON Schema:
-{
-"ambientProps": ["string"],
-"keyProps": ["string"],
-"contextualProps": ["string"],
-"spatialDNA": "string"
-}
-# IMPORTANT: All string values MUST be on a single line. Do NOT use unescaped newlines inside strings.
-`;
-    const response = await ai.models.generateContent({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            systemInstruction: SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION,
-            ...(seed !== undefined && { seed }),
-            temperature: 0.5,
-        },
-    });
-
-    const tokenCount = getTokenCountFromResponse(response);
-    const parsed = parseJsonResponse<{ ambientProps: string[]; keyProps: string[]; contextualProps: string[]; spatialDNA: string; }>(response, 'generateLocationProps');
-    return { ...parsed, tokenCount };
+export const extractFieldsFromSceneDescription = async (newSceneDescription: string, currentCut: Cut, seed?: number): Promise<{ characterPose: string; characterEmotionAndExpression: string; characterOutfit: string; locationDescription: string; otherNotes: string; tokenCount: number; }> => {
+    const prompt = `Extract fields from: "${newSceneDescription}". JSON Output. Ensure all fields are strings.`;
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    return { ...parseJsonResponse<any>(result.text, 'extractFieldsFromSceneDescription'), tokenCount: result.tokenCount };
 };
 
-// ─── generateEditableStoryboardChunk (internal) ───────────────────────────────
-const generateEditableStoryboardChunk = async (
-    chunkBlueprint: any,
-    chunkOriginalScript: string,
-    chunkEnrichedScript: string,
-    locationProps: any,
-    characterProfilesString: string,
-    chunkInfo: { current: number, total: number, startCutId: string },
-    previousCutContext: string,
-    seed?: number,
-    artStyle?: string
-): Promise<{ scenes: EditableScene[], tokenCount: number }> => {
-    const ai = await createGeminiClient();
 
-    // Conditional Directing Guidance based on Art Style
-    let directingGuide = `
-# [중요] 연기 지침 (HIGH PERFORMANCE ACTING):
-- 'characterPose' 필드에 절대 "그냥 서 있다", "앉아 있다" 같은 정적인 설명을 쓰지 마십시오.
-- 인물의 심리 상태가 신체 실루엣으로 드러나게 과장하십시오. (예: "기뻐서 팔다리를 대자로 뻗고 공중 부양함", "충격으로 무릎을 꿇고 고개를 푹 숙인 채 사시나무 떨듯 떪")
-- 'characterEmotionAndExpression'에는 만화적 기호(땀방울, 불꽃, 하트)를 명시하십시오.
-    `;
+export const verifyAndEnrichCutPrompt = async (cut: EditableCut, characterDescriptions: { [key: string]: CharacterDescription }, seed?: number): Promise<{ newSceneDescription: string; newCharacterOutfit: string; tokenCount: number; }> => {
+    
+    // Inject hair DNA directly into outfit field
+    let hairContext = "";
+    let profileOutfitFallback = "";
+    (cut.character || []).forEach(name => {
+        const key = Object.keys(characterDescriptions).find(k => { const cd = characterDescriptions[k]; return (cd.canonicalName && cd.canonicalName === name) || cd.koreanName === name; });
+        if (key && characterDescriptions[key]) {
+             if (characterDescriptions[key].hairStyleDescription) {
+                hairContext += `${name} has ${characterDescriptions[key].hairStyleDescription}. `;
+             }
+             const outfitFromProfile = characterDescriptions[key].locations?.[cut.location];
+             if (outfitFromProfile) {
+                profileOutfitFallback += `[${name}'s base outfit for ${cut.location}: ${outfitFromProfile}] `;
+             }
+        }
+    });
 
-    if (artStyle === 'kyoto') {
-        directingGuide = `
-# [중요] 연기 지침 (KYOTO ANIMATION STYLE):
-- 'characterPose': 과장된 동작보다는 **"섬세한 제스처"**에 집중하십시오. (예: "바람에 머리카락을 귀 뒤로 넘김", "손끝으로 컵을 만지작거림")
-- 'characterEmotionAndExpression': 만화적 기호(땀방울 등)는 최소화하고, **"눈빛의 떨림", "미묘한 홍조", "입술 깨물기"** 등 사실적이고 감성적인 묘사를 사용하십시오.
-- 'sceneDescription': **"빛(Lighting)"과 "바람(Wind)"** 요소를 반드시 포함하여 감성적인 분위기를 연출하십시오. (예: "노을빛이 역광으로 비침", "벚꽃잎이 흩날리는 바람")
-        `;
-    }
-
-    const prompt = `
-# Persona: Cinematic Webtoon Storyboard Artist (Chunk Processor)
-# Task: Generate detailed storyboard JSON for Part ${chunkInfo.current} of ${chunkInfo.total}.
-# [CRITICAL: ANIMATION-LIKE FLOW]
-- Treat this storyboard as keyframes for an animation.
-- Ensure smooth visual transitions between cuts.
-- If a character starts an action in Cut N, they should be in the middle or end of that action in Cut N+1 unless time has passed.
-- Maintain spatial continuity (180-degree rule) unless a new scene starts.
-- Use "Match Cuts" or "Action Cuts" where appropriate to link scenes.
-${directingGuide}
-# [CRITICAL: SCENE COMPOSITION & INSERT CUT PRIORITIES]
-You must determine whether a cut includes a character or is an "Insert Cut" (where the 'character' array is empty \`[]\`) based on the following STRICT priorities:
-
-1. **PRIORITY 1: Detailed Script (상세대본) Instructions**
-   - If the input script explicitly describes a scene WITHOUT characters (e.g., focusing only on an object, background, text message, or scenery), you MUST make it an Insert Cut (empty 'character' array).
-   - Do NOT force a character into the scene if the detailed script does not imply one.
-
-2. **PRIORITY 2: Directorial & Camera Grammar (연출/카메라 문법)**
-   - For basic scripts without detailed visual instructions, follow standard film grammar.
-   - Use an Insert Cut (empty 'character' array) for:
-     a. Establishing Shots (showing a new location).
-     b. Extreme Close-ups of crucial objects (e.g., a ringing phone, a dropped letter, a ticking clock).
-     c. Shots showing the passage of time (e.g., clouds moving, sun setting).
-     d. Building atmosphere before a character is revealed.
-
-3. **PRIORITY 3: Character Assignment (인물 배당)**
-   - ONLY if the cut does not fall under Priority 1 or Priority 2, you should assign the relevant character(s) to the 'character' array.
-   - If a character is speaking, thinking, or reacting, and it's not an intentional insert cut, assign them so the viewer can visually follow the emotional flow.
-
-# [ADVANCED PARSING RULE: MANUAL OVERRIDE]
-The original script input may contain explicit instructions in parentheses or brackets, e.g. "Narration line.\n(Context: ...)" or "[장소: ...]".
-IF parentheses or brackets containing keywords like "장소:", "배경:", "Location:", "등장인물:", "인물:", "캐릭터:", "Character:", "연출의도:", "연출:", "Intent:", "이미지프롬프트:", "이미지:", "그림:", "프롬프트:", "Image:" are detected attached to a narration line:
-1. Extract '장소'/'배경'/'Location' -> Override 'location' field.
-2. Extract '등장인물'/'인물'/'캐릭터'/'Character' -> Override 'character' array.
-3. Extract '연출의도'/'연출'/'Intent' -> Override 'directorialIntent'.
-4. Extract '이미지프롬프트'/'이미지'/'그림'/'프롬프트'/'Image' -> Override 'sceneDescription'.
-5. Use these values STRICTLY instead of generating creative content for those fields.
-6. The 'narrationText' should NOT contain the bracketed instruction.
-
-# Previous Scene Context (STRICT CONTINUITY):
-"${previousCutContext || "Starting of the story."}"
-# 촬영 계획 (Cinematic Blueprint for this chunk):
-\`\`\`json
-${JSON.stringify(chunkBlueprint, null, 2)}
-\`\`\`
-# 장소별 소품 목록 (Set Dresser Data):
-\`\`\`json
-${JSON.stringify(locationProps, null, 2)}
-\`\`\`
-# [중요] 1줄 1컷 절대 법칙 (STRICT 1:1 MAPPING):
-- 입력된 '원본 대본'의 모든 줄을 순차적으로 처리하십시오.
-- 시작 컷 번호는 **'${chunkInfo.startCutId}'** 부터입니다.
-- 임의로 컷을 합치거나 누락하지 마십시오.
-- **CRITICAL:** The input script has EXACTLY ${chunkOriginalScript.split('\n').length} lines. You MUST return EXACTLY ${chunkOriginalScript.split('\n').length} cuts in the JSON array. Do NOT summarize or skip lines.
-# [CRITICAL: LOCATION FIELD RULE]
-- The 'location' field must be a physical PLACE NAME (e.g., 'Classroom', 'Street', 'Bedroom', 'Cafe').
-- DO NOT put camera angles or object descriptions here (e.g., "Close-up of hand" is NOT a location).
-- If it's a close-up, the location is still the room/place where it happens.
-- Use 'sceneDescription' or 'directorialIntent' for visual details like "Close-up focus on...".
-# [중요] 의상 복제 법칙 (LITERAL OUTFIT CLONING):
-- Character Wardrobe Data에 명시된 해당 장소의 의상 설명을 **글자 하나 틀리지 말고 그대로 'characterOutfit' 필드에 복제하십시오.**
-- 절대 "교복", "군복" 같은 짧은 단어로 요약하거나 새로운 설명을 창작하지 마십시오.
-- **원본 이미지의 의상을 무시하고, 반드시 Wardrobe Data에 정의된 의상을 우선적으로 적용하십시오.**
-# [CRITICAL: SCENE SPLITTING RULE]
-- You MUST group cuts into \`scenes\` based on LOCATION and TIME.
-- If the \`location\` changes between cuts (e.g., from "헬스장/야외 (밤)" to "술집 (밤)"), you MUST end the current scene and start a NEW scene in the \`scenes\` array.
-- Do NOT put cuts with different locations into the same scene.
-
-# [CRITICAL: FIELD DEFINITIONS & RULES]
-- **narrationText**: The EXACT line from the original script. Do not modify.
-- **character**: Array of character names present in the cut.
-- **location**: The PHYSICAL PLACE NAME only (e.g., "Classroom"). NO camera angles.
-- **locationDescription**: Visual details of the background, lighting, and atmosphere (e.g., "Sunlight streaming through the window, dust motes dancing").
-- **sceneDescription**: The MAIN VISUAL ACTION. What is happening? (e.g., "A holds out a hand to B").
-- **characterEmotionAndExpression**: Facial expressions and manga symbols (e.g., "Blushing with steam coming out of ears").
-- **characterPose**: Dynamic body language (e.g., "Leaning forward aggressively").
-- **otherNotes**: Technical camera instructions (e.g., "Close-up", "Low angle", "Focus on hand").
-- **directorialIntent**: The narrative mood or "why" this cut exists (e.g., "To show the tension between them").
-
-# Output JSON Structure (MANDATORY):
-{
-"scenes": [
- {
- "sceneNumber": 1,
- "title": "Scene Title",
- "cuts": [
- {
- "id": "cut_N",
- "narrationText": "...",
- "character": ["CharacterName"],
- "location": "...",
- "sceneDescription": "...",
- "characterEmotionAndExpression": "Expressive manga expression with Manpu symbols",
- "characterPose": "High-energy acting pose with body weight shift",
- "characterOutfit": "LITERAL COPY FROM WARDROBE DATA",
- "locationDescription": "...",
- "otherNotes": "...",
- "directorialIntent": "..."
- }
- ]
- }
-]
-}
-**원본 대본 (Chunk):**
-\`\`\`
-${chunkOriginalScript}
-\`\`\`
-**연출 강화 대본 (Chunk):**
-\`\`\`
-${chunkEnrichedScript}
-\`\`\`
-**Character Wardrobe Data (STRICT BASE):**
-\`\`\`json
-${characterProfilesString}
-\`\`\`
-`;
-
-    // Removed maxOutputTokens as per Gemini SDK guidelines.
-    let response;
-    try {
-        response = await ai.models.generateContent({
-            model: MODELS.TEXT,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                systemInstruction: SFW_SYSTEM_INSTRUCTION, // Use SFW instruction to prevent PROHIBITED_CONTENT
-                ...(seed !== undefined && { seed }),
-                temperature: 0.1
-            },
-        });
-    } catch (error: any) {
-        console.warn("First attempt failed, retrying with higher temperature and no seed to bypass potential safety blocks...", error);
-        response = await ai.models.generateContent({
-            model: MODELS.TEXT,
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                systemInstruction: SFW_SYSTEM_INSTRUCTION,
-                temperature: 0.4 // Higher temp can sometimes bypass strict deterministic blocks
-            },
-        });
-    }
-
-    const tokenCount = getTokenCountFromResponse(response);
-    const parsed = parseJsonResponse<any>(response, 'generateEditableStoryboardChunk');
-
-    let scenes = parsed.scenes;
-    if (!scenes && Array.isArray(parsed)) {
-        scenes = parsed;
-    } else if (!scenes && parsed.scene) {
-        scenes = parsed.scene;
-    } else if (!scenes && parsed.storyboard) {
-        scenes = parsed.storyboard;
-    }
-
-    if (!scenes || !Array.isArray(scenes)) {
-        console.error("Failed to extract scenes from parsed JSON:", parsed);
-        scenes = []; // Fallback to empty array to prevent "not iterable" error
-    }
-
-    return { scenes, tokenCount };
+    const prompt = `Continuity check. Location: ${cut.location}, Characters: ${cut.character.join(', ')}. 
+# Goal: 
+1. Ensure 'characterOutfit' is a detailed physical description with HEX codes.
+2. IMPORTANT: Prepend the hair descriptions into the start of 'characterOutfit'.
+3. **LITERAL PRESERVATION:** If you update the outfit, you MUST use the provided Profile Outfit Fallback as your base string. DO NOT SUMMARIZE IT.
+# Reference Hair DNA:
+${hairContext}
+# Profile Outfit Fallback (MANDATORY SOURCE):
+${profileOutfitFallback}
+JSON output.`;
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    return { ...parseJsonResponse<{ newSceneDescription: string; newCharacterOutfit: string; }>(result.text, 'verifyAndEnrichCutPrompt'), tokenCount: result.tokenCount };
 };
 
-// ─── generateEditableStoryboard ───────────────────────────────────────────────
-export const generateEditableStoryboard = async (
-    originalScript: string,
-    enrichedScript: string,
-    blueprint: { [cutId: string]: { shot_size: string; camera_angle: string; intent_reason: string; } },
-    gender: Gender,
-    characterDescriptions: { [key: string]: CharacterDescription },
-    seed?: number,
-    artStyle?: string,
-    onProgress?: (part: number, total: number) => void
-): Promise<{ storyboard: EditableScene[], locationDNAMap: { [location: string]: string }, tokenCount: number }> => {
-    let totalTokenCount = 0;
 
-    // Note: We use 'locations' (English) here instead of 'koreanLocations' because we switched to English-only costumes.
-    const characterProfilesString = JSON.stringify(Object.values(characterDescriptions || {}).map(char => ({
-        koreanName: char.koreanName,
-        gender: char.gender,
-        personality: char.personality,
-        outfitsByLocation: char.locations,
-        hairStyle: char.hairStyleDescription || 'Standard'
-    })), null, 2);
-
-    const allLocations = new Set<string>();
-    Object.values(characterDescriptions || {}).forEach(char => {
-        if (char && char.locations) {
-            Object.keys(char.locations || {}).forEach(loc => allLocations.add(loc));
-        }
-    });
-
-    const locationPropsCache: { [location: string]: any } = {};
-    const locationDNAMap: { [location: string]: string } = {};
-
-    // Preprocess scripts to merge metadata lines
-    // We keep the original unmerged lines for chunking logic to ensure 1:1 mapping with the user's view
-    const originalLinesRaw = originalScript.split('\n').filter(l => l.trim() !== '');
-    const enrichedLinesRaw = enrichedScript.split('\n').filter(l => l.trim() !== '');
-
-    // 1. 장소별 DNA 및 소품 생성 (Parallelized for performance)
-    const locationPromises = Array.from(allLocations).map(async (location) => {
-        try {
-            const relevantLines = originalLinesRaw.filter(line => line.includes(location.split('(')[0].trim())).join('\n');
-            const { tokenCount, spatialDNA, ...props } = await generateLocationProps(location, characterProfilesString, relevantLines || originalScript, artStyle || 'normal', seed);
-            return { location, tokenCount, spatialDNA, props };
-        } catch (error) {
-            console.warn(`Failed to generate props for location ${location}:`, error);
-            return { location, tokenCount: 0, spatialDNA: "Consistent visual background.", props: { ambientProps: [], keyProps: [], contextualProps: [] } };
-        }
-    });
-
-    const locationResults = await Promise.all(locationPromises);
-    locationResults.forEach(res => {
-        totalTokenCount += res.tokenCount;
-        locationPropsCache[res.location] = { ...res.props, spatialDNA: res.spatialDNA };
-        locationDNAMap[res.location] = res.spatialDNA;
-    });
-
-    // 2. 컷 분할 처리
-    const CHUNK_SIZE = 18;
-    // Use the raw lines for total cuts to match the user's input exactly
-    const totalCuts = originalLinesRaw.length;
-
-    const combinedScenes: EditableScene[] = [];
-    let previousCutContext = "";
-
-    let currentCutIndex = 0;
-    let chunkIndex = 0;
-
-    while (currentCutIndex < totalCuts) {
-        // Estimate total chunks based on remaining cuts
-        const estimatedRemainingChunks = Math.ceil((totalCuts - currentCutIndex) / CHUNK_SIZE);
-        const estimatedTotalChunks = chunkIndex + estimatedRemainingChunks;
-
-        if (onProgress) onProgress(chunkIndex + 1, estimatedTotalChunks);
-
-        const startIdx = currentCutIndex;
-        const endIdx = Math.min(startIdx + CHUNK_SIZE, totalCuts);
-
-        // Use the raw lines for the chunk to ensure the model sees exactly what the user sees
-        const chunkOriginal = originalLinesRaw.slice(startIdx, endIdx).join('\n');
-        const chunkEnriched = enrichedLinesRaw.slice(startIdx, endIdx).join('\n');
-        const chunkBlueprint: any = {};
-        for (let k = startIdx; k < endIdx; k++) {
-            const cutId = `cut_${k + 1}`;
-            if (blueprint[cutId]) chunkBlueprint[cutId] = blueprint[cutId];
-        }
-
-        let chunkScenes: EditableScene[] = [];
-        let tokenCount = 0;
-
-        try {
-            const result = await generateEditableStoryboardChunk(
-                chunkBlueprint,
-                chunkOriginal,
-                chunkEnriched,
-                locationPropsCache,
-                characterProfilesString,
-                { current: chunkIndex + 1, total: estimatedTotalChunks, startCutId: `cut_${startIdx + 1}` },
-                previousCutContext,
-                seed,
-                artStyle // Pass the art style
-            );
-            chunkScenes = result.scenes;
-            tokenCount = result.tokenCount;
-        } catch (error) {
-            console.error(`Failed to generate chunk ${chunkIndex + 1}:`, error);
-            // Fallback: Create a dummy scene for the failed chunk to prevent infinite loops
-            chunkScenes = [{
-                sceneNumber: chunkIndex + 1,
-                title: "Failed Scene",
-                cuts: chunkOriginal.split('\n').map((line, i) => ({
-                    id: `cut_${startIdx + i + 1}`,
-                    cutNumber: String(startIdx + i + 1),
-                    narrationText: line,
-                    character: [],
-                    location: "Unknown",
-                    sceneDescription: "Failed to generate visual description.",
-                    characterEmotionAndExpression: "Neutral",
-                    characterPose: "Standing",
-                    characterOutfit: "Default",
-                    locationDescription: "Unknown",
-                    otherNotes: "Generation failed.",
-                    directorialIntent: "None"
-                }))
-            }];
-        }
-
-        totalTokenCount += tokenCount;
-        combinedScenes.push(...chunkScenes);
-
-        // Count how many cuts were actually generated
-        let returnedCutsCount = 0;
-        let lastGeneratedNarration = "";
-        for (const scene of chunkScenes) {
-            if (scene.cuts && Array.isArray(scene.cuts)) {
-                returnedCutsCount += scene.cuts.length;
-                if (scene.cuts.length > 0) {
-                    lastGeneratedNarration = scene.cuts[scene.cuts.length - 1].narrationText || "";
-                }
-            }
-        }
-
-        let linesToAdvance = returnedCutsCount;
-        const chunkLines = chunkOriginal.split('\n');
-
-        if (returnedCutsCount === 0) {
-            console.warn(`Model returned 0 cuts for chunk starting at index ${startIdx}. Advancing by 1 to prevent infinite loop.`);
-            linesToAdvance = 1;
-        } else {
-            // Try to find how many lines were actually processed by matching the last narration
-            let matchIndex = -1;
-            if (lastGeneratedNarration) {
-                // Clean up strings for better matching
-                const cleanLast = lastGeneratedNarration.replace(/\s+/g, '').toLowerCase();
-                // Search from the end to find the LAST matching line
-                for (let i = chunkLines.length - 1; i >= 0; i--) {
-                    const cleanL = chunkLines[i].replace(/\s+/g, '').toLowerCase();
-                    if (cleanL.includes(cleanLast) || cleanLast.includes(cleanL)) {
-                        matchIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            if (matchIndex !== -1) {
-                linesToAdvance = matchIndex + 1;
-                console.log(`Matched last cut to line ${matchIndex + 1} of ${chunkLines.length}. Advancing by ${linesToAdvance}.`);
-            } else {
-                // If we can't match, assume the model summarized the entire chunk to prevent infinite repeating loops
-                console.warn(`Could not match last cut narration to original script. Assuming full chunk processed. Advancing by ${chunkLines.length}.`);
-                linesToAdvance = chunkLines.length;
-            }
-        }
-
-        currentCutIndex += linesToAdvance;
-
-        const lastSceneInChunk = chunkScenes[chunkScenes.length - 1];
-        if (lastSceneInChunk && lastSceneInChunk.cuts && lastSceneInChunk.cuts.length > 0) {
-            const lastCut = lastSceneInChunk.cuts[lastSceneInChunk.cuts.length - 1];
-            previousCutContext = `Up to cut ${lastCut.id}, the situation was: ${lastCut.narrationText}. The visual scene was described as: ${lastCut.sceneDescription}`;
-        }
-
-        chunkIndex++;
-    }
-
-    // 3. [SCENE MERGING] Fix fragmentation caused by chunking
-    const mergedScenes: EditableScene[] = [];
-    if (combinedScenes.length > 0) {
-        let currentScene = { ...combinedScenes[0], cuts: [...combinedScenes[0].cuts] }; // Deep copy cuts array
-
-        for (let i = 1; i < combinedScenes.length; i++) {
-            const nextScene = combinedScenes[i];
-            const lastCutOfCurrent = currentScene.cuts[currentScene.cuts.length - 1];
-            const firstCutOfNext = nextScene.cuts[0];
-
-            // Heuristic: If locations are identical, it's likely the same scene split by chunk limit
-            if (lastCutOfCurrent && firstCutOfNext && lastCutOfCurrent.location === firstCutOfNext.location) {
-                currentScene.cuts = [...currentScene.cuts, ...nextScene.cuts];
-            } else {
-                mergedScenes.push(currentScene);
-                currentScene = { ...nextScene, cuts: [...nextScene.cuts] };
-            }
-        }
-        mergedScenes.push(currentScene);
-    } else {
-        // Fallback if no scenes generated
-    }
-
-    // [SEQUENTIAL RENUMBERING] Force sequential cut IDs to close gaps from chunking/merging
-    let globalCutIndex = 1;
-    const normalizedScenes = mergedScenes.map((scene, sIdx) => ({
-        ...scene,
-        sceneNumber: sIdx + 1,
-        cuts: scene.cuts.map(cut => {
-            const newCutNumber = `${globalCutIndex++}`;
-            return {
-                ...cut,
-                // We keep the internal ID as the newly generated number for consistency in referencing
-                id: newCutNumber,
-                // Ensure display number is also sequential
-                cutNumber: newCutNumber,
-            };
-        })
-    }));
-
-    return { storyboard: normalizedScenes, locationDNAMap, tokenCount: totalTokenCount };
-};
-
-// ─── generateFinalStoryboardFromEditable ──────────────────────────────────────
 export const generateFinalStoryboardFromEditable = (editableScenes: EditableScene[], characterDescriptions: { [key: string]: CharacterDescription }, animationStyle: string): { scenes: Scene[], tokenCount: number } => {
     const scenes: Scene[] = editableScenes.map(editableScene => ({
         sceneNumber: editableScene.sceneNumber, title: editableScene.title, settingPrompt: '',
@@ -1176,96 +789,70 @@ export const generateFinalStoryboardFromEditable = (editableScenes: EditableScen
             locationDescription: editableCut.locationDescription, otherNotes: editableCut.otherNotes, imageUrls: [], imageLoading: false, selectedImageId: null, directorialIntent: editableCut.directorialIntent
         }))
     }));
-    return { scenes, tokenCount: 0 };
+    return { scenes, tokenCount: 0 }; 
 };
 
-// ─── formatTextWithSemanticBreaks ─────────────────────────────────────────────
-export const formatTextWithSemanticBreaks = async (text: string, seed?: number): Promise<{ formattedText: string, tokenCount: number }> => {
-    if (text.includes('\n')) {
-        return { formattedText: text, tokenCount: 0 };
-    }
 
-    const ai = await createGeminiClient();
-    const prompt = `
- [시스템 명령]
- 설명이나 분석 없이, 아래 입력된 문장을 3단계 줄바꿈 알고리즘을 적용한 '최종 결과물'로만 변환하십시오.
- 규칙을 어기고 분석글이나 접두사를 포함하면 안 됩니다.
- 입력: ${text}
- `;
-
-    const response = await ai.models.generateContent({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            systemInstruction: SEMANTIC_LINE_BREAK_SYSTEM_INSTRUCTION,
-            temperature: 0.1,
-            ...(seed !== undefined && { seed }),
-        },
-    });
-
-    const formattedText = getResponseText(response, 'formatTextWithSemanticBreaks');
-    const tokenCount = getTokenCountFromResponse(response);
-
-    // PDF Page 69 - clean-up logic
-    const cleanedText = formattedText
-        .replace(/^(출력|결과|최종 결과물|변환 결과|입력):\s*/i, '')
-        .replace(/^\*\*.*?\*\*\n?/g, '') // 마크다운 볼드 설명 제거
-        .replace(/\[알고리즘.*?\]/g, '') // 알고리즘 단계 태그 제거
-        .trim();
-
-    return { formattedText: cleanedText, tokenCount };
+export const regenerateCutFieldsForCharacterChange = async (originalCut: Cut, newCharacters: string[], characterDescriptions: { [key: string]: CharacterDescription }, location: string, seed?: number): Promise<{ regeneratedCut: Partial<Cut>, tokenCount: number }> => {
+    const prompt = `Change characters to: ${newCharacters.join(', ')}. JSON output. Ensure 'characterOutfit' is a string with HEX codes.`;
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed });
+    return { regeneratedCut: parseJsonResponse<Partial<Cut>>(result.text, 'regenerateCutFieldsForCharacterChange'), tokenCount: result.tokenCount };
 };
 
-// ─── formatMultipleTextsWithSemanticBreaks ─────────────────────────────────────
-export const formatMultipleTextsWithSemanticBreaks = async (texts: string[], seed?: number): Promise<{ formattedTexts: string[], tokenCount: number }> => {
-    const ai = await createGeminiClient();
 
-    // Filter out texts that already have newlines or are empty
-    const textsToProcess = texts.map((text, index) => ({ text, index })).filter(item => !item.text.includes('\n') && item.text.trim() !== '');
-
-    if (textsToProcess.length === 0) {
-        return { formattedTexts: texts, tokenCount: 0 };
-    }
-
+export const regenerateCutFieldsForIntentChange = async (originalCut: Cut | EditableCut, newIntent: string, characterDescriptions: { [key: string]: CharacterDescription }, seed?: number): Promise<{ regeneratedCut: Partial<Cut>, tokenCount: number }> => {
+    const narration = 'narration' in originalCut ? originalCut.narration : (originalCut as EditableCut).narrationText;
+    const location = originalCut.location;
+    const characters = 'characters' in originalCut ? originalCut.characters : (originalCut as EditableCut).character;
+    
     const prompt = `
-[시스템 명령]
-다음 JSON 배열에 포함된 각 문장들을 3단계 줄바꿈 알고리즘을 적용하여 변환하십시오.
-결과는 반드시 동일한 순서의 JSON 배열(문자열 배열)로만 출력해야 합니다.
-설명, 분석, 마크다운 코드 블록(\`\`\`json 등)을 절대 포함하지 말고 오직 JSON 배열만 출력하십시오.
-
-입력:
-${JSON.stringify(textsToProcess.map(t => t.text))}
+# Persona: Master Webtoon Visual Director
+# Task: Update ONLY the ACTING and SCENE fields for a cut based on the user's "Directorial Intent".
+# [중요] 역동적 연기 프로토콜 (DYNAMIC PERFORMANCE):
+- 인물의 포즈('characterPose')를 설계할 때 "평범한 자세 금지" 원칙을 적용하십시오.
+- 인물의 감정이 온몸으로 표현되도록 하십시오. (예: "좌절하여 바닥을 치며 절규함", "기뻐서 발꿈치를 들고 한 바퀴 돎")
+- 만화적 기호를 표정 묘사에 반드시 포함하십시오.
+# CRITICAL RULE (DO NOT CHANGE IDENTITY):
+- DO NOT generate descriptions for clothing or hair. The 'characterOutfit' field is handled by a separate system and MUST NOT be part of your output.
+- Your ONLY job is to describe the character's PERFORMANCE (pose, expression) and the ENVIRONMENT (scene, location details).
+# Context:
+- **Location:** ${location}
+- **Characters:** ${characters.join(', ')}
+- **Narration:** "${narration}"
+- **User's Directorial Intent:** "${newIntent}"
+# Output JSON Schema (STRICTLY adhere to this schema, DO NOT include characterOutfit):
+{
+"sceneDescription": "string",
+"characterPose": "string (Specific body position: limb placement, head direction, weight center, hand gestures. Match character personality and scene context.)",
+"characterEmotionAndExpression": "string (Exaggerated facial expression with Manpu)",
+"locationDescription": "string",
+"otherNotes": "string"
+}
 `;
-
-    const response = await ai.models.generateContent({
-        model: MODELS.TEXT,
-        contents: prompt,
-        config: {
-            systemInstruction: SEMANTIC_LINE_BREAK_SYSTEM_INSTRUCTION,
-            temperature: 0.1,
-            responseMimeType: "application/json",
-            ...(seed !== undefined && { seed }),
-        },
-    });
-
-    try {
-        const resultTexts = parseJsonResponse<string[]>(response, 'formatMultipleTextsWithSemanticBreaks');
-        const tokenCount = getTokenCountFromResponse(response);
-
-        const finalTexts = [...texts];
-        textsToProcess.forEach((item, i) => {
-            if (resultTexts[i]) {
-                finalTexts[item.index] = resultTexts[i]
-                    .replace(/^(출력|결과|최종 결과물|변환 결과|입력):\s*/i, '')
-                    .replace(/^\*\*.*?\*\*\n?/g, '')
-                    .replace(/\[알고리즘.*?\]/g, '')
-                    .trim();
-            }
-        });
-
-        return { formattedTexts: finalTexts, tokenCount };
-    } catch (error) {
-        console.error("Failed to parse multiple semantic breaks:", error);
-        return { formattedTexts: texts, tokenCount: getTokenCountFromResponse(response) };
-    }
+    const result = await callTextModel(SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION + '\nRespond with valid JSON only.', prompt, { responseMimeType: 'application/json', seed, temperature: 0.1 });
+    return { regeneratedCut: parseJsonResponse<Partial<Cut>>(result.text, 'regenerateCutFieldsForIntentChange'), tokenCount: result.tokenCount };
 };
+
+
+
+// ── Re-exports: 분리된 파일에서 re-export (기존 import 경로 호환) ──
+
+export {
+    analyzeScenario,
+    analyzeCharacterBible,
+    generateConti,
+    designCinematography,
+    convertContiToEditableStoryboard,
+    regenerateForNewLocations,
+} from './textAnalysisPipeline';
+
+export {
+    purifyImagePromptForSafety,
+    generateCinematicBlueprint,
+    formatMultipleTextsWithSemanticBreaks,
+    formatTextWithSemanticBreaks,
+    refinePromptWithAI,
+    refineAllPromptsWithAI,
+} from './textAnalysisRefine';
+
+export type { CutFieldChanges } from './textAnalysisRefine';

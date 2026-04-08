@@ -60,43 +60,43 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({ isOpen, onClos
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 animate-fade-in" aria-modal="true" role="dialog">
-      <div className="bg-stone-800 border border-stone-700 rounded-2xl shadow-xl w-full max-w-lg flex flex-col transform transition-all duration-300 scale-95 opacity-0 animate-fade-in-scale">
-        <div className="flex justify-between items-center p-4 border-b border-stone-700">
+      <div className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-xl w-full max-w-lg flex flex-col transform transition-all duration-300 scale-95 opacity-0 animate-fade-in-scale">
+        <div className="flex justify-between items-center p-4 border-b border-zinc-700">
           <h2 className="text-xl font-bold text-white">텍스트 추가</h2>
-          <button onClick={onClose} className="p-2 rounded-full text-stone-400 hover:bg-stone-700">
+          <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700">
             <XIcon className="w-6 h-6" />
           </button>
         </div>
         <div className="p-6 space-y-4">
           <div className="flex items-center gap-4">
-            <img src={target.imageUrl} alt="Target image" className="w-24 h-24 object-cover rounded-md border-2 border-stone-600" />
+            <img src={target.imageUrl} alt="Target image" className="w-24 h-24 object-cover rounded-md border-2 border-zinc-600" />
             <div>
-                <p className="text-sm text-stone-400">컷 #{target.cutNumber}</p>
+                <p className="text-sm text-zinc-400">컷 #{target.cutNumber}</p>
                 <p className="font-semibold text-white">이미지에 텍스트를 추가합니다.</p>
             </div>
           </div>
           
           <div>
-            <label htmlFor="text-content" className="block text-sm font-medium text-stone-300 mb-1">내용</label>
+            <label htmlFor="text-content" className="block text-sm font-medium text-zinc-300 mb-1">내용</label>
             <textarea
               id="text-content"
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={4}
-              className="w-full p-2 bg-stone-700/50 rounded-md border border-stone-600 text-sm text-stone-200 focus:ring-orange-500"
+              className="w-full p-2 bg-zinc-700/50 rounded-md border border-zinc-600 text-sm text-zinc-200 focus:ring-orange-500"
               placeholder="대사 또는 나레이션을 입력하세요..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-stone-300 mb-1">종류</label>
+            <label className="block text-sm font-medium text-zinc-300 mb-1">종류</label>
             <div className="flex gap-4">
                 <label className="flex items-center gap-2 text-sm">
-                    <input type="radio" name="textType" value="speech" checked={textType === 'speech'} onChange={() => setTextType('speech')} className="form-radio h-4 w-4 text-orange-600 bg-stone-700 border-stone-500"/>
+                    <input type="radio" name="textType" value="speech" checked={textType === 'speech'} onChange={() => setTextType('speech')} className="form-radio h-4 w-4 text-orange-600 bg-zinc-700 border-zinc-500"/>
                     말풍선
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                    <input type="radio" name="textType" value="narration" checked={textType === 'narration'} onChange={() => setTextType('narration')} className="form-radio h-4 w-4 text-orange-600 bg-stone-700 border-stone-500"/>
+                    <input type="radio" name="textType" value="narration" checked={textType === 'narration'} onChange={() => setTextType('narration')} className="form-radio h-4 w-4 text-orange-600 bg-zinc-700 border-zinc-500"/>
                     나레이션
                 </label>
             </div>
@@ -104,12 +104,12 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({ isOpen, onClos
           
           {textType === 'speech' && (
             <div>
-              <label htmlFor="character-select" className="block text-sm font-medium text-stone-300 mb-1">말하는 인물</label>
+              <label htmlFor="character-select" className="block text-sm font-medium text-zinc-300 mb-1">말하는 인물</label>
               <select
                 id="character-select"
                 value={characterName}
                 onChange={(e) => setCharacterName(e.target.value)}
-                className="w-full p-2 bg-stone-700/50 rounded-md border border-stone-600 text-sm text-stone-200 focus:ring-orange-500 appearance-none"
+                className="w-full p-2 bg-zinc-700/50 rounded-md border border-zinc-600 text-sm text-zinc-200 focus:ring-orange-500 appearance-none"
                 disabled={target.characters.length === 0}
               >
                 {target.characters.length > 0 ? (
@@ -122,7 +122,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({ isOpen, onClos
           )}
         </div>
 
-        <div className="p-4 bg-stone-900/50 border-t border-stone-700 flex justify-end">
+        <div className="p-4 bg-zinc-900/50 border-t border-zinc-700 flex justify-end">
           <button
             onClick={handleSubmit}
             disabled={isLoading}

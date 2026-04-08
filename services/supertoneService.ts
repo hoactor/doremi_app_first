@@ -1,9 +1,14 @@
 
 import { Notification } from '../types';
+import { IS_TAURI, callSupertoneTauri, loadApiKeys } from './tauriAdapter';
 
 // Supertone API Endpoint
 const SUPERTONE_API_URL = "https://supertoneapi.com/v1/text-to-speech";
-const API_KEY = "4d719c184808a0b9ea28618bf7b13163"; // Provided API Key
+
+// Browser fallback: process.env (Vite define)
+function getApiKeyBrowser(): string {
+    return process.env.SUPERTONE_API_KEY || "";
+}
 
 export interface SupertoneConfig {
     voiceId: string;
@@ -31,7 +36,8 @@ let lastRequestTime = 0;
 
 /**
  * Supertone API 호출 로직
- * 브라우저 CORS 정책으로 인해 모든 요청은 프록시(corsproxy.io)를 통해 즉시 전달됩니다.
+ * Tauri: Rust 백엔드가 직접 호출 (CORS 없음, API 키 안전)
+ * 브라우저: corsproxy.io 경유 (개발용 폴백)
  */
 const performApiCall = async (config: SupertoneConfig): Promise<File> => {
     const { voiceId, text, language = 'ko', style = 'neutral', speed = 1.0, pitch = 0 } = config;
@@ -39,12 +45,26 @@ const performApiCall = async (config: SupertoneConfig): Promise<File> => {
     if (!voiceId) {
         throw new Error("Voice ID가 유효하지 않습니다 (undefined or empty).");
     }
-    if (!API_KEY) {
+
+    // ─── Tauri: Rust 백엔드 프록시 (CORS-free, 키 안전) ───
+    if (IS_TAURI) {
+        try {
+            const blob = await callSupertoneTauri(voiceId.trim(), text, language, style);
+            return new File([blob], `supertone_${Date.now()}.wav`, { type: 'audio/wav' });
+        } catch (error: any) {
+            console.error("Supertone (Tauri) Failed:", error);
+            throw new Error(`Supertone TTS 오류: ${error.message || error}`);
+        }
+    }
+
+    // ─── 브라우저: CORS proxy 경유 (개발용) ───
+    const apiKey = getApiKeyBrowser();
+    if (!apiKey) {
         throw new Error("Supertone API Key가 설정되지 않았습니다.");
     }
 
     const cleanVoiceId = voiceId.trim();
-    const cleanApiKey = API_KEY.trim();
+    const cleanApiKey = apiKey.trim();
     const targetUrl = `${SUPERTONE_API_URL}/${cleanVoiceId}`;
     
     const body = {

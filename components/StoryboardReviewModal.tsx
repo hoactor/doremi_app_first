@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { EditableScene, EditableCut, GeneratedImage, ArtStyle } from '../types';
 import { XIcon, SparklesIcon, RefreshIcon, SpinnerIcon, CheckIcon, PhotoIcon, ZoomInIcon, BookmarkSquareIcon, ChevronDownIcon, ChevronRightIcon, ArrowLeftIcon, ArrowTopRightOnSquareIcon, PaintBrushIcon, ShirtIcon } from './icons';
 import { useAppContext } from '../AppContext';
+import { buildMechanicalOutfit } from '../appUtils';
 
 interface StoryboardReviewModalProps {
   isOpen: boolean;
@@ -19,30 +20,32 @@ const DraftCutCard: React.FC<{
   hasModified: boolean;
   imageUrl?: string;
   versionCount: number;
-}> = ({ cut, isSelected, onSelect, hasModified, imageUrl, versionCount }) => (
+  outfitMismatch?: boolean;
+}> = ({ cut, isSelected, onSelect, hasModified, imageUrl, versionCount, outfitMismatch }) => (
   <div
     id={`review-list-item-${cut.id}`}
     onClick={onSelect}
-    className={`p-2 rounded-lg border-l-4 cursor-pointer transition-all duration-200 flex items-center gap-3 ${isSelected ? 'bg-orange-900/40 border-orange-500 shadow-md scale-[1.02]' : 'bg-stone-800/50 border-transparent hover:bg-stone-800'}`}
+    className={`p-2 rounded-lg border-l-4 cursor-pointer transition-all duration-200 flex items-center gap-3 ${isSelected ? 'bg-orange-900/40 border-orange-500 shadow-md scale-[1.02]' : 'bg-zinc-800/50 border-transparent hover:bg-zinc-800'}`}
   >
-    <div className="w-12 h-12 flex-shrink-0 bg-stone-900 rounded-md overflow-hidden border border-stone-700 flex items-center justify-center relative">
+    <div className="w-12 h-12 flex-shrink-0 bg-zinc-900 rounded-md overflow-hidden border border-zinc-700 flex items-center justify-center relative">
       {imageUrl ? (
         <img src={imageUrl} alt={`Cut ${cut.id}`} className="w-full h-full object-cover" />
       ) : (
-        <PhotoIcon className="w-5 h-5 text-stone-600" />
+        <PhotoIcon className="w-5 h-5 text-zinc-600" />
       )}
       {versionCount > 1 && (
         <div className="absolute bottom-0 right-0 bg-orange-600 text-[8px] font-black px-1 rounded-tl-sm text-white shadow-sm border-t border-l border-orange-400/50">
           v{versionCount}
         </div>
       )}
-      {hasModified && <div className="absolute top-0 right-0 w-2 h-2 rounded-full bg-green-500 border border-stone-900 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>}
+      {hasModified && <div className="absolute top-0 right-0 w-2 h-2 rounded-full bg-green-500 border border-zinc-900 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>}
+      {outfitMismatch && <div className="absolute top-0 left-0 w-2 h-2 rounded-full bg-red-500 border border-zinc-900 shadow-[0_0_8px_rgba(239,68,68,0.6)]" title="의상 매칭 실패"></div>}
     </div>
     <div className="flex-grow min-w-0">
       <div className="flex justify-between items-center mb-0.5">
-        <span className={`text-[10px] font-black uppercase tracking-widest ${isSelected ? 'text-orange-300' : 'text-stone-500'}`}>CUT #{cut.id}</span>
+        <span className={`text-[10px] font-black uppercase tracking-widest ${isSelected ? 'text-orange-300' : 'text-zinc-500'}`}>CUT #{cut.id}</span>
       </div>
-      <p className="text-[11px] text-stone-300 line-clamp-1 leading-tight">{cut.narrationText}</p>
+      <p className="text-[11px] text-zinc-300 line-clamp-1 leading-tight">{cut.narrationText}</p>
     </div>
   </div>
 );
@@ -54,12 +57,12 @@ const OutfitSelector: React.FC<{
   onSelect: (outfit: string) => void;
   onClose: () => void;
 }> = ({ characterName, outfits, onSelect, onClose }) => (
-    <div className="absolute z-[100] bottom-full right-0 mb-2 w-72 bg-stone-800 border border-stone-600 rounded-xl shadow-2xl animate-fade-in-scale ring-1 ring-black/50 overflow-hidden">
-        <div className="p-3 border-b border-stone-700 flex justify-between items-center bg-stone-900/80">
+    <div className="absolute z-[100] bottom-full right-0 mb-2 w-72 bg-zinc-800 border border-zinc-600 rounded-xl shadow-2xl animate-fade-in-scale ring-1 ring-black/50 overflow-hidden">
+        <div className="p-3 border-b border-zinc-700 flex justify-between items-center bg-zinc-900/80">
             <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest">{characterName} 프로필 의상함</span>
-            <button onClick={onClose} className="p-1 hover:bg-stone-700 rounded-full transition-colors"><XIcon className="w-3.5 h-3.5 text-stone-400" /></button>
+            <button onClick={onClose} className="p-1 hover:bg-zinc-700 rounded-full transition-colors"><XIcon className="w-3.5 h-3.5 text-zinc-400" /></button>
         </div>
-        <div className="max-h-60 overflow-y-auto p-1.5 custom-scrollbar bg-stone-800/50">
+        <div className="max-h-60 overflow-y-auto p-1.5 custom-scrollbar bg-zinc-800/50">
             {Object.entries(outfits).length > 0 ? (
                 Object.entries(outfits).map(([loc, desc]) => (
                     <button
@@ -67,12 +70,12 @@ const OutfitSelector: React.FC<{
                         onClick={() => onSelect(desc)}
                         className="w-full text-left p-2.5 hover:bg-orange-600/30 rounded-lg transition-all border border-transparent hover:border-orange-500/30 group mb-1 last:mb-0"
                     >
-                        <p className="text-[10px] font-bold text-stone-400 group-hover:text-orange-300 mb-0.5 uppercase tracking-tighter">{loc}</p>
-                        <p className="text-[11px] text-stone-200 line-clamp-2 leading-relaxed group-hover:text-white italic">"{desc}"</p>
+                        <p className="text-[10px] font-bold text-zinc-400 group-hover:text-orange-300 mb-0.5 uppercase tracking-tighter">{loc}</p>
+                        <p className="text-[11px] text-zinc-200 line-clamp-2 leading-relaxed group-hover:text-white italic">"{desc}"</p>
                     </button>
                 ))
             ) : (
-                <div className="p-4 text-center text-xs text-stone-500 italic">프로필에 저장된 의상이 없습니다.</div>
+                <div className="p-4 text-center text-xs text-zinc-500 italic">프로필에 저장된 의상이 없습니다.</div>
             )}
         </div>
     </div>
@@ -80,7 +83,7 @@ const OutfitSelector: React.FC<{
 
 export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ isOpen, onClose, draftScenes, onConfirm }) => {
   const { state, actions } = useAppContext();
-  const { isLoading, generatedImageHistory, characterDescriptions, storyTitle, artStyle } = state;
+  const { isLoading, generatedImageHistory, characterDescriptions, storyTitle, artStyle, locationRegistry } = state;
 
   const [localScenes, setLocalScenes] = useState<EditableScene[]>([]);
   const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
@@ -107,7 +110,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
     if (win) {
       win.document.title = `${storyTitle || 'Director'} - Review Popout`;
       document.querySelectorAll('link, style').forEach(s => win.document.head.appendChild(s.cloneNode(true)));
-      win.document.body.className = "bg-stone-950 m-0 p-0";
+      win.document.body.className = "bg-zinc-950 m-0 p-0";
       const container = win.document.createElement('div');
       container.id = 'popout-root';
       win.document.body.appendChild(container);
@@ -156,7 +159,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
   }, [isOpen, draftScenes]);
 
   const getCharKey = (name: string) => {
-    return Object.keys(characterDescriptions).find(key => characterDescriptions[key].koreanName === name);
+    return Object.keys(characterDescriptions).find(key => { const cd = characterDescriptions[key]; return (cd.canonicalName && cd.canonicalName === name) || cd.koreanName === name; });
   };
 
   const handleUpdateCut = (cutId: string, updates: Partial<EditableCut>) => {
@@ -168,16 +171,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
             const newCut = { ...cut, ...updates };
             // Automatic profile assignment logic for CAST changes
             if (updates.character) {
-              const profileOutfitParts: string[] = [];
-              (updates.character || []).forEach(name => {
-                const key = getCharKey(name);
-                if (key && characterDescriptions[key]) {
-                  const hair = characterDescriptions[key].hairStyleDescription ? `(${characterDescriptions[key].hairStyleDescription}) ` : '';
-                  const outfitText = characterDescriptions[key].koreanLocations?.[newCut.location] || characterDescriptions[key].koreanBaseAppearance || '기본 의상';
-                  profileOutfitParts.push(`[${name}: ${hair}${outfitText}]`);
-                }
-              });
-              newCut.characterOutfit = profileOutfitParts.join(' ');
+              newCut.characterOutfit = buildMechanicalOutfit(updates.character || [], characterDescriptions, newCut.location, { useKorean: true });
             }
             return newCut;
           }
@@ -241,9 +235,8 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
         const profileOutfit = char.koreanLocations?.[cut.location];
         
         if (profileOutfit) {
-          // Found exact match for this location
-          const hair = char.hairStyleDescription ? `(${char.hairStyleDescription}) ` : '';
-          nextOutfits.push(`[${name}: ${hair}${profileOutfit}]`);
+          // Found exact match for this location — 의상만 넣기 (hair DNA는 buildFinalPrompt에서 별도 처리)
+          nextOutfits.push(`[${name}: ${profileOutfit}]`);
         } else {
           // No exact match, trigger manual choice UI for the first problematic character
           manualCharName = name;
@@ -265,11 +258,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
   const handleManualOutfitSelect = (outfitDesc: string) => {
     if (!outfitSelectionTarget) return;
     const { cutId, charName } = outfitSelectionTarget;
-    
-    const key = getCharKey(charName);
-    const char = key ? characterDescriptions[key] : null;
-    const hair = char?.hairStyleDescription ? `(${char.hairStyleDescription}) ` : '';
-    const formattedOutfit = `[${charName}: ${hair}${outfitDesc}]`;
+    const formattedOutfit = `[${charName}: ${outfitDesc}]`;
 
     setLocalScenes(prev => {
         return prev.map(scene => ({
@@ -312,31 +301,48 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
   if (!isOpen) return null;
 
   const allCuts = localScenes.flatMap(s => s.cuts);
-  const allLocations = [...new Set(allCuts.map(c => c.location))];
+  // ★ Phase 10: 레지스트리 기반 장소 목록 (레지스트리 우선 + 컷에 있지만 레지스트리에 없는 장소 추가)
+  const cutLocations = [...new Set(allCuts.map(c => c.location))];
+  const registry = (locationRegistry && locationRegistry.length > 0) ? locationRegistry : [];
+  const allLocations = [...registry, ...cutLocations.filter(loc => !registry.includes(loc))];
+
+  // ★ Phase 10: 의상 매칭 실패 컷 감지
+  const outfitMismatchCuts = new Set<string>();
+  for (const cut of allCuts) {
+      const characters = cut.characters || [];
+      for (const name of characters) {
+          const key = getCharKey(name);
+          if (!key || !characterDescriptions[key]) continue;
+          const outfit = characterDescriptions[key].locations?.[cut.location];
+          if (!outfit || outfit.trim().length < 3) {
+              outfitMismatchCuts.add(cut.id);
+          }
+      }
+  }
   
   // Find current scene number based on selectedCutId
   const currentScene = localScenes.find(s => s.cuts.some(c => c.id === selectedCutId));
   const currentSceneId = currentScene ? currentScene.sceneNumber : 1;
 
   const renderContent = () => (
-    <div className={`bg-stone-900 border border-stone-700 shadow-2xl w-full h-full flex flex-col overflow-hidden ${isExternal ? 'rounded-none' : 'rounded-3xl'}`}>
-      <header className="flex justify-between items-center p-6 border-b border-stone-800 bg-stone-900/50 flex-shrink-0">
+    <div className={`bg-zinc-900 border border-zinc-700 shadow-2xl w-full h-full flex flex-col overflow-hidden ${isExternal ? 'rounded-none' : 'rounded-3xl'}`}>
+      <header className="flex justify-between items-center p-6 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
         <div className="flex items-center gap-4">
           <div className="p-3 bg-orange-600/20 rounded-2xl border border-orange-500/30">
             <SparklesIcon className="w-8 h-8 text-orange-400" />
           </div>
           <div>
             <h2 className="text-2xl font-black text-white tracking-tight">AI Director Review</h2>
-            <p className="text-sm text-stone-500 font-medium">연출 의도를 입력하면 AI가 모든 시각적 요소를 정밀하게 설계합니다.</p>
+            <p className="text-sm text-zinc-500 font-medium">연출 의도를 입력하면 AI가 모든 시각적 요소를 정밀하게 설계합니다.</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {!isExternal && (
-            <button onClick={handlePopOut} className="p-2 text-stone-400 hover:text-white bg-stone-800 rounded-lg border border-stone-700 transition-colors" title="새 창으로 분리">
+            <button onClick={handlePopOut} className="p-2 text-zinc-400 hover:text-white bg-zinc-800 rounded-lg border border-zinc-700 transition-colors" title="새 창으로 분리">
               <ArrowTopRightOnSquareIcon className="w-5 h-5" />
             </button>
           )}
-          <button onClick={onClose} className="p-3 rounded-full text-stone-500 hover:text-white hover:bg-stone-800 transition-all">
+          <button onClick={onClose} className="p-3 rounded-full text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all">
             <XIcon className="w-6 h-6" />
           </button>
         </div>
@@ -344,10 +350,10 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
 
       <div className="flex flex-grow overflow-hidden">
         {/* Sidebar */}
-        <div className="w-1/4 min-w-[280px] border-r border-stone-800 bg-stone-950/30 flex flex-col">
-          <div className="p-4 border-b border-stone-800 bg-stone-900/50 flex justify-between items-center">
-            <h3 className="text-[10px] font-black text-stone-500 uppercase tracking-[0.2em]">Storyboard Draft</h3>
-            <span className="px-2 py-0.5 rounded-full bg-stone-800 text-[10px] font-bold text-stone-400 border border-stone-700">{allCuts.length} CUTS</span>
+        <div className="w-1/4 min-w-[280px] border-r border-zinc-800 bg-zinc-950/30 flex flex-col">
+          <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
+            <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em]">Storyboard Draft</h3>
+            <span className="px-2 py-0.5 rounded-full bg-zinc-800 text-[10px] font-bold text-zinc-400 border border-zinc-700">{allCuts.length} CUTS</span>
           </div>
           <div className="flex-grow overflow-y-auto p-4 space-y-2 custom-scrollbar">
             {allCuts.map(cut => {
@@ -361,6 +367,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                   hasModified={modifiedCutIds.has(cut.id)}
                   imageUrl={history?.[history.length - 1]?.imageUrl}
                   versionCount={history?.length || 0}
+                  outfitMismatch={outfitMismatchCuts.has(cut.id)}
                 />
               );
             })}
@@ -368,7 +375,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
         </div>
 
         {/* Editor Main */}
-        <div ref={editorScrollRef} className="flex-grow p-8 overflow-y-auto bg-stone-900 custom-scrollbar relative">
+        <div ref={editorScrollRef} className="flex-grow p-8 overflow-y-auto bg-zinc-900 custom-scrollbar relative">
           <div className="max-w-3xl mx-auto space-y-8">
             {allCuts.map(currentCut => {
               const history = cutHistoryMap.get(currentCut.id) || [];
@@ -380,10 +387,10 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                 <div 
                   id={`review-editor-card-${currentCut.id}`}
                   key={currentCut.id} 
-                  className={`space-y-4 relative p-6 rounded-3xl border-2 transition-all duration-500 ${selectedCutId === currentCut.id ? 'bg-stone-800/40 border-orange-500/50 shadow-2xl' : 'bg-stone-800/10 border-stone-800 opacity-60 hover:opacity-100'}`}
+                  className={`space-y-4 relative p-6 rounded-3xl border-2 transition-all duration-500 ${selectedCutId === currentCut.id ? 'bg-zinc-800/40 border-orange-500/50 shadow-2xl' : 'bg-zinc-800/10 border-zinc-800 opacity-60 hover:opacity-100'}`}
                 >
                   {regeneratingCutIds.has(currentCut.id) && (
-                    <div className="absolute inset-0 bg-stone-900/80 z-10 flex flex-col items-center justify-center rounded-3xl backdrop-blur-sm">
+                    <div className="absolute inset-0 bg-zinc-900/80 z-10 flex flex-col items-center justify-center rounded-3xl backdrop-blur-sm">
                       <SpinnerIcon className="w-10 h-10 text-orange-400 mb-3" />
                       <p className="text-sm font-black text-orange-300 animate-pulse uppercase tracking-widest">Re-Imagining Scene...</p>
                     </div>
@@ -392,7 +399,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="text-3xl font-black text-orange-500/50 italic tracking-tighter">#{currentCut.id}</span>
-                      <div className="h-1 w-12 bg-stone-800 rounded-full"></div>
+                      <div className="h-1 w-12 bg-zinc-800 rounded-full"></div>
                       {hasModified && <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-[10px] font-black text-green-400 border border-green-500/30 uppercase tracking-tighter">Modified</span>}
                     </div>
                     <div className="flex gap-2">
@@ -408,20 +415,20 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-stone-500 uppercase tracking-widest block px-1">Narration / Script</label>
+                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block px-1">Narration / Script</label>
                     <textarea
                       value={currentCut.narrationText || ''}
                       onChange={(e) => handleUpdateCut(currentCut.id, { narrationText: e.target.value })}
                       rows={2}
-                      className="w-full p-4 text-xl font-bold bg-stone-950/50 rounded-2xl border border-stone-800 text-stone-100 focus:outline-none focus:border-orange-500 transition-all resize-none shadow-inner"
+                      className="w-full p-4 text-xl font-bold bg-zinc-950/50 rounded-2xl border border-zinc-800 text-zinc-100 focus:outline-none focus:border-orange-500 transition-all resize-none shadow-inner"
                       placeholder="나레이션이 없는 컷입니다."
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-stone-500 uppercase tracking-widest block px-1">Cast</label>
-                      <div className="flex gap-2 p-2 bg-stone-950/30 rounded-2xl border border-stone-800 flex-wrap">
+                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block px-1">Cast</label>
+                      <div className="flex gap-2 p-2 bg-zinc-950/30 rounded-2xl border border-zinc-800 flex-wrap">
                         {Object.values(characterDescriptions).map(charDesc => {
                           const charName = charDesc.koreanName;
                           return (
@@ -433,7 +440,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                                   : [...currentCut.character, charName];
                                 handleUpdateCut(currentCut.id, { character: newChars });
                               }}
-                              className={`flex-1 min-w-[60px] py-1.5 text-sm font-black rounded-xl transition-all ${currentCut.character.includes(charName) ? 'bg-orange-600 text-white shadow-md' : 'text-stone-800 text-stone-500 hover:text-stone-300'}`}
+                              className={`flex-1 min-w-[60px] py-1.5 text-sm font-black rounded-xl transition-all ${currentCut.character.includes(charName) ? 'bg-orange-600 text-white shadow-md' : 'text-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
                             >
                               {charName}
                             </button>
@@ -442,21 +449,22 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-stone-500 uppercase tracking-widest block px-1">Location</label>
+                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block px-1">Location</label>
                       <select
+                        id="location-dropdown"
                         value={currentCut.location}
                         onChange={(e) => handleUpdateCut(currentCut.id, { location: e.target.value })}
-                        className="w-full p-2.5 bg-stone-950/30 rounded-2xl border border-stone-800 text-sm font-bold text-white focus:ring-1 focus:ring-orange-500 appearance-none"
+                        className="w-full p-2.5 bg-zinc-950/30 rounded-2xl border border-zinc-800 text-sm font-bold text-white focus:ring-1 focus:ring-orange-500 appearance-none"
                       >
-                        {allLocations.map(loc => <option key={loc} value={loc} className="bg-stone-800">{loc}</option>)}
+                        {allLocations.map(loc => <option key={loc} value={loc} className="bg-zinc-800">{loc}</option>)}
                       </select>
                     </div>
                   </div>
 
-                  <div className="p-5 bg-stone-900/50 rounded-3xl border border-stone-800 shadow-inner flex gap-6 items-start">
+                  <div className="p-5 bg-zinc-900/50 rounded-3xl border border-zinc-800 shadow-inner flex gap-6 items-start">
                     <div className="flex flex-col gap-3">
                       <div
-                        className="w-[160px] h-[160px] flex-shrink-0 bg-stone-950 rounded-2xl border border-stone-800 overflow-hidden flex items-center justify-center relative group cursor-zoom-in shadow-2xl"
+                        className="w-[160px] h-[160px] flex-shrink-0 bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden flex items-center justify-center relative group cursor-zoom-in shadow-2xl"
                         onClick={() => currentImg && actions.handleOpenImageViewer(currentImg.imageUrl, `Cut ${currentCut.id} Reference`, currentImg.prompt)}
                       >
                         {currentImg ? (
@@ -481,15 +489,15 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                           <button
                             onClick={() => changeViewingVersion(currentCut.id, 'prev', history.length)}
                             disabled={currentVersionIdx === 0}
-                            className="p-1 rounded-lg bg-stone-800 text-stone-400 hover:text-white disabled:opacity-20"
+                            className="p-1 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white disabled:opacity-20"
                           >
                             <ArrowLeftIcon className="w-4 h-4" />
                           </button>
-                          <span className="text-[10px] font-black text-stone-500">{currentVersionIdx + 1} / {history.length}</span>
+                          <span className="text-[10px] font-black text-zinc-500">{currentVersionIdx + 1} / {history.length}</span>
                           <button
                             onClick={() => changeViewingVersion(currentCut.id, 'next', history.length)}
                             disabled={currentVersionIdx === history.length - 1}
-                            className="p-1 rounded-lg bg-stone-800 text-stone-400 hover:text-white disabled:opacity-20"
+                            className="p-1 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white disabled:opacity-20"
                           >
                             <ChevronRightIcon className="w-4 h-4" />
                           </button>
@@ -499,14 +507,14 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
 
                     <div className="flex-grow flex flex-col h-full min-w-0">
                       <div className="flex justify-between items-center mb-2">
-                        <label className="text-sm font-black text-amber-400 uppercase tracking-widest flex items-center gap-2">
+                        <label className="text-sm font-black text-orange-400 uppercase tracking-widest flex items-center gap-2">
                           <SparklesIcon className="w-5 h-5" />
                           Directorial Intent
                         </label>
                         {currentImg && (
                           <div className="group relative">
-                            <BookmarkSquareIcon className="w-4 h-4 text-stone-600 cursor-help hover:text-orange-400 transition-colors" />
-                            <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-stone-950 border border-stone-700 rounded-xl shadow-2xl text-[10px] text-stone-400 invisible group-hover:visible z-30 font-mono leading-relaxed break-words">
+                            <BookmarkSquareIcon className="w-4 h-4 text-zinc-600 cursor-help hover:text-orange-400 transition-colors" />
+                            <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-zinc-950 border border-zinc-700 rounded-xl shadow-2xl text-[10px] text-zinc-400 invisible group-hover:visible z-30 font-mono leading-relaxed break-words">
                               <p className="text-orange-400 font-bold mb-1 uppercase tracking-tighter">[Prompt of this version]</p>
                               {currentImg.prompt}
                             </div>
@@ -516,7 +524,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                       <textarea
                         value={currentCut.directorialIntent || ''}
                         onChange={(e) => handleUpdateCut(currentCut.id, { directorialIntent: e.target.value })}
-                        className={`w-full flex-grow p-4 text-base font-medium rounded-2xl bg-stone-950/50 border-2 transition-all focus:outline-none focus:ring-4 focus:ring-amber-500/10 placeholder:text-stone-700 leading-relaxed ${(hasModified && (currentCut.directorialIntent || '').trim()) ? 'border-orange-400 shadow-[0_0_20px_rgba(249,115,22,0.15)]' : 'border-stone-800'}`}
+                        className={`w-full flex-grow p-4 text-base font-medium rounded-2xl bg-zinc-950/50 border-2 transition-all focus:outline-none focus:ring-4 focus:ring-orange-500/10 placeholder:text-zinc-700 leading-relaxed ${(hasModified && (currentCut.directorialIntent || '').trim()) ? 'border-orange-400 shadow-[0_0_20px_rgba(249,115,22,0.15)]' : 'border-zinc-800'}`}
                         placeholder="연출 의도를 구체적으로 입력하세요. 예) 비가 억수같이 쏟아지는 창밖을 보며 흐느끼는 장면. 조명은 차가운 푸른색."
                         style={{ minHeight: '115px' }}
                       />
@@ -525,7 +533,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                           <button
                             key={chip.label}
                             onClick={() => appendQuickIntent(currentCut.id, currentCut.directorialIntent || '', chip.text)}
-                            className="px-3 py-1.5 rounded-full bg-stone-800 border border-stone-700 text-[10px] font-bold text-stone-400 hover:text-orange-300 hover:border-orange-500 transition-all active:scale-95"
+                            className="px-3 py-1.5 rounded-full bg-zinc-800 border border-zinc-700 text-[10px] font-bold text-zinc-400 hover:text-orange-300 hover:border-orange-500 transition-all active:scale-95"
                           >
                             {chip.label}
                           </button>
@@ -534,13 +542,25 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                     </div>
                   </div>
                   
-                  <p className="mt-[-0.75rem] text-[9px] font-bold text-stone-500 italic px-1 text-right">
+                  <p className="mt-[-0.75rem] text-[9px] font-bold text-zinc-500 italic px-1 text-right">
                     * 입력한 의도는 '검수 완료' 시 AI가 세부 묘사(포즈, 표정, 배경)로 자동 변환하여 이미지 생성에 사용합니다.
                   </p>
 
-                  <div className="space-y-2 bg-stone-950/20 p-4 rounded-2xl border border-stone-800/50 relative">
+                  <div className="space-y-2 bg-zinc-950/20 p-4 rounded-2xl border border-zinc-800/50 relative">
+                    {outfitMismatchCuts.has(currentCut.id) && (
+                      <div className="mb-2 px-3 py-2 bg-red-900/30 border border-red-700/50 rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-400 text-[10px] font-bold">⚠️ 의상 매칭 실패</span>
+                          <span className="text-red-300/70 text-[10px]">"{currentCut.location}"에 해당하는 의상이 없습니다.</span>
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={() => { const chars = currentCut.characters || []; for (const n of chars) { const k = getCharKey(n); if (k && characterDescriptions[k] && (!characterDescriptions[k].locations?.[currentCut.location] || characterDescriptions[k].locations[currentCut.location].trim().length < 3)) { actions.handleGenerateLocationOutfits(k); break; } } }} className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-orange-600/30 border border-orange-500/40 text-orange-300 hover:bg-orange-600/50 transition-colors">자동 생성</button>
+                          <button onClick={() => document.getElementById('location-dropdown')?.focus()} className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-zinc-700/50 border border-zinc-600 text-zinc-300 hover:bg-zinc-600/50 transition-colors">장소 변경</button>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center">
-                      <label className="text-[10px] font-black text-stone-600 uppercase tracking-widest">Base Outfit for {currentCut.location}</label>
+                      <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">Base Outfit for {currentCut.location}</label>
                       <div className="relative">
                         <button
                           onClick={() => handleSyncOutfitFromProfile(currentCut)}
@@ -565,7 +585,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                       value={currentCut.characterOutfit || ''}
                       onChange={(e) => handleUpdateCut(currentCut.id, { characterOutfit: e.target.value })}
                       rows={2}
-                      className="w-full p-3 bg-transparent text-xs font-medium text-stone-400 border border-stone-800/50 rounded-xl focus:outline-none focus:border-orange-500 resize-none shadow-inner"
+                      className="w-full p-3 bg-transparent text-xs font-medium text-zinc-400 border border-zinc-800/50 rounded-xl focus:outline-none focus:border-orange-500 resize-none shadow-inner"
                       placeholder="의상 설명 (프로필에서 자동 주입됨)"
                     />
                   </div>
@@ -576,18 +596,18 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
         </div>
       </div>
 
-      <footer className="p-6 bg-stone-900 border-t border-stone-800 flex justify-between items-center flex-shrink-0">
+      <footer className="p-6 bg-zinc-900 border-t border-zinc-800 flex justify-between items-center flex-shrink-0">
         <button
           onClick={() => actions.handleRegenerateStoryboardDraft()}
           disabled={isLoading}
-          className="flex items-center gap-3 px-6 py-3 text-sm font-black rounded-2xl bg-stone-800 hover:bg-stone-700 text-stone-400 transition-all border border-stone-700 disabled:opacity-50 active:scale-95 uppercase tracking-tighter"
+          className="flex items-center gap-3 px-6 py-3 text-sm font-black rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-all border border-zinc-700 disabled:opacity-50 active:scale-95 uppercase tracking-tighter"
         >
           <RefreshIcon className="w-5 h-5" />
           Regenerate All Drafts
         </button>
         <div className="flex items-center gap-6">
           <div className="text-right">
-            <p className="text-[10px] font-black text-stone-500 uppercase tracking-[0.2em]">Ready to Process</p>
+            <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em]">Ready to Process</p>
             <p className="text-sm font-bold text-white"><span className="text-orange-400">{modifiedCutIds.size}</span> Custom Intentions Set</p>
           </div>
           <button
@@ -596,7 +616,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
             className="group flex items-center gap-4 px-10 py-4 text-xl font-black rounded-2xl text-white bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-500 hover:to-orange-600 transition-all shadow-[0_0_30px_rgba(234,88,12,0.3)] transform hover:-translate-y-1 active:scale-95 disabled:opacity-70 disabled:transform-none uppercase tracking-tight"
           >
             {isConfirming ? <SpinnerIcon className="w-7 h-7" /> : <CheckIcon className="w-7 h-7 font-black" />}
-            <span>Finalize Direction & Generate</span>
+            <span>연출 확정</span>
           </button>
         </div>
       </footer>
@@ -612,17 +632,17 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
   return (
     <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4 sm:p-6 animate-fade-in" aria-modal="true" role="dialog">
       {isExternal ? (
-        <div className="flex flex-col items-center justify-center text-center p-12 bg-stone-900 rounded-3xl border border-stone-700 shadow-2xl max-w-lg">
+        <div className="flex flex-col items-center justify-center text-center p-12 bg-zinc-900 rounded-3xl border border-zinc-700 shadow-2xl max-w-lg">
           <div className="w-20 h-20 bg-orange-600/20 rounded-full flex items-center justify-center mb-6 border border-orange-500/30">
             <ArrowTopRightOnSquareIcon className="w-10 h-10 text-orange-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">창이 분리되었습니다</h2>
-          <p className="text-stone-400 mb-8 leading-relaxed">디렉터 리뷰 창이 독립된 환경에서 실행 중입니다.<br />이 창을 닫기 전까지 계속해서 수정을 진행할 수 있습니다.</p>
+          <p className="text-zinc-400 mb-8 leading-relaxed">디렉터 리뷰 창이 독립된 환경에서 실행 중입니다.<br />이 창을 닫기 전까지 계속해서 수정을 진행할 수 있습니다.</p>
           <button onClick={() => { if (externalWindowRef.current) externalWindowRef.current.close(); setIsExternal(false); }} className="w-full py-4 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2">
             <RefreshIcon className="w-5 h-5" />
             현재 탭으로 가져오기
           </button>
-          <button onClick={onClose} className="w-full mt-3 py-4 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold rounded-xl transition-all">모달 닫기</button>
+          <button onClick={onClose} className="w-full mt-3 py-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl transition-all">모달 닫기</button>
         </div>
       ) : (
         <div className="w-full max-w-7xl h-full max-h-[92vh]">

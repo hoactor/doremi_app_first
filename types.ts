@@ -1,18 +1,50 @@
+// types.ts — Re-export 허브
+// 실제 정의는 types/ 폴더에 분리, 기존 import 경로 호환 유지
 
+// ─── 분리된 모듈 re-export ────────────────────────────────────────
+export type { UniversalScriptSchema, USSCharacter, USSLocation, USSCut } from './types/uss';
+export type {
+    CutType, PipelineCheckpoint, ApiSource, EnrichedBeat,
+    ScenarioAnalysis, BehaviorPatterns, OutfitRecommendation,
+    CharacterBible, ContiCut, CinematographyCut, CinematographyPlan,
+} from './types/pipeline';
+
+// ─── 기본 타입 ────────────────────────────────────────────────────
 export type Gender = 'male' | 'female';
 export type ImageRatio = '1:1' | '16:9' | '9:16';
 export type AppState = 'initial' | 'storyboardGenerated';
 export type SceneDirectionTheme = string;
 export type NanoModel = 'nano-2.5' | 'nano-3.1' | 'nano-3pro';
 export type ArtStyle = 'normal' | 'moe' | 'dalle-chibi' | 'custom' | 'vibrant' | 'kyoto';
+export type ContentFormat = 'ssul-shorts' | 'webtoon' | 'anime';
+export type AIModelTier = 'sonnet' | 'opus';
+export type ImageEngine = 'gemini' | 'flux';
+export type FluxModel = 'flux-pro' | 'flux-flex' | 'flux-lora';
+export type ScriptInputMode = 'narration' | 'msf' | 'uss';
+
+// ─── Phase 6: LoRA 레지스트리 ────────────────────────────────────
+export interface LoRAEntry {
+    id: string;
+    name: string;
+    url: string;
+    triggerWord: string;
+    scale: number;
+    type: 'character' | 'style';
+    baseAppearance?: string;            // 캐릭터 LoRA 전용 — 외형 묘사 (프롬프트 자동 삽입용)
+    createdAt: string;
+}
 
 export interface GeneratedImage {
     id: string;
     imageUrl: string;
+    localPath?: string;
     sourceCutNumber: string;
     prompt: string;
-    engine: 'dalle3' | 'nano' | 'nano-v3';
+    engine: 'dalle3' | 'nano' | 'nano-v3' | 'imagen-rough';
     createdAt: string;
+    tag?: 'rough' | 'normal' | 'hq';
+    model?: string;
+    artStyleLabel?: string;
 }
 
 export interface CostumeSuggestion {
@@ -32,6 +64,10 @@ export interface CharacterImage {
 
 export interface CharacterDescription {
     koreanName: string;
+    /** 영어 정규 이름 — 내부 매칭 키. 없으면 koreanName 폴백 (기존 프로젝트 호환) */
+    canonicalName?: string;
+    /** 대본에서 이 캐릭터를 가리키는 모든 한국어 지칭 */
+    aliases?: string[];
     koreanBaseAppearance: string;
     baseAppearance: string;
     gender: 'male' | 'female';
@@ -40,10 +76,10 @@ export interface CharacterDescription {
     koreanLocations: { [location: string]: string };
     firstScenePrompt?: string;
     revisedPrompt?: string;
-    characterSheetHistory?: string[]; // Formerly characterSheetUrl
-    isEditingSheet?: boolean; // For loading state
+    characterSheetHistory?: string[];
+    isEditingSheet?: boolean;
     imageLoading?: boolean;
-    images?: CharacterImage[]; // Versions of the character image
+    images?: CharacterImage[];
     transparentImageUrl?: string;
     aPoseImageUrl?: string;
     isRemovingBackground?: boolean;
@@ -60,23 +96,20 @@ export interface CharacterDescription {
     isGeneratingLocationOutfits?: boolean;
     outfitPresets?: { name: string, description: string }[];
     locationOutfitImages?: { [location: string]: { imageUrl?: string; imageLoading?: boolean } };
-    // New fields for Costume Studio
     mannequinImageUrl?: string | null;
-    mannequinHistory?: string[]; // NEW: For step 3 undo functionality
+    mannequinHistory?: string[];
     isApplyingCostume?: boolean;
     isRequestingOutfitModification?: { [location: string]: boolean };
-    
-    // New fields for Character Sheet Studio
-    sourceImageUrl?: string; // The very first image uploaded by the user
+    sourceImageUrl?: string;
     isUnifyingStyle?: boolean;
     isInjectingPersonality?: boolean;
     upscaledImageUrl?: string;
     isUpscaling?: boolean;
-
-    // NEW: Character Visual DNA Tracking
-    hairStyleDescription?: string; 
-    facialFeatures?: string; // NEW: Added facial bone structure and features
+    hairStyleDescription?: string;
+    facialFeatures?: string;
     isAnalyzingHair?: boolean;
+    loraId?: string;
+    loraScaleOverride?: number;
 }
 
 export interface Cut {
@@ -90,27 +123,31 @@ export interface Cut {
     characterEmotionAndExpression: string;
     characterPose: string;
     characterOutfit: string;
+    characterIdentityDNA?: string;
     locationDescription: string;
     otherNotes: string;
     imageUrls: string[];
     suggestedEffect?: { name: string; prompt: string; } | null;
     imageLoading: boolean;
     audioDataUrls?: string[];
-    audioDuration?: number; // Duration of the assigned audio in seconds
+    audioDuration?: number;
     selectedImageId: string | null;
     directorialIntent?: string;
     isUpdatingIntent?: boolean;
-    dialogueSpeaker?: string; // Explicitly selected speaker for dialogue in this cut
-    // Guest Character Fields
+    dialogueSpeaker?: string;
     guestCharacterUrl?: string | null;
     guestCharacterName?: string | null;
-    // Typecast Specific Fields
     voiceEmotion?: string;
     voicePitch?: number;
     voiceSpeed?: number;
     isFormattingNarration?: boolean;
-    imagePrompt?: string; // Final combined prompt used for generation
-    artStyleOverride?: ArtStyle; // NEW: Specific art style for this cut
+    imagePrompt?: string;
+    artStyleOverride?: ArtStyle;
+    useIntenseEmotion?: boolean;
+    isIntensifying?: boolean;
+    characterEmotionAndExpressionIntense?: string;
+    sceneDescriptionIntense?: string;
+    characterPoseIntense?: string;
 }
 
 export interface Scene {
@@ -153,7 +190,8 @@ export interface MasterStyleGuide {
 export interface Notification {
     id: number;
     message: string;
-    type: 'error' | 'success' | 'info';
+    type: 'error' | 'success' | 'info' | 'warning';
+    action?: { label: string; callback: () => void };
 }
 
 export interface ClosetCharacter {
@@ -166,7 +204,7 @@ export interface StudioSession {
     originalImage: GeneratedImage | null;
     currentImage: GeneratedImage | null;
     history: GeneratedImage[];
-    referenceImageUrl: string | null;
+    referenceImageUrls: string[];
     editPrompt: string;
     zoom: number;
     pan: { x: number; y: number };
@@ -183,11 +221,11 @@ export interface EditableCut {
     characterEmotionAndExpression: string;
     characterPose: string;
     characterOutfit: string;
+    characterIdentityDNA?: string;
     locationDescription: string;
     otherNotes: string;
     suggestedEffect?: { name: string; prompt: string; } | null;
     directorialIntent?: string;
-    // Chain of Thought fields (Optional, for AI internal logic)
     context_analysis?: string;
     primary_emotion?: string;
 }
@@ -204,7 +242,7 @@ export type EditImageFunction = (
     baseImageUrl: string,
     editPrompt: string,
     originalPrompt: string,
-    referenceImageUrl?: string,
+    referenceImageUrls?: string[],
     maskBase64?: string,
     masterStyleImageUrl?: string,
     isCreativeGeneration?: boolean
@@ -222,13 +260,16 @@ export interface ReferenceBackground {
     koreanTitle: string;
 }
 
+// ─── AppDataState ─────────────────────────────────────────────────
+import type { EnrichedBeat, PipelineCheckpoint, ApiSource, ScenarioAnalysis, CharacterBible, ContiCut, CinematographyPlan } from './types/pipeline';
+
 export interface AppDataState {
     appState: AppState;
     generatedContent: GeneratedScript | null;
-    editableStoryboard: EditableScene[] | null; // New field for draft review
-    storyboardSeed: number | null; // To allow for storyboard regeneration
+    editableStoryboard: EditableScene[] | null;
+    storyboardSeed: number | null;
     characterDescriptions: { [key: string]: CharacterDescription };
-    locationVisualDNA: { [location: string]: string }; // NEW: Spatial consistency DNA
+    locationVisualDNA: { [location: string]: string };
     contextSummary: string | null;
     isLoading: boolean;
     loadingMessage: string;
@@ -238,27 +279,27 @@ export interface AppDataState {
     notifications: Notification[];
     openAiApiKey: string | null;
     geminiTokenCount: number;
+    claudeTokenCount: number;
     dalleImageCount: number;
+    falUsage: { totalImages: number; totalCost: number; history: { date: string; images: number; cost: number; model: string }[] };
     userInputScript: string;
     enrichedScript: string | null;
+    enrichedBeats: EnrichedBeat[] | null;
     storyTitle: string | null;
+    storyBrief?: string;
     speakerGender: Gender;
     assetLibrary: LibraryAsset[];
     isAssetLibraryOpen: boolean;
     backgroundReplacementTargetCutNumber: string | null;
     backgroundReplacementSourceUrl: string | null;
-    guestSelectionTargetCutNumber: string | null; // New state for guest selection
+    guestSelectionTargetCutNumber: string | null;
     closetCharacters: ClosetCharacter[];
     smartFieldSuggestions: { [cutId: string]: { [field: string]: string[] } };
     animationStyle: 'none' | 'kyoto' | 'pa_works';
     generatedImageHistory: GeneratedImage[];
-    studioSessions: {
-        a: StudioSession;
-        b: StudioSession;
-    };
-    nextStudioSlot: 'a' | 'b';
+    studioSessions: { a: StudioSession };
     filenameTemplate: string;
-    activeStudioTarget: 'a' | 'b';
+    activeStudioTarget: 'a';
     isAutoGenerating: boolean;
     isGeneratingSRT: boolean;
     backgroundMusicUrl: string | null;
@@ -268,8 +309,28 @@ export interface AppDataState {
     cutToSplit: Cut | null;
     artStyle: ArtStyle;
     customArtStyle: string;
+    imageRatio: ImageRatio;
     selectedNanoModel: NanoModel;
+    selectedImageEngine: ImageEngine;
+    selectedFluxModel: FluxModel;
+    aiModelTier: AIModelTier;
+    contentFormat: ContentFormat;
+    pipelineCheckpoint: PipelineCheckpoint;
+    scriptMetadata?: { metadataByLine: Record<number, any>; isDetailed: boolean };
+    scenarioAnalysis: ScenarioAnalysis | null;
+    characterBibles: CharacterBible[] | null;
+    contiCuts: ContiCut[] | null;
+    cinematographyPlan: CinematographyPlan | null;
+    locationRegistry: string[];
+    logline: string;
+    scriptInputMode: ScriptInputMode;
+    styleLoraId?: string;
+    styleLoraScaleOverride?: number;
+    currentProjectId: string | null;
+    isProjectSaved: boolean;
 }
+
+// ─── AppAction ────────────────────────────────────────────────────
 
 export type AppAction =
     | { type: 'START_LOADING'; payload: string }
@@ -293,12 +354,15 @@ export type AppAction =
     | { type: 'REMOVE_NOTIFICATION'; payload: number }
     | { type: 'SET_OPENAI_API_KEY'; payload: string | null }
     | { type: 'SET_CONTEXT_SUMMARY'; payload: string | null }
-    | { type: 'ADD_USAGE'; payload: { geminiTokens: number; dalleImages: number } }
+    | { type: 'ADD_USAGE'; payload: { tokens: number; source: ApiSource } }
+    | { type: 'ADD_FAL_USAGE'; payload: { images: number; model: FluxModel } }
     | { type: 'RESET_STATE' }
     | { type: 'START_NEW_ANALYSIS' }
     | { type: 'SET_USER_INPUT_SCRIPT'; payload: string }
     | { type: 'SET_ENRICHED_SCRIPT'; payload: string | null }
+    | { type: 'SET_ENRICHED_BEATS'; payload: EnrichedBeat[] | null }
     | { type: 'SET_STORY_TITLE'; payload: string | null }
+    | { type: 'SET_STORY_BRIEF'; payload: string }
     | { type: 'SET_SPEAKER_GENDER'; payload: Gender }
     | { type: 'SET_ASSET_LIBRARY'; payload: LibraryAsset[] }
     | { type: 'ADD_ASSET_TO_LIBRARY'; payload: LibraryAsset }
@@ -316,34 +380,133 @@ export type AppAction =
     | { type: 'CLEAR_SMART_FIELD_SUGGESTIONS'; payload: { cutId: string } }
     | { type: 'SET_ANIMATION_STYLE'; payload: 'none' | 'kyoto' | 'pa_works' }
     | { type: 'ADD_TO_IMAGE_HISTORY'; payload: GeneratedImage }
-    | { type: 'ADD_IMAGE_TO_CUT'; payload: { image: GeneratedImage; cutNumber: string } } // NEW
-    | { type: 'TOGGLE_NEXT_STUDIO_SLOT' }
+    | { type: 'ADD_IMAGE_TO_CUT'; payload: { image: GeneratedImage; cutNumber: string } }
     | { type: 'DELETE_FROM_IMAGE_HISTORY'; payload: string }
-    | { type: 'LOAD_IMAGE_INTO_STUDIO'; payload: { studioId: 'a' | 'b'; image: GeneratedImage } }
-    | { type: 'LOAD_USER_IMAGE_INTO_STUDIO'; payload: { studioId: 'a' | 'b'; imageDataUrl: string } }
-    | { type: 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD', payload: { studioId: 'a' | 'b', imageDataUrl: string } }
-    | { type: 'UPDATE_STUDIO_SESSION', payload: { studioId: 'a' | 'b'; data: Partial<StudioSession> } }
-    | { type: 'SET_ORIGINAL_IMAGE', payload: { studioId: 'a' | 'b', image: GeneratedImage } }
-    | { type: 'PREPARE_STUDIO_FOR_CUT', payload: { studioId: 'a' | 'b', cutNumber: string, prompt: string } }
-    | { type: 'CLEAR_STUDIO_SESSION', payload: { studioId: 'a' | 'b' } }
-    | { type: 'REVERT_STUDIO_SESSION', payload: { studioId: 'a' | 'b' } }
-    | { type: 'UNDO_STUDIO_SESSION', payload: { studioId: 'a' | 'b' } }
-    | { type: 'COPY_ORIGINAL_TO_CURRENT', payload: { studioId: 'a' | 'b' } }
+    | { type: 'LOAD_IMAGE_INTO_STUDIO'; payload: { studioId: 'a'; image: GeneratedImage } }
+    | { type: 'LOAD_USER_IMAGE_INTO_STUDIO'; payload: { studioId: 'a'; imageDataUrl: string } }
+    | { type: 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD', payload: { studioId: 'a', imageDataUrl: string } }
+    | { type: 'UPDATE_STUDIO_SESSION', payload: { studioId: 'a'; data: Partial<StudioSession> } }
+    | { type: 'SET_ORIGINAL_IMAGE', payload: { studioId: 'a', image: GeneratedImage } }
+    | { type: 'PREPARE_STUDIO_FOR_CUT', payload: { studioId: 'a', cutNumber: string, prompt: string } }
+    | { type: 'CLEAR_STUDIO_SESSION', payload: { studioId: 'a' } }
+    | { type: 'REVERT_STUDIO_SESSION', payload: { studioId: 'a' } }
+    | { type: 'UNDO_STUDIO_SESSION', payload: { studioId: 'a' } }
+    | { type: 'COPY_ORIGINAL_TO_CURRENT', payload: { studioId: 'a' } }
     | { type: 'COPY_PROMPT_TO_STUDIOS', payload: string }
     | { type: 'SET_FILENAME_TEMPLATE', payload: string }
-    | { type: 'SET_ACTIVE_STUDIO_TARGET', payload: 'a' | 'b' }
-    | { type: 'UPDATE_STUDIO_TRANSFORM', payload: { studioId: 'a' | 'b', zoom: number, pan: { x: number, y: number } } }
+    | { type: 'SET_ACTIVE_STUDIO_TARGET', payload: 'a' }
+    | { type: 'UPDATE_STUDIO_TRANSFORM', payload: { studioId: 'a', zoom: number, pan: { x: number, y: number } } }
     | { type: 'START_AUTO_GENERATION'; payload: string }
     | { type: 'STOP_AUTO_GENERATION' }
     | { type: 'SET_FAILED_CUTS', payload: string[] }
     | { type: 'SET_BACKGROUND_MUSIC', payload: { url: string | null, name: string | null } }
     | { type: 'SELECT_IMAGE_FOR_CUT', payload: { cutNumber: string, imageId: string | null } }
+    | { type: 'TOGGLE_INTENSE_EMOTION', payload: { cutNumber: string } }
+    | { type: 'TOGGLE_ALL_INTENSE_EMOTION' }
     | { type: 'OPEN_CUT_SPLITTER', payload: Cut }
     | { type: 'CLOSE_CUT_SPLITTER' }
     | { type: 'REPLACE_CUT', payload: { originalCutNumber: string; newCuts: Cut[] } }
     | { type: 'SET_LOCATION_OUTFIT_IMAGE_STATE', payload: { characterKey: string; location: string; state: Partial<{ imageUrl: string; imageLoading: boolean }> } }
     | { type: 'SET_ART_STYLE', payload: ArtStyle }
     | { type: 'SET_CUSTOM_ART_STYLE', payload: string }
+    | { type: 'SET_IMAGE_RATIO', payload: ImageRatio }
     | { type: 'SET_OUTFIT_MODIFICATION_STATE', payload: { characterKey: string; location: string; isLoading: boolean } }
     | { type: 'UPDATE_LOCATION_OUTFIT', payload: { characterKey: string; location: string; korean: string; english: string } }
-    | { type: 'SET_NANO_MODEL', payload: NanoModel };
+    | { type: 'SET_NANO_MODEL', payload: NanoModel }
+    | { type: 'SET_IMAGE_ENGINE', payload: ImageEngine }
+    | { type: 'SET_FLUX_MODEL', payload: FluxModel }
+    | { type: 'SET_AI_MODEL_TIER', payload: AIModelTier }
+    | { type: 'SET_CONTENT_FORMAT', payload: ContentFormat }
+    | { type: 'SET_PIPELINE_CHECKPOINT', payload: PipelineCheckpoint }
+    | { type: 'SET_SCRIPT_METADATA', payload: { metadataByLine: Record<number, any>; isDetailed: boolean } | undefined }
+    | { type: 'SET_SCENARIO_ANALYSIS', payload: ScenarioAnalysis | null }
+    | { type: 'SET_LOCATION_REGISTRY', payload: string[] }
+    | { type: 'SET_LOGLINE', payload: string }
+    | { type: 'SET_SCRIPT_INPUT_MODE', payload: ScriptInputMode }
+    | { type: 'SET_STYLE_LORA'; payload: { id?: string; scaleOverride?: number } }
+    | { type: 'SET_CHARACTER_BIBLES', payload: CharacterBible[] | null }
+    | { type: 'SET_CONTI_CUTS', payload: ContiCut[] | null }
+    | { type: 'UPDATE_CONTI_CUT', payload: { id: string; data: Partial<ContiCut> } }
+    | { type: 'DELETE_CONTI_CUT', payload: string }
+    | { type: 'SET_CINEMATOGRAPHY_PLAN', payload: CinematographyPlan | null }
+    | { type: 'SET_CURRENT_PROJECT_ID', payload: string | null }
+    | { type: 'SET_PROJECT_SAVED', payload: boolean }
+    | { type: 'SET_ASSET_CATALOG', payload: AssetCatalogEntry[] };
+
+// ─── Phase 5: 로컬 스토리지 타입 ─────────────────────────────────
+
+export interface ProjectMetadata {
+    version: 2;
+    id: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    artStyle: ArtStyle;
+    imageRatio: ImageRatio;
+    speakerGender: Gender;
+    characterDescriptions: { [key: string]: CharacterDescription };
+    scenes: ProjectScene[];
+    locationVisualDNA: { [location: string]: string };
+    enrichedScript: string;
+    enrichedBeats?: EnrichedBeat[];
+    userInputScript: string;
+    scenarioAnalysis?: any;
+    characterBibles?: any[];
+    contiCuts?: any[];
+    cinematographyPlan?: any;
+    locationRegistry?: string[];
+    logline?: string;
+    contentFormat?: ContentFormat;
+    aiModelTier?: AIModelTier;
+}
+
+export interface ProjectScene {
+    sceneNumber: number;
+    title: string;
+    cuts: ProjectCut[];
+}
+
+export interface ProjectCut {
+    cutNumber: string;
+    narration: string;
+    imagePaths: string[];
+    selectedImagePath: string | null;
+    audioPath: string | null;
+    imagePrompt: string;
+    cutType?: string;
+}
+
+export interface ProjectListEntry {
+    id: string;
+    title: string;
+    cutCount: number;
+    thumbnailPath: string | null;
+    updatedAt: string;
+    artStyle?: string | null;
+}
+
+export interface AssetCatalogEntry {
+    id: string;
+    type: 'character' | 'outfit' | 'background';
+    name: string;
+    imagePath: string;
+    thumbnailPath: string;
+    tags: {
+        character: string | null;
+        artStyle: string | null;
+        location: string | null;
+        description: string | null;
+    };
+    visualDNA: {
+        hair?: string;
+        colorPalette?: { [key: string]: string };
+        distinctiveMarks?: string;
+    } | null;
+    outfitData: {
+        englishDescription?: string;
+        locations?: string[];
+    } | null;
+    spatialDNA: string | null;
+    prompt: string | null;
+    createdAt: string;
+}
