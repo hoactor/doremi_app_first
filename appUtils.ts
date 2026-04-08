@@ -73,3 +73,33 @@ export function buildMechanicalOutfit(
 
     return parts.join(' ');
 }
+
+// ── 4. 캐릭터 ID 매칭 (레거시 호환) ──
+
+/** charId 또는 한국어 이름 → charId 변환. 매칭 실패 시 null */
+export function resolveCharId(
+    nameOrId: string,
+    characterDescriptions: Record<string, CharacterDescription>
+): string | null {
+    if (!nameOrId) return null;
+    // 1. charId 직접 매칭
+    if (characterDescriptions[nameOrId]) return nameOrId;
+
+    // 2. displayName 정확 매칭
+    const byExact = Object.entries(characterDescriptions)
+        .find(([, c]) => c.koreanName === nameOrId);
+    if (byExact) return byExact[0];
+
+    // 3. 괄호 제거 후 매칭
+    const strip = (s: string) => s.replace(/\s*\(.*\)$/, '').trim();
+    const stripped = strip(nameOrId);
+    const byStripped = Object.entries(characterDescriptions)
+        .find(([, c]) => strip(c.koreanName || '') === stripped);
+    if (byStripped) return byStripped[0];
+
+    // 4. 레거시 키 매칭 (공백→언더스코어)
+    const legacyKey = nameOrId.replace(/\s/g, '_');
+    if (characterDescriptions[legacyKey]) return legacyKey;
+
+    return null;
+}

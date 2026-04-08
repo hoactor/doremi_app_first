@@ -210,6 +210,7 @@ export async function editImageWithFlux(
             output_format: "png",
             safety_tolerance: "5",
         };
+        if (!isLora) input.prompt_upsampling = false;   // ★ 프롬프트 자동확장 OFF → 인물 일관성 보호
         if (options?.seed != null) input.seed = options.seed;
 
         // LoRA: FLUX.2 LoRA 엔드포인트만 지원
@@ -290,6 +291,7 @@ export async function generateImageWithFlux(
             output_format: "png",
             safety_tolerance: "5",
         };
+        if (!isLora) input.prompt_upsampling = false;   // ★ 프롬프트 자동확장 OFF → 인물 일관성 보호
 
         // LoRA: FLUX.2 LoRA 엔드포인트만 지원
         if (isLora && options?.loraUrls?.length) {
@@ -349,8 +351,14 @@ export async function generateMultiCharWithFlux(
     if (isFlux2) {
         // ★ FLUX.2: 참조 이미지를 /edit의 image_urls로 전달
         const editEndpoint = resolveEditEndpoint(endpoint);
+        // fal.ai API 제한: Pro ≤ 4장, Flex ≤ 10장 — 안전 마진으로 4장 통일
+        const MAX_REFS = 4;
+        const limitedRefs = referenceImageUrls.slice(0, MAX_REFS);
+        if (referenceImageUrls.length > MAX_REFS) {
+            console.warn(`[falService] 레퍼런스 ${referenceImageUrls.length}장 → ${MAX_REFS}장으로 제한`);
+        }
         const uploadedRefs: string[] = [];
-        for (const url of referenceImageUrls) {
+        for (const url of limitedRefs) {
             uploadedRefs.push(await prepareImageUrl(url));
         }
 
@@ -362,6 +370,7 @@ export async function generateMultiCharWithFlux(
             output_format: "png",
             safety_tolerance: "5",
         };
+        if (!isLora) input.prompt_upsampling = false;   // ★ 프롬프트 자동확장 OFF → 인물 일관성 보호
 
         // LoRA: FLUX.2 LoRA 엔드포인트만 지원
         if (isLora && options?.loraUrls?.length) {
@@ -430,6 +439,7 @@ export async function generateOutfitWithFlux(
             seed: options?.seed,
             output_format: "png",
             safety_tolerance: "5",
+            prompt_upsampling: false,   // ★ 프롬프트 자동확장 OFF → 인물 일관성 보호
         };
     } else {
         input = {

@@ -5,6 +5,7 @@ import type { AppAction, Cut, GeneratedImage, GeneratedScript, CharacterDescript
 import { editImageWithNano, generateMultiCharacterImage } from './services/geminiService';
 import { IS_TAURI, getGeminiApiKey } from './services/tauriAdapter';
 import { generateMultiCharWithFlux, generateImageWithFlux, getFluxImageSize } from './services/falService';
+import { resolveCharId } from './appUtils';
 import type { PromptContext } from './appStyleEngine';
 
 // ─── editImageWithNano 재시도 래퍼 (순수 함수) ──────────────────────
@@ -65,17 +66,18 @@ export async function generateImageForCut(
 ): Promise<{ imageUrl: string; tokenCount: number }> {
     const { characterDescriptions, artStylePrompt, modelName, imageRatio, selectedNanoModel, sceneImageMap } = ctx;
 
-    // 캐릭터 감지
-    const presentCharKeys = Object.keys(characterDescriptions).filter(key =>
-        cut.characters.some(c => c.includes(characterDescriptions[key].koreanName))
-    );
+    // 캐릭터 감지 — cut.characters는 charId 배열 (resolveCharId로 레거시 폴백)
+    const presentCharKeys = cut.characters
+        .map(charId => resolveCharId(charId, characterDescriptions))
+        .filter((id): id is string => id !== null && !!characterDescriptions[id]);
 
     const charsToGenerate: { name: string; url: string }[] = [];
     for (let j = 0; j < presentCharKeys.length; j++) {
-        const key = presentCharKeys[j];
-        const char = characterDescriptions[key];
-        const ref = char.mannequinImageUrl || char.upscaledImageUrl || (char.characterSheetHistory && char.characterSheetHistory[char.characterSheetHistory.length - 1]) || char.sourceImageUrl;
-        if (ref) charsToGenerate.push({ name: char.koreanName || `Char${j + 1}`, url: ref });
+        const charId = presentCharKeys[j];
+        const char = characterDescriptions[charId];
+        const cutLocation = ('location' in cut ? (cut as any).location : '') || '';
+        const ref = char.locationOutfitImages?.[cutLocation]?.imageUrl || char.mannequinImageUrl || char.upscaledImageUrl || (char.characterSheetHistory && char.characterSheetHistory[char.characterSheetHistory.length - 1]) || char.sourceImageUrl;
+        if (ref) charsToGenerate.push({ name: char.koreanName || charId, url: ref });
     }
     if ((cut as any).guestCharacterUrl) {
         charsToGenerate.push({ name: (cut as any).guestCharacterName || 'Guest', url: (cut as any).guestCharacterUrl });
