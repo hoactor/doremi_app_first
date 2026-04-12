@@ -521,9 +521,9 @@ export function getTokenCountFromResponse(response: GenerateContentResponse): nu
 }
 
 export const MODELS = {
-    TEXT: 'gemini-3-flash-preview', 
-    VISION: 'gemini-3-flash-preview', 
-    IMAGE: 'gemini-2.5-flash-image', 
+    TEXT: 'gemini-3-flash-preview',
+    VISION: 'gemini-3-flash-preview',
+    IMAGE: 'gemini-3-flash-image-preview',
     TTS: 'gemini-2.5-flash-preview-tts',
 };
 
