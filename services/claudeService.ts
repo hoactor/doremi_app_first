@@ -10,11 +10,19 @@ import {
     callClaudeStreamTauri,
     callClaudeVisionTauri,
 } from './tauriAdapter';
+import { setUseClaudeForText } from './ai/aiCore';
+import type { AIModelTier } from '../types';
 
 // ★ 동적 모델 선택 (기본 Opus)
 let _claudeModelOverride: string | null = null;
 
-export function setClaudeModel(tier: 'sonnet' | 'opus') {
+export function setClaudeModel(tier: AIModelTier) {
+    if (tier === 'gemini') {
+        // Gemini 선택 시 텍스트 모델도 Gemini로 전환 (Claude 경로 OFF)
+        setUseClaudeForText(false);
+        return;
+    }
+    setUseClaudeForText(true);
     _claudeModelOverride = tier === 'opus'
         ? 'claude-opus-4-6'
         : 'claude-sonnet-4-20250514';

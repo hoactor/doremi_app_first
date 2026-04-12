@@ -24,10 +24,11 @@ export async function getGeminiAI(): Promise<GoogleGenAI> {
 export function clearGeminiKeyCache() { _cachedGeminiKey = null; }
 
 /**
- * AI Provider 설정 — TEXT 분석은 Claude, 이미지 생성/TTS는 Gemini
- * 이 플래그를 false로 바꾸면 모든 텍스트 함수가 Gemini로 돌아감 (롤백용)
+ * AI Provider 설정 — TEXT 분석은 기본 Claude, 이미지 생성/TTS는 Gemini
+ * setUseClaudeForText(false)로 런타임 전환 시 텍스트도 Gemini 사용
  */
-const USE_CLAUDE_FOR_TEXT = true;
+let USE_CLAUDE_FOR_TEXT = true;
+export function setUseClaudeForText(value: boolean) { USE_CLAUDE_FOR_TEXT = value; }
 
 /**
  * TEXT 모델 브릿지 — Claude 또는 Gemini로 라우팅

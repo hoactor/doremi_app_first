@@ -226,6 +226,7 @@ export const AppInputScreen: React.FC<AppInputScreenProps> = ({ onImportClick })
                             {([
                                 { value: 'opus', label: 'Opus' },
                                 { value: 'sonnet', label: 'Sonnet' },
+                                { value: 'gemini', label: 'Gemini' },
                             ] as const).map(m => (
                                 <button key={m.value}
                                     onClick={() => dispatch({type: 'SET_AI_MODEL_TIER', payload: m.value})}
