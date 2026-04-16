@@ -10,6 +10,7 @@
 import type { Cut, EditableCut, CharacterDescription, ArtStyle, LoRAEntry } from './types';
 import type { PromptContext } from './appStyleEngine';
 import { callClaude } from './services/claudeService';
+import { sanitizeChildSafety } from './appSafetySanitize';
 
 /** Flux 프롬프트용 확장 컨텍스트 (LoRA 정보 포함) */
 export interface FluxPromptContext extends PromptContext {
@@ -626,12 +627,12 @@ export async function buildFluxPromptSmart(
     // 항상 Claude로 자연어 프롬프트 생성 시도 (단순/복잡 분기 없음)
     if (options?.useClaude !== false) {
         const translated = await translateStructuredToFlux(structuredInput, ctx.artStyle);
-        if (translated) return sanitizeFluxPrompt(translated);
+        if (translated) return sanitizeChildSafety(sanitizeFluxPrompt(translated));
     }
 
     // Claude 실패 시에만 규칙 기반 폴백
     console.warn('[FluxPromptEngine] Claude 실패 — 규칙 기반 폴백');
-    return sanitizeFluxPrompt(buildFluxPrompt(cut, ctx));
+    return sanitizeChildSafety(sanitizeFluxPrompt(buildFluxPrompt(cut, ctx)));
 }
 
 // ─── 이미지대본 직통 번역 (상세대본 → Flux) ─────────────────────────

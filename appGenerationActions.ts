@@ -6,6 +6,7 @@ import { buildArtStylePrompt, buildFinalPrompt, PromptContext } from './appStyle
 import { generateImageForCut, CutGenerationContext } from './appImageEngine';
 import { refinePromptWithAI, refineAllPromptsWithAI } from './services/geminiService';
 import { buildFluxPromptSmart, FluxPromptContext, translateImageScriptToFlux } from './appFluxPromptEngine';
+import { sanitizeChildSafety } from './appSafetySanitize';
 
 export interface GenerationActionHelpers {
     dispatch: (action: AppAction) => void;
@@ -64,7 +65,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 const styleToUse = cut.artStyleOverride || stateRef.current.artStyle;
                 const artStylePrompt = getArtStylePrompt(styleToUse);
                 const modelName = getVisionModelName();
-                const geminiPrompt = cut.imagePrompt || calculateFinalPrompt(cut as any);
+                const geminiPrompt = sanitizeChildSafety(cut.imagePrompt || calculateFinalPrompt(cut as any));
 
                 // Flux 엔진: 스마트 프롬프트 (복잡 씬 → Claude 번역)
                 let prompt = geminiPrompt;
@@ -94,7 +95,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                         const translated = await translateImageScriptToFlux(sceneDesc, charList, pCtx.artStyle, {
                             styleLoraId: pCtx.styleLoraId, loraRegistry: pCtx.loraRegistry, fluxModel: pCtx.fluxModel,
                         });
-                        if (translated) prompt = translated;
+                        if (translated) prompt = sanitizeChildSafety(translated);
                     }
 
                     // 직통 번역 실패 or 비상세대본 → 기존 경로 폴백
@@ -212,7 +213,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
         dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { imageLoading: true } } });
 
         try {
-        const geminiPrompt = cut.imagePrompt || calculateFinalPrompt(cut as any);
+        const geminiPrompt = sanitizeChildSafety(cut.imagePrompt || calculateFinalPrompt(cut as any));
 
         // Flux 엔진: 스마트 프롬프트 (복잡 씬 → Claude 번역)
         let prompt = geminiPrompt;
@@ -243,7 +244,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 const translated = await translateImageScriptToFlux(sceneDesc, charList, pCtx.artStyle, {
                     styleLoraId: pCtx.styleLoraId, loraRegistry: pCtx.loraRegistry, fluxModel: pCtx.fluxModel,
                 });
-                if (translated) prompt = translated;
+                if (translated) prompt = sanitizeChildSafety(translated);
             }
 
             // 직통 번역 실패 or 비상세대본 → 기존 경로 폴백
@@ -376,7 +377,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 merged.characterOutfit = buildMechanicalOutfit(chars, s.characterDescriptions, cut.location);
             }
             const promptCtx: PromptContext = { characterDescriptions: s.characterDescriptions, locationVisualDNA: s.locationVisualDNA || {}, cinematographyPlan: s.cinematographyPlan || null, imageRatio: s.imageRatio || '1:1', artStyle: s.artStyle };
-            const newPrompt = buildFinalPrompt(merged, promptCtx);
+            const newPrompt = sanitizeChildSafety(buildFinalPrompt(merged, promptCtx));
             const upd: Partial<Cut> = { ...fieldChanges, imagePrompt: newPrompt };
             if (fieldChanges.characters) upd.characterOutfit = merged.characterOutfit;
             delete (upd as any).characters;
