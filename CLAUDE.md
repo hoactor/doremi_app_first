@@ -6,27 +6,28 @@
 ## 기술 스택
 - React 19 + TypeScript + Vite 6 + Tailwind (CDN)
 - Tauri v2 (Rust 백엔드)
-- AI: Claude Opus 4.6 (대본 분석) + Gemini 2.5 Flash (이미지 생성) + fal.ai Flux (이미지 생성, 병행) + Supertone (TTS)
+- AI: Claude Opus 4.6 (대본 분석) + Gemini 2.5 Flash (이미지 생성) + fal.ai Flux (이미지 생성, 병행 중) + Supertone (TTS)
 - 실행 환경: Mac Studio M4 Max (32GB)
 
 ## 절대 규칙 — 위반 시 앱이 깨진다
 
 ### Rust 백엔드
-- **`lib.rs` 절대 만들지 마.** 모든 Rust 코드는 `src-tauri/src/main.rs` 하나에 있다.
+- **Rust 코드는 `src-tauri/src/main.rs` 하나에만 있어야 한다.** `lib.rs` 새로 만들지 마.
 - **`tauri.conf.json`의 plugins 섹션은 빈 `{}` 유지.** 내용 넣으면 빌드 실패.
 - API 키는 macOS Keychain 저장 (`keyring` crate, feature = `apple-native`, service = `"doremissul-studio"`).
-- 키 종류: `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `SUPERTONE_API_KEY`.
+- 키 종류: `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `SUPERTONE_API_KEY`, `FAL_API_KEY`.
 - HTTP 타임아웃: `from_secs(300)` — 줄이지 마.
 - `dragDropEnabled: false` 유지.
 
-### Flux 통합 (병행 운영)
-- **기존 Gemini 경로 수정 금지.** `imageGeneration.ts`, `appStyleEngine.ts`는 절대 건드리지 마.
-- Flux는 별도 경로: `falService.ts` (API), `appFluxPromptEngine.ts` (프롬프트).
+### Flux 통합 (Gemini와 병행 운영 중)
+- **기존 Gemini 경로 수정 금지.** `services/ai/imageGeneration.ts`, `appStyleEngine.ts`는 절대 건드리지 마.
+- Flux는 별도 경로: `services/falService.ts` (API 클라이언트), `appFluxPromptEngine.ts` (프롬프트 빌더).
 - 엔진 전환: `state.selectedImageEngine` → `'gemini'` | `'flux'`. 기본값 `'gemini'`.
-- `generateCharacterMask()`와 `renderTextOnImage()`는 엔진 무관 항상 Gemini 사용.
+- `generateCharacterMask()`와 `renderTextOnImage()`는 엔진 무관 **항상 Gemini** 사용 (Flux 대체 불가).
 - fal CDN URL은 임시 → 반환 즉시 `falUrlToDataUrl()`로 base64 변환 필수.
-- Flux 프롬프트에 `DO NOT`, `[SECTION]:`, `# HEADER`, `(weight:1.4)` 등 지시형/SD식 문법 금지. 묘사형 자연어만.
-- 작업 상세: `FLUX_INTEGRATION_WORKPLAN.md` 참조.
+- Flux 프롬프트에 `DO NOT`, `[SECTION]:`, `# HEADER`, `(weight:1.4)` 등 지시형/SD식 문법 금지. **묘사형 자연어만**, 200자 이내 권장.
+- 중요도순: 캐릭터 → 행동 → 감정 → 의상 → 카메라 → 배경 → 화풍 → FX.
+- 작업 이력: `FLUX_INTEGRATION_WORKPLAN.md` 참조.
 
 ### 프론트엔드 구조
 - **contexts/ 폴더 금지.** 모든 .ts 파일은 루트 레벨.
@@ -34,11 +35,11 @@
   - 분할 파일: appDownloadActions, appGenerationActions, appNormalizationActions, appCharacterActions, appCutEditActions, appProjectActions, appMiscActions
   - helpers: dispatch, stateRef, addNotification + 필요 유틸 주입
   - React Hook 의존 없음 (순수 함수 + async)
-- `geminiService.ts`는 re-export 허브. 직접 수정하지 말고 실제 함수가 있는 파일을 수정할 것.
-  - 파이프라인 함수 → `textAnalysisPipeline.ts`
-  - 수정/포맷 함수 → `textAnalysisRefine.ts`
-  - enrichScript + 유틸 → `textAnalysis.ts`
-  - 레거시 보관 → `textAnalysis.legacy.ts`
+- `services/geminiService.ts`는 re-export 허브. 직접 수정하지 말고 실제 함수가 있는 파일을 수정할 것.
+  - 파이프라인 함수(5개) → `services/ai/textAnalysisPipeline.ts`
+  - 수정/포맷/블루프린트 → `services/ai/textAnalysisRefine.ts`
+  - enrichScript + 유틸 → `services/ai/textAnalysis.ts`
+  - MSF 대본 → `services/ai/msfAnalysis.ts` / USS 대본 → `services/ai/ussAnalysis.ts`
 - `⌘+Enter`만 수정 실행. 일반 Enter는 줄바꿈.
 
 ### 공통 유틸 (appUtils.ts) — 중복 만들지 마
@@ -49,9 +50,9 @@
   - `useKorean: true` → StoryboardReviewModal 전용
 
 ### 이미지 생성
-- 현재 Gemini 단일 엔진. Flux 병행 운영은 **계획 중** (`FLUX_INTEGRATION_WORKPLAN.md` 참조).
+- Gemini와 Flux **병행 운영** (엔진 전환은 `state.selectedImageEngine`로).
 - Imagen 4 Fast는 삭제됨. `generateImagenRough` 함수 없음.
-- 러프/일반 모두 Gemini 2.5 Flash. 차이는 레퍼런스 유무.
+- 러프/일반 모두 Gemini 2.5 Flash (Gemini 경로일 때). 차이는 레퍼런스 유무.
 - 인서트 컷은 `sceneImageMap`으로 같은 location 이미지를 스타일 레퍼런스로 자동 첨부.
 - Studio는 studioId `'a'` 단일 사용.
 
@@ -74,66 +75,70 @@ Rust Backend (src-tauri/src/main.rs)
     ├─ proxy_claude_stream() → Claude 스트리밍
     ├─ proxy_gemini()       → Gemini API (이미지)
     ├─ proxy_supertone()    → Supertone API (TTS)
-    ├─ save/load/check_api_keys() → macOS Keychain (claude/gemini/supertone)
+    ├─ save/load/check_api_keys() → macOS Keychain (claude/gemini/supertone/fal)
     ├─ ensure_directories() → 로컬 스토리지
     ├─ save_image_file() / delete_image_file() → 이미지 + 썸네일
     ├─ create/save/load/list/delete_project() → 프로젝트 CRUD
     ├─ save/load/delete/update_asset() → 에셋 카탈로그 CRUD
     ├─ read_image_base64()  → 로컬 파일 → data:URL
-    ├─ proxy_fetch()        → 범용 HTTP
+    ├─ proxy_fetch()        → 범용 HTTP (fal.ai 포함)
     └─ open_asset_catalog() → 에셋 카탈로그 독립 윈도우
 ```
 
 ## 핵심 파일 구조
 
 ```
-doremi_app-main/
+doremi_app_first/
 ├── index.tsx                # 엔트리 — URL ?view=asset-catalog 분기 (멀티윈도우)
 ├── App.tsx                  # 메인 앱 — 사이드바 + SceneCard 그리드(3열) + 오른쪽 2탭
-├── AppContext.tsx            # Provider + 액션 래퍼 (factory 패턴)
+├── AppContext.tsx           # Provider + 액션 래퍼 (factory 패턴)
 ├── appReducer.ts            # 리듀서 + 순수 헬퍼
 ├── appTypes.ts              # UIState + initialUIState
-├── appStyleEngine.ts        # 화풍 프롬프트 빌더 + buildFinalPrompt + 씬무드 감지 + buildProportionStylePrompt
+├── appStyleEngine.ts        # 화풍 프롬프트 빌더 + buildFinalPrompt + 씬무드 감지 + buildProportionStylePrompt (Gemini 전용)
+├── appFluxPromptEngine.ts   # Flux 전용 프롬프트 빌더 (묘사형 자연어)
 ├── appProjectActions.ts     # 프로젝트 CRUD + 에셋 저장
 ├── appDownloadActions.ts    # ZIP/SRT/필터 다운로드
 ├── appGenerationActions.ts  # 이미지 생성/러프/일반/수정/일괄수정
 ├── appNormalizationActions.ts # 정규화 + 의상적용 스토리보드
 ├── appCharacterActions.ts   # 캐릭터 스튜디오 14개 핸들러
 ├── appCutEditActions.ts     # Studio 편집/생성 + 컷필드 수정
-├── appAnalysisPipeline.ts   # 대본 분석 파이프라인 (Phase1 Step1~3+pause / Phase2 Step4~6)
-├── appImageEngine.ts        # 이미지 생성 + 인서트 컷 스타일 참조
+├── appAnalysisPipeline.ts   # 대본 분석 파이프라인 (narration/MSF/USS 3경로 + resume)
+├── appImageEngine.ts        # 이미지 생성 + 인서트 컷 스타일 참조 (엔진 분기)
 ├── appMiscActions.ts        # 화풍 핫스왑, outpaint/fill
 ├── appUtils.ts              # 공통 유틸 (getEngineFromModel, createGeneratedImage, buildMechanicalOutfit)
-├── types.ts                 # 전체 타입 정의
+├── appSafetySanitize.ts     # 아동 안전 필터 런타임 치환 (Gemini/Flux 공용 래핑)
+├── appPresetValidation.ts   # 프리셋 데이터 검증 (Step 3 직후 호출, errors/warnings)
+├── types.ts                 # 전체 타입 정의 (ImageEngine, FluxModel 포함)
 ├── services/
 │   ├── claudeService.ts     # Claude API (429 재시도)
 │   ├── geminiService.ts     # Re-export 허브 (직접 수정 금지)
-│   ├── ai/
-│   │   ├── aiCore.ts        # AI 공유 헬퍼 + Vision 리사이즈 + MIME 감지
-│   │   ├── textAnalysis.ts  # enrichScript + 유틸 + re-export
-│   │   ├── textAnalysisPipeline.ts # 파이프라인 5함수
-│   │   ├── textAnalysisRefine.ts   # 프롬프트 수정/포맷/블루프린트
-│   │   ├── textAnalysis.legacy.ts  # 레거시 보관 (건드리지 마)
-│   │   └── imageGeneration.ts      # 이미지 생성 (Gemini)
-│   ├── supertoneService.ts  # TTS API
-│   └── tauriAdapter.ts      # Tauri IPC 브릿지 + emit/listen/openAssetCatalog
+│   ├── falService.ts        # fal.ai Flux API 클라이언트
+│   ├── supertoneService.ts  # Supertone TTS (BatchAudioModal에서 선택 가능)
+│   ├── typecastService.ts   # Typecast TTS (BatchAudioModal 기본 엔진)
+│   ├── openaiService.ts     # ⚠️ 미구현/준비 중 — 대표캐릭·배경 DALL-E 원본 생성용 예정. 현재 호출처 없음
+│   ├── tauriAdapter.ts      # Tauri IPC 브릿지 + emit/listen/openAssetCatalog
+│   └── ai/
+│       ├── aiCore.ts        # AI 공유 헬퍼 + Vision 리사이즈 + MIME 감지
+│       ├── textAnalysis.ts  # enrichScript + 유틸 + re-export
+│       ├── textAnalysisPipeline.ts # 파이프라인 5함수 (analyzeScenario/Bible/Conti/Cinema/Convert)
+│       ├── textAnalysisRefine.ts   # 프롬프트 수정/포맷/블루프린트
+│       ├── msfAnalysis.ts          # MSF(Master Scene Format) 대본 분석
+│       ├── ussAnalysis.ts          # USS(Universal Script Schema) 대본 분석
+│       └── imageGeneration.ts      # 이미지 생성 (Gemini 전용)
 ├── components/
 │   ├── SceneCard.tsx         # 메인 CutCard
 │   ├── AppInputScreen.tsx    # 첫 화면 (로그라인+대본+프로젝트설정)
 │   ├── EnlargedCutModal.tsx  # 더블클릭 확대 모달
 │   ├── EnrichedScriptEditor.tsx # 연출 대본 편집기 (Copy/Paste/Validate)
 │   ├── SlideshowModal.tsx    # 슬라이드쇼 재생/프리뷰
-│   ├── slideshowUtils.ts    # 캔버스 렌더링 유틸
-│   ├── slideshowExport.ts   # 영상 내보내기 (전체/컷별)
 │   ├── ImageStudio.tsx       # 이미지 편집 (참조 슬롯 2~5 + 메인 캔버스)
-│   ├── imageStudioUtils.ts   # 드래그 프리뷰 + 캔버스 변환
 │   ├── ImageEditorModal.tsx  # Nano Image Editor (다중 레퍼런스 최대 5개)
 │   ├── CharacterStudio.tsx   # 캐릭터 스튜디오 3컬럼
 │   ├── ProportionStudioModal.tsx # 캐릭터 비율 스튜디오 (등신 조절)
 │   ├── AssetCatalogModal.tsx # 에셋 카탈로그 (모달)
 │   └── AssetCatalogPage.tsx  # 에셋 카탈로그 (독립 윈도우, AppContext 미사용)
 ├── src-tauri/
-│   ├── src/main.rs           # Rust 백엔드 (유일한 .rs 파일)
+│   ├── src/main.rs           # Rust 백엔드 (유일한 진입점)
 │   ├── tauri.conf.json       # plugins: {} 유지!
 │   └── Cargo.toml
 └── vite.config.ts
@@ -219,46 +224,25 @@ GeneratedImage.model?: string  // 'nano-2.5', 'nano-3.1', 'nano-3pro'
 # 개발
 npm run tauri:dev
 
+# 타입 체크
+npm run lint   # tsc --noEmit
+
 # 빌드
 npm run tauri:build   # → .dmg
 
 # 백업
-cd ~/Downloads && zip -r doremi_app-backup-$(date +%Y%m%d-%H%M).zip doremi_app-main/ -x "*/node_modules/*" "*/target/*" "*/.git/*"
+cd ~/Downloads && zip -r doremi_app-backup-$(date +%Y%m%d-%H%M).zip doremi_app_first/ -x "*/node_modules/*" "*/target/*" "*/.git/*"
 ```
 
 ## 스크립트 전달 방식
 - fix 스크립트는 `.py` 파일 또는 단일 커맨드로 제공할 것 (멀티라인 터미널 붙여넣기 실패함).
 
 ## 현재 작업 큐
-- **Flux 통합 (진행 중)** — `FLUX_INTEGRATION_WORKPLAN.md` 참조. Phase별로 작업 지시할 것.
+- **OpenAI DALL-E 통합** — `services/openaiService.ts`에 `generateImageWithDalle` 정의만 있음. 대표 캐릭터·배경 원본 이미지 생성용. 호출처 아직 없음, 연결 예정.
+- **Flux 프롬프트 엔진 완성** — `appFluxPromptEngine.ts` (712줄)가 최종 버전(1109줄) 대비 미완. Gemini 품질 확정 후 진행.
+- **대본 포맷 자동 감지** — 현재는 탭 3개(narration/msf/uss)로 사용자가 선택. 장기적으로 대본 입력 시 자동 감지 후 해당 파이프라인으로 라우팅 목표.
 - 파이프라인 체크포인트/이어서진행 ("이어서 진행" 버튼)
 - SlideshowModal 다운로드 패턴 수정 (남은 건)
-
-## Flux 통합 계획 (미구현)
-
-> 상세 계획: `FLUX_INTEGRATION_WORKPLAN.md` 참조
-
-### 개요
-- fal.ai Flux API를 기존 Gemini 파이프라인과 **병행 운영** 예정
-- **기존 Gemini 경로 수정 금지.** `imageGeneration.ts`, `appStyleEngine.ts`는 절대 건드리지 마.
-- Flux는 별도 경로로 추가: `falService.ts` (API), `appFluxPromptEngine.ts` (프롬프트)
-- 엔진 전환: `state.selectedImageEngine` → `'gemini'` | `'flux'`. 기본값 `'gemini'`.
-
-### 구현 예정 파일 (아직 없음)
-- `services/falService.ts` — fal.ai Flux API 클라이언트
-- `appFluxPromptEngine.ts` — Flux 전용 프롬프트 빌더
-- `types.ts`에 `ImageEngine`, `FluxModel` 타입 추가 예정
-- `src-tauri/src/main.rs`에 `FAL_API_KEY` keychain 추가 예정
-
-### Flux 프롬프트 규칙 (구현 시 참고)
-- Flux = 디퓨전 모델. **묘사형 자연어만** 이해. 규칙/네거티브/마크다운 전부 무시됨.
-- `DO NOT`, `[SECTION]:`, `# HEADER`, `(weight:1.4)` 등 지시형/SD식 문법 쓰지 마.
-- 원하는 것만 묘사. 중요도순 배열: 캐릭터 → 행동 → 감정 → 의상 → 카메라 → 배경 → 화풍 → FX
-- 200자 이내 권장. 길어질수록 뒷부분 무시됨.
-
-### Flux에서 Gemini 대체 불가 기능
-- `generateCharacterMask()` — 비전 분석, Gemini 전용
-- `renderTextOnImage()` — 텍스트 삽입, Gemini LLM이 우위
 
 ## 호환성 주의 — 기존 프로젝트가 깨지면 안 된다
 - locationRegistry 없으면 빈 배열 폴백
