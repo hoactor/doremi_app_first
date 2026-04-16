@@ -528,6 +528,9 @@ export const convertContiToEditableStoryboard = (
             })(),
             suggestedEffect: null,
             directorialIntent: (() => {
+                // ★ 사용자 원본 direction이 있으면 최우선 (영어 FX 키워드 보존)
+                if (cut.direction) return cut.direction;
+                // 없으면 기존 로직 (cutType + sfxNote + cameraMovement 조립)
                 const parts: string[] = [];
                 const typeMap: Record<string, string> = {
                     'establish': 'Establishing shot, setting the scene',

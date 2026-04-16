@@ -393,6 +393,8 @@ export async function resumeFromEnrichedPause(
                 // ★ imagePrompt → visualDescription: 사용자 직접 입력이 AI 분석보다 우선
                 if (meta.imagePrompt) {
                     cut.visualDescription = meta.imagePrompt;
+                    // 구성 컷(타임랩스/화면분할 등) 충돌 방지: AI 단일 포즈가 사용자 구도를 덮는 것 방지
+                    cut.characterPose = '';
                 }
             }
         }
