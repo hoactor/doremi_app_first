@@ -2,9 +2,11 @@
 // Design: aienhancer-inspired — single orange accent, 3-level dark, centered flow
 // ★ MSF 대본 모드 탭 추가 + 드래그앤드롭 분리 + 자동 셋업
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import { SparklesIcon, SpinnerIcon, RefreshIcon, PlayIcon, ChevronRightIcon, ScissorsIcon, DocumentArrowUpIcon } from './icons';
+import { detectScriptFormat } from '../appUtils';
+import type { ScriptInputMode } from '../types';
 
 const GENRE_PRESETS = ['연애썰', '직장썰', '가족썰', '군대썰', '학교썰', '복수썰', '공포썰', '감동썰', '사이다썰'];
 const TONE_PRESETS = ['코믹', '자조유머', '따뜻', '냉소', '긴장감', '감동', '사이다', '어둠', '열혈', '밝음'];
@@ -27,9 +29,14 @@ export const AppInputScreen: React.FC<AppInputScreenProps> = ({ onImportClick })
     const { state, dispatch, actions } = useAppContext();
     const { userInputScript, logline, pipelineCheckpoint, storyTitle, speakerGender, imageRatio, contentFormat, aiModelTier, titleSuggestions, isGeneratingTitles, scriptInputMode } = state;
 
-    const activeTab = scriptInputMode || 'narration';
+    // ★ 포맷 모드: 사용자 선택('auto' | 수동 3종)
+    //   activeTab = 화면에 실제로 반영할 모드. 'auto'는 내용 감지로 해석.
+    const userMode: ScriptInputMode = scriptInputMode || 'auto';
+    const detectedMode = useMemo(() => detectScriptFormat(userInputScript || ''), [userInputScript]);
+    const activeTab: 'narration' | 'msf' | 'uss' = userMode === 'auto' ? detectedMode : userMode;
 
     const [localScript, setLocalScript] = useState(userInputScript);
+    const [isFormatMenuOpen, setIsFormatMenuOpen] = useState(false);
     const [isDragOverScript, setIsDragOverScript] = useState(false);
     const [isDragOverSetup, setIsDragOverSetup] = useState(false);
     const [llGenre, setLlGenre] = useState('');
@@ -106,9 +113,10 @@ export const AppInputScreen: React.FC<AppInputScreenProps> = ({ onImportClick })
         }
     };
 
-    // ═══ 탭 전환 ═══
-    const handleTabSwitch = (tab: 'narration' | 'msf' | 'uss') => {
+    // ═══ 포맷 모드 변경 (auto 또는 수동 3종) ═══
+    const handleTabSwitch = (tab: ScriptInputMode) => {
         dispatch({ type: 'SET_SCRIPT_INPUT_MODE', payload: tab });
+        setIsFormatMenuOpen(false);
     };
 
     // ═══ 자동 셋업 — handleAutoSetup 호출 후 로컬 state도 동기화 ═══
@@ -328,38 +336,44 @@ export const AppInputScreen: React.FC<AppInputScreenProps> = ({ onImportClick })
                         </div>
                     </div>
                 )}
-                {/* ── 탭 헤더 ── */}
+                {/* ── 포맷 감지/선택 바 ── */}
                 <div className="flex items-center gap-0 px-3 pt-3 pb-0 flex-shrink-0">
-                    <button
-                        onClick={() => handleTabSwitch('narration')}
-                        className={`px-4 py-2 rounded-t-lg text-[11px] font-bold transition-all border-b-2 ${
-                            activeTab === 'narration'
-                                ? 'text-orange-300 border-orange-500 bg-orange-500/[0.06]'
-                                : 'text-zinc-600 border-transparent hover:text-zinc-400 hover:bg-[#111114]'
-                        }`}
-                    >
-                        이미지대본
-                    </button>
-                    <button
-                        onClick={() => handleTabSwitch('msf')}
-                        className={`px-4 py-2 rounded-t-lg text-[11px] font-bold transition-all border-b-2 ${
-                            activeTab === 'msf'
-                                ? 'text-orange-300 border-orange-500 bg-orange-500/[0.06]'
-                                : 'text-zinc-600 border-transparent hover:text-zinc-400 hover:bg-[#111114]'
-                        }`}
-                    >
-                        MSF 대본
-                    </button>
-                    <button
-                        onClick={() => handleTabSwitch('uss')}
-                        className={`px-4 py-2 rounded-t-lg text-[11px] font-bold transition-all border-b-2 ${
-                            activeTab === 'uss'
-                                ? 'text-emerald-300 border-emerald-500 bg-emerald-500/[0.06]'
-                                : 'text-zinc-600 border-transparent hover:text-zinc-400 hover:bg-[#111114]'
-                        }`}
-                    >
-                        USS
-                    </button>
+                    <div className="relative">
+                        <button
+                            onClick={() => setIsFormatMenuOpen(v => !v)}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all border ${
+                                activeTab === 'uss'
+                                    ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/[0.06] hover:bg-emerald-500/[0.10]'
+                                    : 'text-orange-300 border-orange-500/30 bg-orange-500/[0.06] hover:bg-orange-500/[0.10]'
+                            }`}
+                            title="대본 포맷 선택 — 기본 자동 감지"
+                        >
+                            <span>형식: {activeTab === 'narration' ? '이미지상세대본' : activeTab === 'msf' ? 'MSF' : 'USS'}</span>
+                            <span className="text-[9px] opacity-60">{userMode === 'auto' ? '자동' : '수동'}</span>
+                            <ChevronRightIcon className="w-3 h-3 rotate-90 opacity-60" />
+                        </button>
+                        {isFormatMenuOpen && (
+                            <div className="absolute top-full left-0 mt-1 z-20 min-w-[180px] bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg shadow-2xl overflow-hidden">
+                                {([
+                                    { key: 'auto',      label: '자동 감지 (추천)', hint: detectedMode === 'narration' ? '이미지상세대본' : detectedMode === 'msf' ? 'MSF' : 'USS' },
+                                    { key: 'narration', label: '이미지상세대본',    hint: '괄호 메타데이터' },
+                                    { key: 'msf',       label: 'MSF 대본',         hint: 'INT./EXT. 씬헤딩' },
+                                    { key: 'uss',       label: 'USS',              hint: '자유 나레이션' },
+                                ] as const).map(opt => (
+                                    <button
+                                        key={opt.key}
+                                        onClick={() => handleTabSwitch(opt.key)}
+                                        className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-[11px] text-left hover:bg-[#111114] transition-colors ${
+                                            userMode === opt.key ? 'text-orange-300 bg-orange-500/[0.06]' : 'text-zinc-300'
+                                        }`}
+                                    >
+                                        <span className="font-semibold">{opt.label}</span>
+                                        <span className="text-[9px] text-zinc-600">{opt.hint}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <div className="flex-1" />
                     <div className="flex items-center gap-2 pr-2 pb-1">
                         <div className="w-px h-3 bg-zinc-800" />

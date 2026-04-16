@@ -189,7 +189,7 @@ import { createNormalizationActions } from './appNormalizationActions';
 import { createGenerationActions } from './appGenerationActions';
 import { createCharacterActions } from './appCharacterActions';
 import { createCutEditActions } from './appCutEditActions';
-import { getEngineFromModel, createGeneratedImage } from './appUtils';
+import { getEngineFromModel, createGeneratedImage, detectScriptFormat } from './appUtils';
 
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -646,7 +646,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const handleStartStudio = async (overrides?: { artStyle?: ArtStyle, customArtStyle?: string }) => {
         cancelActivePipeline(); // ★ 이전 파이프라인 취소
-        const mode = stateRef.current.scriptInputMode || 'narration';
+
+        // ★ 대본 포맷 라우팅: 'auto'면 내용 기반 감지, 그 외는 수동 선택 그대로
+        const userMode = stateRef.current.scriptInputMode || 'auto';
+        let mode: 'narration' | 'msf' | 'uss';
+        if (userMode === 'auto') {
+            mode = detectScriptFormat(stateRef.current.userInputScript || '');
+            const label = mode === 'narration' ? '이미지상세대본' : mode === 'msf' ? 'MSF' : 'USS';
+            addNotification(`대본 포맷 자동 감지: ${label} 파이프라인`, 'info');
+        } else {
+            mode = userMode;
+        }
+
         if (mode === 'uss') {
             await runUSSPipeline({ dispatch, stateRef, addNotification, handleAddUsage, updateUIState }, overrides);
         } else if (mode === 'msf') {

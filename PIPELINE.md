@@ -9,6 +9,7 @@
     │
     ▼
 [AppContext.handleStartStudio] ──→ scriptInputMode 확인
+    ('auto'면 detectScriptFormat으로 내용 기반 감지 → 수동 선택은 그대로 반영)
     │
     ├─ 'narration' (이미지상세대본 탭)
     │      │
@@ -116,4 +117,4 @@ conti_pause     ──→  resumeFromContiPause (appAnalysisPipeline.ts:453)
 - [ ] narration 탭의 포맷 미감지 폴백 → USS (완료: 커밋 `2b72a4c`)
 - [x] validatePresetData를 MSF/USS 경로에도 이식 (완료)
 - [ ] Flux 프롬프트 엔진 완성 (Gemini 품질 확정 후)
-- [ ] 탭 3개 제거 → 대본 포맷 자동 감지로 단일 진입점
+- [x] 대본 포맷 자동 감지 (탭 제거, `detectScriptFormat` + '자동/수동' 드롭다운)

@@ -20,7 +20,7 @@ export type ContentFormat = 'ssul-shorts' | 'webtoon' | 'anime';
 export type AIModelTier = 'sonnet' | 'opus' | 'gemini';
 export type ImageEngine = 'gemini' | 'flux';
 export type FluxModel = 'flux-pro' | 'flux-flex' | 'flux-lora';
-export type ScriptInputMode = 'narration' | 'msf' | 'uss';
+export type ScriptInputMode = 'auto' | 'narration' | 'msf' | 'uss';
 
 // ─── Phase 6: LoRA 레지스트리 ────────────────────────────────────
 export interface LoRAEntry {

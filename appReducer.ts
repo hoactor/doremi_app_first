@@ -66,7 +66,7 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
         sanitized.selectedFluxModel = 'flux-pro';
     }
     if (!('scriptInputMode' in sanitized) || !sanitized.scriptInputMode) {
-        sanitized.scriptInputMode = 'narration';
+        sanitized.scriptInputMode = 'auto';
     }
     if (!('falUsage' in sanitized) || !sanitized.falUsage) {
         sanitized.falUsage = { totalImages: 0, totalCost: 0, history: [] };
@@ -197,7 +197,7 @@ export const buildProjectMetadata = (state: any): object => {
         locationRegistry: state.locationRegistry || [],
         logline: state.logline || '',
         // 파이프라인 모드 + LoRA 설정 보존
-        scriptInputMode: state.scriptInputMode || 'narration',
+        scriptInputMode: state.scriptInputMode || 'auto',
         storyBrief: state.storyBrief || '',
         styleLoraId: state.styleLoraId || null,
         styleLoraScaleOverride: state.styleLoraScaleOverride ?? undefined,
@@ -304,7 +304,7 @@ export const restoreStateFromProject = (metadata: any): Partial<AppDataState> =>
         editableStoryboard: metadata.editableStoryboard || null,
         contentFormat: metadata.contentFormat || 'ssul-shorts',
         aiModelTier: metadata.aiModelTier || 'opus',
-        scriptInputMode: metadata.scriptInputMode || 'narration',
+        scriptInputMode: metadata.scriptInputMode || 'auto',
         logline: metadata.logline || '',
         locationRegistry: metadata.locationRegistry || [],
         storyBrief: metadata.storyBrief || '',
@@ -386,7 +386,7 @@ export const initialAppDataState: AppDataState = {
     selectedImageEngine: 'gemini' as ImageEngine,
     selectedFluxModel: 'flux-pro' as FluxModel,
     // ★ MSF 대본 모드
-    scriptInputMode: 'narration' as const,
+    scriptInputMode: 'auto' as const,
 };
 
 export function appReducer(state: AppDataState, action: AppAction): AppDataState {

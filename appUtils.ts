@@ -103,3 +103,42 @@ export function resolveCharId(
 
     return null;
 }
+
+// ── 5. 대본 포맷 자동 감지 ──
+
+/**
+ * 대본 텍스트를 보고 3개 파이프라인 중 어디로 보낼지 결정.
+ *
+ * 판정 순서 (위에서부터 강한 신호 먼저)
+ *   1. MSF       : INT./EXT. 씬 헤딩, FADE IN/OUT, 대사 블록 (이름 + (V.O.))
+ *   2. narration : 괄호 메타데이터 (등장인물: .. / 연출의도: .. / 이미지프롬프트: ..)
+ *   3. uss       : 그 외 전부 (기본 나레이션 — 한 줄 = 한 컷)
+ *
+ * USS가 폴백인 이유: 감지 실패 시 가장 관대한 파이프라인(자유 나레이션)으로 보내서
+ * 어떤 대본이 와도 최소한 진행은 되게 함.
+ */
+export function detectScriptFormat(script: string): 'narration' | 'msf' | 'uss' {
+    if (!script || !script.trim()) return 'uss';
+
+    // MSF: 씬 헤딩 / 페이드 / (V.O.) / (O.S.) 같은 극본 문법
+    const msfPatterns = [
+        /\bINT\.\s/i,
+        /\bEXT\.\s/i,
+        /\bFADE\s+(IN|OUT)[:\.]/i,
+        /\([VO]\.?\s*[O]\.?\)/i,       // (V.O.) (O.S.)
+        /^\s*#?씬\s*\d+/m,             // "씬 1", "#씬 1"
+        /^\s*SCENE\s+\d+/im,
+    ];
+    if (msfPatterns.some(p => p.test(script))) return 'msf';
+
+    // 이미지상세대본: 괄호 메타데이터 블록
+    const narrationPatterns = [
+        /\(\s*등장인물\s*[:：]/,
+        /\(\s*연출의도\s*[:：]/,
+        /\(\s*이미지프롬프트\s*[:：]/,
+    ];
+    if (narrationPatterns.some(p => p.test(script))) return 'narration';
+
+    // 폴백: USS
+    return 'uss';
+}
