@@ -197,13 +197,13 @@ export async function runAnalysisPipeline(
         // ★ 상세 대본 전처리: 괄호 메타데이터 추출 + 순수 나레이션 분리
         const { cleanScript, metadataByLine, isDetailed } = preprocessDetailedScript(normalizedScript);
 
-        // ★ 이미지대본 탭: 상세대본 포맷 권장 — 감지 실패 시 일반 파이프라인으로 폴백
+        // ★ 이미지대본 탭: 상세대본 포맷 미감지 시 USS 파이프라인으로 위임
         const inputMode = stateRef.current.scriptInputMode || 'narration';
         if (inputMode === 'narration' && !isDetailed) {
-            addNotification(
-                '이미지대본 형식이 감지되지 않아 일반 분석 모드로 진행합니다.',
-                'info'
-            );
+            dispatch({ type: 'STOP_LOADING' });
+            addNotification('이미지상세대본 포맷이 감지되지 않아 USS 파이프라인으로 진행합니다.', 'info');
+            await runUSSPipeline(h, overrides);
+            return;
         }
 
         const scriptForAnalysis = isDetailed ? cleanScript : normalizedScript;
