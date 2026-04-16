@@ -182,6 +182,28 @@ export interface PromptContext {
     artStyle: ArtStyle;
 }
 
+/**
+ * 안전망: sceneDescription에서 카메라 프레이밍 키워드를 추출.
+ * designCinematography의 vis 힌트가 누락되거나 플랜과 씬 묘사가 충돌할 때
+ * 씬 묘사의 프레이밍 의도가 우선되도록 보강한다.
+ */
+const extractFramingFromScene = (desc: string | undefined | null): string | null => {
+    if (!desc) return null;
+    const lower = desc.toLowerCase();
+    const patterns: [RegExp, string][] = [
+        [/\b(extreme close-?up|ecu)\b/, 'extreme close-up'],
+        [/\b(close-?up|closeup)\b/, 'close-up'],
+        [/\b(bust shot)\b/, 'bust'],
+        [/\b(medium shot)\b/, 'medium'],
+        [/\b(full shot|full-body)\b/, 'full'],
+        [/\b(wide shot|wide view|wide angle)\b/, 'wide'],
+    ];
+    for (const [regex, shot] of patterns) {
+        if (regex.test(lower)) return shot;
+    }
+    return null;
+};
+
 export function buildFinalPrompt(cut: Cut | EditableCut, ctx: PromptContext): string {
     const { characterDescriptions: charDescriptions, locationVisualDNA: locDNA, cinematographyPlan, imageRatio, artStyle } = ctx;
     const rawCharacters = 'characters' in cut ? cut.characters : (cut as EditableCut).character;
@@ -480,9 +502,15 @@ ${technicalFX ? `- VISUAL FX: ${technicalFX}` : ''}`;
         ? `# [CRITICAL: SCENE DESCRIPTION — MUST FOLLOW]\n${sceneDesc}\n- The above scene description defines WHAT TO DRAW. Camera angle, character position, lighting, and framing described here take PRIORITY over generic acting directions.`
         : '';
 
-    const cameraInfo = cineCut
-        ? `${cineCut.shotSize}, ${cineCut.cameraAngle}, ${cineCut.cameraMovement}`
-        : (other || 'Standard medium shot');
+    const cameraInfo = (() => {
+        // 안전망: sceneDescription의 프레이밍 힌트가 cinematographyPlan보다 우선
+        const sceneFraming = extractFramingFromScene(sceneDesc);
+        if (cineCut) {
+            const finalShot = sceneFraming || cineCut.shotSize;
+            return `${finalShot}, ${cineCut.cameraAngle}, ${cineCut.cameraMovement}`;
+        }
+        return other || 'Standard medium shot';
+    })();
 
     const poseInfo = cineCut
         ? (pose ? `${pose}. Eyeline: looking ${cineCut.eyelineDirection}.` : `Eyeline: looking ${cineCut.eyelineDirection}. Follow the scene description for character positioning.`)

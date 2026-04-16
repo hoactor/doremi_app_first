@@ -343,10 +343,11 @@ export const designCinematography = async (
     seed?: number
 ): Promise<{ plan: CinematographyPlan; tokenCount: number }> => {
 
-    // 컷 요약 (토큰 절약)
-    const cutSummary = contiCuts.map(c =>
-        `${c.id} [${c.cutType}] chars:${c.characters.join(',')||'none'} loc:${c.location} emotion:${c.emotionBeat}`
-    ).join('\n');
+    // 컷 요약 (토큰 절약) — vis 힌트 포함
+    const cutSummary = contiCuts.map(c => {
+        const visHint = c.visualDescription ? ` vis:"${c.visualDescription.substring(0, 80)}"` : '';
+        return `${c.id} [${c.cutType}] chars:${c.characters.join(',')||'none'} loc:${c.location} emotion:${c.emotionBeat}${visHint}`;
+    }).join('\n');
 
     const prompt = `
 # Role: 촬영 감독 (Director of Photography)
@@ -359,6 +360,7 @@ export const designCinematography = async (
 4. 감정 강도 = 샷 크기: 감정 강한 순간 → 클로즈업, 전환/이동 → 와이드
 5. 리액션 비율: 대사 컷 2~3개당 리액션/인서트 1개
 6. 인서트컷 용도: 시간경과, 감정 상징, 복선 설치
+7. ★ visualDescription 존중 규칙 (최우선): 각 컷의 vis 필드에 이미 카메라 프레이밍 힌트가 포함되어 있으면(예: "Close-up of...", "Wide shot of...", "Bust shot...") 반드시 그 프레이밍을 shotSize로 채택하라. vis 필드의 프레이밍이 위 1~6번 규칙과 충돌해도 vis가 우선한다 — 이미 연출감독이 의도적으로 결정한 프레이밍이다.
 
 # 시나리오 정보:
 - 장르: ${scenarioAnalysis.genre}
