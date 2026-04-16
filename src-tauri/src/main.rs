@@ -59,7 +59,7 @@ static API_KEYS_CACHE: Mutex<Option<ApiKeys>> = Mutex::new(None);
 
 /// 캐시에서 키 로드 (없으면 마이그레이션 후 키체인에서 1회 읽어 캐시)
 fn cached_keys() -> ApiKeys {
-    let mut cache = API_KEYS_CACHE.lock().unwrap();
+    let cache = API_KEYS_CACHE.lock().unwrap();
     if let Some(ref keys) = *cache {
         return keys.clone();
     }
