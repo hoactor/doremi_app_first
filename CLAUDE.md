@@ -146,6 +146,8 @@ doremi_app_first/
 
 ## 대본 분석 파이프라인
 
+> 3개 파이프라인(narration/MSF/USS)의 전체 흐름/비교표/Step 앵커는 [PIPELINE.md](PIPELINE.md) 참조.
+
 ```
 [Step 1] analyzeScenario(script, seed?, logline?)
     → 시나리오 분석 + locations 배열 (장소 레지스트리)
