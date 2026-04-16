@@ -17,6 +17,7 @@ import {
 } from './services/geminiService';
 import { IS_TAURI, createProject as createProjectLocal } from './services/tauriAdapter';
 import { setClaudeModel } from './services/claudeService';
+import { validatePresetData } from './appPresetValidation';
 
 export interface PipelineHelpers {
     dispatch: (action: AppAction) => void;
@@ -289,6 +290,22 @@ export async function runAnalysisPipeline(
         dispatch({ type: 'SET_ENRICHED_SCRIPT', payload: enrichedScript });
         dispatch({ type: 'SET_ENRICHED_BEATS', payload: enrichedBeats });
         updateUIState({ analysisProgress: 45 });
+
+        // ★ 프리셋 데이터 검증 — Step 1~3 결과의 논리적 일관성 점검
+        {
+            const s = stateRef.current;
+            if (s.scenarioAnalysis && s.characterBibles) {
+                const validation = validatePresetData(normalizedScript, s.scenarioAnalysis, s.characterBibles, enrichedBeats);
+                if (validation.errors.length > 0) {
+                    console.error('[PresetValidation] errors:', validation.errors);
+                    addNotification(`프리셋 검증 오류 ${validation.errors.length}건: ${validation.errors.slice(0, 2).join(' / ')}${validation.errors.length > 2 ? ' ...' : ''}`, 'error');
+                }
+                if (validation.warnings.length > 0) {
+                    console.warn('[PresetValidation] warnings:', validation.warnings);
+                    addNotification(`프리셋 경고 ${validation.warnings.length}건 (콘솔 확인)`, 'warning');
+                }
+            }
+        }
 
         // ★ 상세 대본: enriched_pause 건너뛰고 바로 Step 4~5 → conti_pause
         if (isDetailed) {
