@@ -1,6 +1,5 @@
 
 import {
-    generateEditableStoryboard,
     generateCharacterMask, generateTitleSuggestions,
     renderTextOnImage,
     regenerateSingleCutDraft,
@@ -146,7 +145,6 @@ interface AppContextType {
         handleRemoveEffectFromPrompt: (cutNumber: string, effectPrompt: string) => void;
         handleScrollToCut: (cutNumber: string) => void;
         handleOpenReviewModalForEdit: () => void;
-        handleRegenerateStoryboardDraft: () => Promise<void>;
         handleRegenerateSingleCut: (cut: EditableCut) => Promise<Partial<EditableCut> | null>;
         handleOpenReviewModal: (cutNumber: string) => void;
         handleOpenReviewModalForDirectEntry: () => void;
@@ -1003,26 +1001,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         handleRemoveEffectFromPrompt: (cutNumber: string, effectPrompt: string) => {},
         handleScrollToCut: (cutNumber: string) => { const el = document.getElementById(`cut-${cutNumber}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); },
         handleOpenReviewModalForEdit,
-        handleRegenerateStoryboardDraft: async () => { 
-            const { userInputScript, enrichedScript, speakerGender, characterDescriptions } = stateRef.current; 
-            dispatch({ type: 'START_LOADING', payload: '재생성 중...' }); 
-            try { 
-                const normalizedScript = normalizeScriptCuts(userInputScript); 
-                const seed = Math.floor(Math.random() * 100000); 
-                const { blueprint, tokenCount: bToken } = await generateCinematicBlueprint(enrichedScript!, seed); 
-                handleAddUsage(bToken, 'claude'); 
-                const { storyboard, locationDNAMap, tokenCount: sToken } = await generateEditableStoryboard(normalizedScript, enrichedScript!, blueprint, speakerGender, characterDescriptions, seed); 
-                handleAddUsage(sToken, 'claude'); 
-                dispatch({ type: 'SET_EDITABLE_STORYBOARD', payload: storyboard }); 
-                dispatch({ type: 'SET_LOCATION_VISUAL_DNA', payload: locationDNAMap }); 
-            } catch (error) {
-                console.error("Failed to regenerate storyboard:", error);
-                addNotification('스토리보드 재생성 중 오류가 발생했습니다.', 'error');
-            } finally { 
-                dispatch({ type: 'STOP_LOADING' }); 
-            } 
-        },
-        handleRegenerateSingleCut: async (cut: EditableCut) => { 
+        handleRegenerateSingleCut: async (cut: EditableCut) => {
             try {
                 const seed = Math.floor(Math.random() * 100000); 
                 const res = await regenerateSingleCutDraft(cut, stateRef.current.speakerGender, seed); 

@@ -610,8 +610,6 @@ ${scriptContext}
     return { ...parsed, tokenCount: result.tokenCount };
 };
 
-// ── [LEGACY] generateEditableStoryboardChunk + mergeMetaLines → textAnalysis.legacy.ts로 분리 (Phase 9) ──
-
 /**
  * Normalizes a script so that each logical cut is exactly one line.
  * This prevents issues where "Cut 18" and the dialogue are treated as separate cuts.
@@ -727,8 +725,6 @@ export const normalizeScriptCuts = (script: string): string => {
 };
 
 
-
-// ── [LEGACY] generateEditableStoryboard → textAnalysis.legacy.ts로 분리 (Phase 9) ──
 
 
 export const regenerateSceneFromModification = async (currentCut: Cut, elementName: string, elementValue: string, seed?: number): Promise<{ newSceneDescription: string, tokenCount: number }> => {

@@ -596,15 +596,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
         </div>
       </div>
 
-      <footer className="p-6 bg-zinc-900 border-t border-zinc-800 flex justify-between items-center flex-shrink-0">
-        <button
-          onClick={() => actions.handleRegenerateStoryboardDraft()}
-          disabled={isLoading}
-          className="flex items-center gap-3 px-6 py-3 text-sm font-black rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-all border border-zinc-700 disabled:opacity-50 active:scale-95 uppercase tracking-tighter"
-        >
-          <RefreshIcon className="w-5 h-5" />
-          Regenerate All Drafts
-        </button>
+      <footer className="p-6 bg-zinc-900 border-t border-zinc-800 flex justify-end items-center flex-shrink-0">
         <div className="flex items-center gap-6">
           <div className="text-right">
             <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em]">Ready to Process</p>

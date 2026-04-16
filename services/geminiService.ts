@@ -18,7 +18,6 @@ export {
     regenerateImagePrompts,
     generateLocationProps,
     normalizeScriptCuts,
-    // generateEditableStoryboard — [LEGACY] Phase 9에서 textAnalysis.legacy.ts로 분리
     regenerateSceneFromModification,
     extractFieldsFromSceneDescription,
     verifyAndEnrichCutPrompt,
@@ -46,9 +45,6 @@ export { parseMSFScript, generateTitleAndSetup, enrichContiCutsBatch, enrichCont
 
 // ─── USS (Universal Script Schema) ────────────────────────────────
 export { analyzeUSSStructure, convertAllNarrationToCuts, ussToAppData } from './ai/ussAnalysis';
-
-// ─── 레거시 (참고/롤백용) ────────────────────────────────────────
-export { generateEditableStoryboard } from './ai/textAnalysis.legacy';
 
 // ─── 이미지 생성/편집 + TTS (11개) ──────────────────────────────
 export {
