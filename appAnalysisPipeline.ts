@@ -558,7 +558,7 @@ export async function resumeFromContiPause(
  * 상태 변경  : SET_SCENARIO_ANALYSIS, SET_CHARACTER_BIBLES, SET_CONTI_CUTS,
  *              SET_CINEMATOGRAPHY_PLAN, SET_EDITABLE_STORYBOARD
  * 특이점    : narration 경로의 Step 1~4를 parseMSFScript 한 번에 처리.
- *              validatePresetData는 현재 호출하지 않음 (향후 이식 대상).
+ *              validatePresetData 호출 (characterBibles 직후, enrichedBeats 없으므로 3-arg).
  */
 export async function runMSFPipeline(
     h: PipelineHelpers,
@@ -606,6 +606,21 @@ export async function runMSFPipeline(
 
         // characterBibles → legacyCharacters 변환 (기존 코드와 동일)
         dispatch({ type: 'SET_CHARACTER_BIBLES', payload: msfResult.characterBibles });
+
+        // ★ 프리셋 데이터 검증 — parseMSFScript 결과의 논리 일관성 점검
+        //    MSF는 enrichedBeats 단계가 없으므로 scenarioAnalysis + characterBibles만 검증
+        {
+            const validation = validatePresetData(userInputScript, msfResult.scenarioAnalysis, msfResult.characterBibles);
+            if (validation.errors.length > 0) {
+                console.error('[PresetValidation/MSF] errors:', validation.errors);
+                addNotification(`프리셋 검증 오류 ${validation.errors.length}건: ${validation.errors.slice(0, 2).join(' / ')}${validation.errors.length > 2 ? ' ...' : ''}`, 'error');
+            }
+            if (validation.warnings.length > 0) {
+                console.warn('[PresetValidation/MSF] warnings:', validation.warnings);
+                addNotification(`프리셋 경고 ${validation.warnings.length}건 (콘솔 확인)`, 'warning');
+            }
+        }
+
         const legacyCharacters: { [key: string]: CharacterDescription } = {};
         for (const bible of msfResult.characterBibles) {
             const key = bible.koreanName.replace(/\s/g, '_');
@@ -803,6 +818,20 @@ export async function runUSSPipeline(
         dispatch({ type: 'SET_LOCATION_VISUAL_DNA', payload: locationVisualDNA });
         dispatch({ type: 'SET_CHARACTER_BIBLES', payload: characterBibles });
         dispatch({ type: 'SET_CHARACTER_DESCRIPTIONS', payload: legacyCharacters });
+
+        // ★ 프리셋 데이터 검증 — ussToAppData 결과의 논리 일관성 점검
+        //    USS는 enrichedBeats 단계가 없으므로 scenarioAnalysis + characterBibles만 검증
+        {
+            const validation = validatePresetData(userInputScript, scenarioAnalysis, characterBibles);
+            if (validation.errors.length > 0) {
+                console.error('[PresetValidation/USS] errors:', validation.errors);
+                addNotification(`프리셋 검증 오류 ${validation.errors.length}건: ${validation.errors.slice(0, 2).join(' / ')}${validation.errors.length > 2 ? ' ...' : ''}`, 'error');
+            }
+            if (validation.warnings.length > 0) {
+                console.warn('[PresetValidation/USS] warnings:', validation.warnings);
+                addNotification(`프리셋 경고 ${validation.warnings.length}건 (콘솔 확인)`, 'warning');
+            }
+        }
 
         // 제목 자동 설정
         if (structure.meta.title && !stateRef.current.storyTitle) {

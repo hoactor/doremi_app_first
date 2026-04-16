@@ -39,7 +39,7 @@
 | enriched_pause | ✅ (사용자 편집 가능) | ❌ (전체 자동) | ❌ (전체 자동) |
 | Step 1~3 분할 | 3개 Claude 호출 | 1개 Claude 호출로 통합 | 구조 호출 + 배치 컷 변환 |
 | Step 5~6 | 공통 사용 | 공통 사용 | 공통 사용 |
-| validatePresetData | ✅ (Step 3 직후) | ❌ (향후 이식 예정) | ❌ (향후 이식 예정) |
+| validatePresetData | ✅ (Step 3 직후, 4-arg) | ✅ (parseMSFScript 직후, 3-arg) | ✅ (ussToAppData 직후, 3-arg) |
 | 토큰 효율 | 중간 | 좋음 (1회 호출) | 좋음 (배치 처리) |
 | 상세 편집 유연성 | 높음 | 낮음 | 중간 |
 
@@ -114,6 +114,6 @@ conti_pause     ──→  resumeFromContiPause (appAnalysisPipeline.ts:453)
 ## 진행 중 작업
 
 - [ ] narration 탭의 포맷 미감지 폴백 → USS (완료: 커밋 `2b72a4c`)
-- [ ] validatePresetData를 MSF/USS 경로에도 이식
+- [x] validatePresetData를 MSF/USS 경로에도 이식 (완료)
 - [ ] Flux 프롬프트 엔진 완성 (Gemini 품질 확정 후)
 - [ ] 탭 3개 제거 → 대본 포맷 자동 감지로 단일 진입점

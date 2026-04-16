@@ -21,7 +21,7 @@ export function validatePresetData(
     userInputScript: string,
     scenarioAnalysis: ScenarioAnalysis,
     characterBibles: CharacterBible[],
-    enrichedBeats: EnrichedBeat[],
+    enrichedBeats?: EnrichedBeat[],
 ): PresetValidationResult {
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -86,26 +86,28 @@ export function validatePresetData(
         }
     }
 
-    // ── enrichedBeats 검증 ──
-    if (!Array.isArray(enrichedBeats) || enrichedBeats.length === 0) {
-        errors.push('enrichedBeats가 비어있습니다.');
-    } else {
-        const validTypes = new Set(['narration', 'insert', 'reaction']);
-        for (let i = 0; i < enrichedBeats.length; i++) {
-            const beat = enrichedBeats[i];
-            const prefix = `enrichedBeats[${i}]`;
-            if (!beat.text) errors.push(`${prefix}.text 누락`);
-            if (!validTypes.has(beat.type)) errors.push(`${prefix}.type="${beat.type}"은 narration/insert/reaction 중 하나여야 합니다`);
-            if (!beat.beat) warnings.push(`${prefix}.beat 누락`);
-            if (!beat.emotion) warnings.push(`${prefix}.emotion 누락`);
-            if (!beat.direction) warnings.push(`${prefix}.direction 누락`);
-        }
+    // ── enrichedBeats 검증 ── (narration 경로에서만 생성됨. MSF/USS는 이 블록 스킵)
+    if (enrichedBeats !== undefined) {
+        if (!Array.isArray(enrichedBeats) || enrichedBeats.length === 0) {
+            errors.push('enrichedBeats가 비어있습니다.');
+        } else {
+            const validTypes = new Set(['narration', 'insert', 'reaction']);
+            for (let i = 0; i < enrichedBeats.length; i++) {
+                const beat = enrichedBeats[i];
+                const prefix = `enrichedBeats[${i}]`;
+                if (!beat.text) errors.push(`${prefix}.text 누락`);
+                if (!validTypes.has(beat.type)) errors.push(`${prefix}.type="${beat.type}"은 narration/insert/reaction 중 하나여야 합니다`);
+                if (!beat.beat) warnings.push(`${prefix}.beat 누락`);
+                if (!beat.emotion) warnings.push(`${prefix}.emotion 누락`);
+                if (!beat.direction) warnings.push(`${prefix}.direction 누락`);
+            }
 
-        // id 연속성 검증
-        const ids = enrichedBeats.map(b => b.id);
-        const isSequential = ids.every((id, idx) => id === idx + 1);
-        if (!isSequential) {
-            warnings.push('enrichedBeats id가 1부터 연속이 아닙니다. 자동 보정됩니다.');
+            // id 연속성 검증
+            const ids = enrichedBeats.map(b => b.id);
+            const isSequential = ids.every((id, idx) => id === idx + 1);
+            if (!isSequential) {
+                warnings.push('enrichedBeats id가 1부터 연속이 아닙니다. 자동 보정됩니다.');
+            }
         }
     }
 

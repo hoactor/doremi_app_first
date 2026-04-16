@@ -243,7 +243,6 @@ cd ~/Downloads && zip -r doremi_app-backup-$(date +%Y%m%d-%H%M).zip doremi_app_f
 - **OpenAI DALL-E 통합** — `services/openaiService.ts`에 `generateImageWithDalle` 정의만 있음. 대표 캐릭터·배경 원본 이미지 생성용. 호출처 아직 없음, 연결 예정.
 - **Flux 프롬프트 엔진 완성** — `appFluxPromptEngine.ts` (712줄)가 최종 버전(1109줄) 대비 미완. Gemini 품질 확정 후 진행.
 - **대본 포맷 자동 감지** — 현재는 탭 3개(narration/msf/uss)로 사용자가 선택. 장기적으로 대본 입력 시 자동 감지 후 해당 파이프라인으로 라우팅 목표.
-- 파이프라인 체크포인트/이어서진행 ("이어서 진행" 버튼)
 - SlideshowModal 다운로드 패턴 수정 (남은 건)
 
 ## 호환성 주의 — 기존 프로젝트가 깨지면 안 된다
