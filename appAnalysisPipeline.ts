@@ -1,7 +1,39 @@
-// appAnalysisPipeline.ts — React 의존 제로
-// 대본 분석 파이프라인 (handleStartStudio + handleResumeFromEnrichedPause)
-// Phase 9: enrichScript 재설계 + 파이프라인 통합 (레거시 경로 제거)
-// ★ Phase 12: enriched_pause — Step 3 후 일시정지, 사용자 편집 후 Step 4~6 재개
+// ═══════════════════════════════════════════════════════════════════════════
+// appAnalysisPipeline.ts — 대본 분석 파이프라인 (React 의존 제로)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 이 파일의 3가지 파이프라인 + 2가지 resume
+//
+//   ┌─ UI 탭(scriptInputMode) ───→  진입 함수              ────→  동작
+//   │  narration (이미지상세대본)    runAnalysisPipeline       상세 포맷 감지 시 Step 1~3 후 enriched_pause,
+//   │                                                          미감지 시 runUSSPipeline으로 위임
+//   │  msf                           runMSFPipeline            전체 자동 (pause 없음)
+//   │  uss                           runUSSPipeline            전체 자동 (pause 없음)
+//
+//   resumeFromEnrichedPause  ← 사용자가 enriched_pause에서 편집 후 호출 (Step 4~6 실행)
+//   resumeFromContiPause     ← 사용자가 conti_pause에서 컷 편집 후 호출 (Step 6만 실행)
+//
+// 라인 가이드
+//   30–74    취소 토큰 유틸 (startNewPipeline / checkPipelineAlive / cancelActivePipeline / createSafeHelpers)
+//   76–161   상세 대본 전처리 (preprocessDetailedScript) — 괄호 메타데이터 추출
+//   167–332  runAnalysisPipeline (narration / 이미지상세대본) — Step 1~3 + validatePresetData
+//   340–446  resumeFromEnrichedPause — Step 4~6
+//   453–498  resumeFromContiPause — Step 6만
+//   505–661  runMSFPipeline
+//   664–794  runUSSPipeline
+//   797+     handleRefreshLocations — 새 장소에 대한 visualDNA + 의상 재생성
+//
+// 파이프라인 단계 레퍼런스 (실제 구현은 services/ai/*)
+//   Step 1  analyzeScenario          → scenarioAnalysis (locations 포함)
+//   Step 2  analyzeCharacterBible    → characterBibles
+//   Step 3  enrichScriptWithDirections → enrichedBeats  ← validatePresetData 호출 지점
+//   Step 4  generateConti            → contiCuts
+//   Step 5  designCinematography     → cinematographyPlan (shotSize, cameraAngle, …)
+//   Step 6  convertContiToEditableStoryboard → editableStoryboard (UI가 렌더)
+//
+// MSF는 parseMSFScript 1회로 Step 1-4를 한 번에, 이후 enrichContiCutsBatch + designCinematography.
+// USS는 analyzeUSSStructure → convertAllNarrationToCuts → ussToAppData.
+// ═══════════════════════════════════════════════════════════════════════════
 
 import type { AppAction, ArtStyle, CharacterDescription, EnrichedBeat } from './types';
 import type { UIState } from './appTypes';
@@ -161,8 +193,17 @@ export function preprocessDetailedScript(rawScript: string): {
 }
 
 /**
- * Phase 1: Step 1~3 (시나리오 분석 → 캐릭터 바이블 → enrichScript)
- * enrichScript 완료 후 enriched_pause 상태로 정지 → 사용자가 편집 가능
+ * narration 탭 — 이미지상세대본 전용 경로 (Step 1~3 후 일시정지)
+ *
+ * 진입       : handleStartStudio (AppContext) — scriptInputMode === 'narration'
+ * 실행       : Step 1 analyzeScenario → Step 2 analyzeCharacterBible
+ *              → Step 3 enrichScriptWithDirections
+ *              → validatePresetData (필드 누락/논리 오류 조기 감지)
+ * 상태 변경  : SET_SCENARIO_ANALYSIS, SET_CHARACTER_BIBLES, SET_ENRICHED_SCRIPT,
+ *              SET_ENRICHED_BEATS, SET_PIPELINE_CHECKPOINT('enriched_pause')
+ * 이탈 분기  : (a) preprocessDetailedScript로 상세 포맷 미감지 → runUSSPipeline 위임
+ *              (b) isDetailed=true인 상세대본 → resumeFromEnrichedPause로 바로 진행
+ *              (c) 일반 → enriched_pause에서 정지, 사용자 편집 대기
  */
 export async function runAnalysisPipeline(
     h: PipelineHelpers,
@@ -333,8 +374,14 @@ export async function runAnalysisPipeline(
 }
 
 /**
- * Phase 2: Step 4~6 (콘티 → 촬영설계 → 스토리보드 변환)
- * enriched_pause 상태에서 사용자가 편집 완료 후 호출
+ * narration 경로 Phase 2 — Step 4~6 (콘티 → 촬영설계 → 스토리보드 변환)
+ *
+ * 진입       : (a) AppContext handleResumeFromEnrichedPauseAction (사용자 편집 후)
+ *              (b) runAnalysisPipeline 내부에서 isDetailed=true일 때 직접
+ * 실행       : Step 4 generateConti → Step 5 designCinematography
+ *              → Step 6 convertContiToEditableStoryboard
+ * 상태 변경  : SET_CONTI_CUTS, SET_CINEMATOGRAPHY_PLAN, SET_EDITABLE_STORYBOARD,
+ *              SET_PIPELINE_CHECKPOINT('conti_pause' 또는 'complete')
  * @param editedBeats 사용자가 편집(또는 그대로 유지)한 EnrichedBeat[]
  */
 export async function resumeFromEnrichedPause(
@@ -447,8 +494,11 @@ export async function resumeFromEnrichedPause(
 
 
 /**
- * conti_pause 상태에서 사용자가 컷 편집 완료 후 호출
- * Step 6만 실행: ContiCut → EditableScene 변환
+ * conti_pause 이후 Step 6만 재실행
+ *
+ * 진입       : AppContext — conti_pause에서 사용자가 컷 편집 완료 후
+ * 실행       : convertContiToEditableStoryboard (Claude 호출 없음, 순수 변환)
+ * 상태 변경  : SET_EDITABLE_STORYBOARD, SET_PIPELINE_CHECKPOINT('complete')
  */
 export async function resumeFromContiPause(
     h: PipelineHelpers,
@@ -499,8 +549,16 @@ export async function resumeFromContiPause(
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * MSF 대본 모드: Claude 1회 → designCinematography → convertContiToEditableStoryboard
- * enriched_pause 없이 끝까지 자동 진행
+ * MSF(Master Scene Format) 대본 경로 — 전체 자동 (pause 없음)
+ *
+ * 진입       : handleStartStudio — scriptInputMode === 'msf'
+ * 실행       : parseMSFScript (Claude 1회로 씬/캐릭터/컷 분해)
+ *              → enrichContiCutsBatch (감정/연기/포즈 풍부화, 배치 처리)
+ *              → designCinematography → convertContiToEditableStoryboard
+ * 상태 변경  : SET_SCENARIO_ANALYSIS, SET_CHARACTER_BIBLES, SET_CONTI_CUTS,
+ *              SET_CINEMATOGRAPHY_PLAN, SET_EDITABLE_STORYBOARD
+ * 특이점    : narration 경로의 Step 1~4를 parseMSFScript 한 번에 처리.
+ *              validatePresetData는 현재 호출하지 않음 (향후 이식 대상).
  */
 export async function runMSFPipeline(
     h: PipelineHelpers,
@@ -655,10 +713,19 @@ export async function runMSFPipeline(
 
 
 // ═══════════════════════════════════════════════════════════════════
-// USS Pipeline — 나레이션 → Claude 구조분석 → 배치 컷 변환 → Step 5~6
-// Call 1: 구조 분석 (meta + characters + locations + 막 구분)
-// Call 2~N: 나레이션 배치 → 컷 변환
-// 기존 Step 1~4를 대체하는 실험적 경로
+// USS(Universal Script Schema) Pipeline — 전체 자동 (pause 없음)
+// ═══════════════════════════════════════════════════════════════════
+//
+// 진입       : handleStartStudio — scriptInputMode === 'uss'
+//              + narration 탭에서 상세 포맷 미감지 시 폴백으로도 호출됨
+// 실행       : Call 1 analyzeUSSStructure — 메타/캐릭터/장소/막 구조 분해
+//              Call 2~N convertAllNarrationToCuts — 나레이션 배치별 컷 변환
+//              → ussToAppData (타입 매핑)
+//              → designCinematography → convertContiToEditableStoryboard
+// 상태 변경  : SET_SCENARIO_ANALYSIS, SET_CHARACTER_BIBLES, SET_CONTI_CUTS,
+//              SET_CINEMATOGRAPHY_PLAN, SET_EDITABLE_STORYBOARD
+// 특이점    : Step 1~4의 분할 호출 대신 "구조 먼저 + 컷을 나중에"로 재구성.
+//              enrichedBeats 단계 없음.
 // ═══════════════════════════════════════════════════════════════════
 
 export async function runUSSPipeline(
@@ -795,7 +862,11 @@ export async function runUSSPipeline(
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * 새로 추가된 장소에 대해 visualDNA + 의상 재생성
+ * 새로 추가된 장소에 대한 visualDNA + 캐릭터별 의상 재생성
+ *
+ * 진입       : 사용자가 editable storyboard에서 새 location 추가 시
+ * 실행       : regenerateForNewLocations (Claude 호출)
+ * 상태 변경  : SET_LOCATION_VISUAL_DNA (merge), SET_CHARACTER_BIBLES (의상 merge)
  * @param newLocations 새로 추가할 장소 이름 배열
  */
 export async function handleRefreshLocations(
