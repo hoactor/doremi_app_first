@@ -2,6 +2,7 @@
 
 import { SlideshowItem, VideoSegment, ZOOM_RATE_PER_SECOND, LOGO_DATA_URL, loadImage, getSfxOffsetByName, getSupportedMimeType, drawFrame } from './slideshowUtils';
 import { applySmartLineBreaks } from '../utils/textUtils';
+import { downloadFile } from '../services/tauriAdapter';
 
 export interface ExportHelpers {
     sortedItems: SlideshowItem[];
@@ -125,24 +126,24 @@ export async function handleExportToVideo(h: ExportHelpers, options: { includeBg
 
             const recorder = new MediaRecorder(combinedStream, recorderOptions);
             recorder.ondataavailable = (event) => { if (event.data.size > 0) recordedChunks.push(event.data); };
-            recorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: mimeType || 'video/webm' }); 
-                if (blob.size === 0) { 
-                    addNotification("내보내기 실패", "error"); 
-                    setIsExporting(false); 
-                    realTimeAudioCtx.close(); 
-                    return; 
+            recorder.onstop = async () => {
+                const blob = new Blob(recordedChunks, { type: mimeType || 'video/webm' });
+                if (blob.size === 0) {
+                    addNotification("내보내기 실패", "error");
+                    setIsExporting(false);
+                    realTimeAudioCtx.close();
+                    return;
                 }
-                const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.style.display = 'none'; document.body.appendChild(a); a.href = url;
                 const modeSuffix = (!options.includeBgm && !options.includeSfx) ? '_narration_only' : '';
-                const safeTitle = (storyTitle || 'storyboard').replace(/[\\/\\?%*:|"<>]/g, '_'); 
-                
+                const safeTitle = (storyTitle || 'storyboard').replace(/[\\/\\?%*:|"<>]/g, '_');
+
                 // Determine file extension
                 let extension = 'webm';
                 if (mimeType.includes('mp4')) extension = 'mp4';
-                
-                a.download = `${safeTitle}${modeSuffix}.${extension}`; a.click();
-                setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100); 
+
+                const fileName = `${safeTitle}${modeSuffix}.${extension}`;
+                const extLabel = extension.toUpperCase();
+                await downloadFile(blob, fileName, [{ name: `${extLabel} Video`, extensions: [extension] }]);
                 setIsExporting(false);
                 realTimeAudioCtx.close();
             };
@@ -233,20 +234,19 @@ export async function handleExportCutsToVideos(h: ExportHelpers) {
 
                     const recorder = new MediaRecorder(combinedStream, recorderOptions);
                     recorder.ondataavailable = (event) => { if (event.data.size > 0) recordedChunks.push(event.data); };
-                    recorder.onstop = () => {
-                        const blob = new Blob(recordedChunks, { type: mimeType || 'video/webm' }); 
-                        if (blob.size === 0) { 
-                            realTimeAudioCtx.close(); 
-                            resolve(); 
-                            return; 
+                    recorder.onstop = async () => {
+                        const blob = new Blob(recordedChunks, { type: mimeType || 'video/webm' });
+                        if (blob.size === 0) {
+                            realTimeAudioCtx.close();
+                            resolve();
+                            return;
                         }
-                        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.style.display = 'none'; document.body.appendChild(a); a.href = url;
                         let extension = 'webm';
                         if (mimeType.includes('mp4')) extension = 'mp4';
-                        const [scenePart, cutPart] = item.cutNumber.split('-'); 
-                        a.download = `cut_${scenePart}-${cutPart?.padStart(2, '0') || item.cutNumber}.${extension}`; 
-                        a.click();
-                        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100); 
+                        const [scenePart, cutPart] = item.cutNumber.split('-');
+                        const fileName = `cut_${scenePart}-${cutPart?.padStart(2, '0') || item.cutNumber}.${extension}`;
+                        const extLabel = extension.toUpperCase();
+                        await downloadFile(blob, fileName, [{ name: `${extLabel} Video`, extensions: [extension] }]);
                         realTimeAudioCtx.close();
                         resolve();
                     };
