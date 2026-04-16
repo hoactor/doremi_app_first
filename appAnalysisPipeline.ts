@@ -380,14 +380,19 @@ export async function resumeFromEnrichedPause(
         // originLines 기반 매핑 — USS가 한 줄을 여러 컷으로 분할해도 shift 없음
         if (scriptMeta?.isDetailed && scriptMeta.metadataByLine) {
             for (const cut of contiCuts) {
-                if (cut.direction) continue; // 이미 direction 있으면 스킵
                 const lineNum = cut.originLines?.[0];
-                if (lineNum != null) {
-                    const lineIdx = String(lineNum - 1); // originLines는 1-based, metadataByLine 키는 0-based
-                    const meta = (scriptMeta.metadataByLine as any)[lineIdx];
-                    if (meta?.direction) {
-                        cut.direction = meta.direction;
-                    }
+                if (lineNum == null) continue;
+                const lineIdx = String(lineNum - 1); // originLines는 1-based, metadataByLine 키는 0-based
+                const meta = (scriptMeta.metadataByLine as any)[lineIdx];
+                if (!meta) continue;
+
+                // direction: AI가 안 넣었으면 사용자 값 보충
+                if (!cut.direction && meta.direction) {
+                    cut.direction = meta.direction;
+                }
+                // ★ imagePrompt → visualDescription: 사용자 직접 입력이 AI 분석보다 우선
+                if (meta.imagePrompt) {
+                    cut.visualDescription = meta.imagePrompt;
                 }
             }
         }

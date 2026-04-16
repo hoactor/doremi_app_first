@@ -66,7 +66,10 @@ export function createProjectActions(h: ProjectActionHelpers) {
         handleCreateNewProject: async (title?: string) => {
             if (!IS_TAURI) { addNotification('프로젝트 저장은 데스크톱 앱에서만 가능합니다.', 'info'); return; }
             try {
-                const projectTitle = title || stateRef.current.storyTitle || '새 프로젝트';
+                const projectTitle = title || '새 프로젝트';
+                // ★ 이전 프로젝트 데이터 초기화 (사용자 선호 설정은 보존)
+                dispatch({ type: 'RESET_STATE' });
+                setUIState(initialUIState);
                 const projectId = await createProjectLocal(projectTitle);
                 dispatch({ type: 'SET_CURRENT_PROJECT_ID', payload: projectId });
                 dispatch({ type: 'SET_PROJECT_SAVED', payload: false });

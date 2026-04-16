@@ -538,7 +538,25 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                 },
             };
         }
-        case 'RESET_STATE': return { ...initialAppDataState, openAiApiKey: state.openAiApiKey, assetLibrary: state.assetLibrary, closetCharacters: state.closetCharacters, filenameTemplate: state.filenameTemplate };
+        case 'RESET_STATE': return {
+            ...initialAppDataState,
+            // 인증 + 라이브러리 (세션 유지)
+            openAiApiKey: state.openAiApiKey,
+            assetLibrary: state.assetLibrary,
+            closetCharacters: state.closetCharacters,
+            // 사용자 선호 설정 (프로젝트 간 유지)
+            filenameTemplate: state.filenameTemplate,
+            aiModelTier: state.aiModelTier,
+            selectedImageEngine: state.selectedImageEngine,
+            selectedFluxModel: state.selectedFluxModel,
+            contentFormat: state.contentFormat,
+            artStyle: state.artStyle,
+            customArtStyle: state.customArtStyle,
+            imageRatio: state.imageRatio,
+            scriptInputMode: state.scriptInputMode,
+            styleLoraId: state.styleLoraId,
+            styleLoraScaleOverride: state.styleLoraScaleOverride,
+        };
         case 'START_NEW_ANALYSIS': return { ...initialAppDataState, openAiApiKey: state.openAiApiKey, userInputScript: state.userInputScript, storyTitle: state.storyTitle, speakerGender: state.speakerGender, closetCharacters: state.closetCharacters, assetLibrary: state.assetLibrary, filenameTemplate: state.filenameTemplate, artStyle: state.artStyle, customArtStyle: state.customArtStyle, imageRatio: state.imageRatio, logline: state.logline, scriptInputMode: state.scriptInputMode, styleLoraId: state.styleLoraId, styleLoraScaleOverride: state.styleLoraScaleOverride };
         case 'SET_USER_INPUT_SCRIPT': return { ...state, userInputScript: action.payload };
         case 'SET_ENRICHED_SCRIPT': return { ...state, enrichedScript: action.payload };
