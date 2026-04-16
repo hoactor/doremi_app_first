@@ -1,5 +1,46 @@
-// services/ai/textAnalysis.ts — 텍스트 분석 함수
-// geminiService.ts에서 분리됨. 파이프라인/수정/포맷은 별도 파일로 재분리.
+// ═══════════════════════════════════════════════════════════════════════════
+// services/ai/textAnalysis.ts — Claude 호출 헬퍼 모음 (858줄)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 이 파일은 **대본 분석에 필요한 Claude 호출 함수의 유틸 허브**. 파일 하나가
+// 단일 기능을 갖지 않고, 여러 독립적 함수가 용도별로 모여 있음. 다른 파일
+// (textAnalysisPipeline / textAnalysisRefine / msfAnalysis / ussAnalysis)에서
+// import해서 사용.
+//
+// 카테고리별 함수 (라인 순)
+//   비전(이미지→텍스트)
+//     analyzeHairStyle                        7    캐릭터 이미지 → hair/face 묘사
+//     analyzeCharacterVisualDNA               67   (analyzeHairStyle의 alias)
+//
+//   대본 풍부화 (narration 경로의 Step 3)
+//     enrichScriptWithDirections              105  대본 → EnrichedBeat[] (4원칙 연출)
+//
+//   컷 재생성
+//     regenerateSingleCutDraft                420  한 컷만 재생성
+//     regenerateSceneFromModification         730  요소 변경 기반 sceneDesc 재생성
+//     extractFieldsFromSceneDescription       737  sceneDesc → 각 필드 역추출
+//     verifyAndEnrichCutPrompt                744  cut 검증 + 보강
+//     regenerateCutFieldsForCharacterChange   792  캐릭터 변경 시 컷 필드 재조립
+//     regenerateCutFieldsForIntentChange      799  연출의도 변경 시 필드 재조립
+//
+//   캐릭터/의상
+//     analyzeCharacters                       451  (레거시 경로, 사용 줄어들었음)
+//     generateOutfitsForLocations             536  캐릭터별 장소 의상 일괄 생성
+//     regenerateOutfitDescription             552  사용자 요청 반영한 의상 재생성
+//
+//   기타 유틸
+//     generateTitleSuggestions                527  제목 제안
+//     regenerateImagePrompts                  564  imagePrompt 텍스트 재작성
+//     generateLocationProps                   571  장소 소품/배경 제안
+//     normalizeScriptCuts                     618  "컷 N" 번호 정규화 (순수 함수)
+//     generateFinalStoryboardFromEditable     777  Editable → Scene 변환 (순수)
+//
+// 이 파일에서 제외된 것 (별도 파일)
+//   · 파이프라인 5함수 (analyzeScenario/Bible/Conti/Cinema/Convert) → textAnalysisPipeline.ts
+//   · 프롬프트 수정/포맷/블루프린트                                   → textAnalysisRefine.ts
+//   · MSF 전용                                                          → msfAnalysis.ts
+//   · USS 전용                                                          → ussAnalysis.ts
+// ═══════════════════════════════════════════════════════════════════════════
 
 import { CharacterDescription, Scene, Cut, Gender, EditableScene, EditableCut, EnrichedBeat } from '../../types';
 import { callTextModel, callTextModelStream, callVisionTextModel, parseJsonResponse, SCRIPT_ANALYSIS_SYSTEM_INSTRUCTION, SFW_SYSTEM_INSTRUCTION, dataUrlToBlob, blobToBase64 } from './aiCore';
