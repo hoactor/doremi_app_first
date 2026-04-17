@@ -32,7 +32,7 @@ const TYPE_LABELS: Record<DalleAssetType, string> = {
 };
 
 const TYPE_HINTS: Record<DalleAssetType, string> = {
-    character: '예: "20대 여성, 긴 갈색 웨이브 머리, 베이지 블레이저와 흰 셔츠, 부드러운 미소"',
+    character: '예: "20대 여성, 긴 갈색 웨이브 머리, 카페에서 커피 마시며 웃고 있는"\n상황(공원/카페/거리 등)까지 넣으면 더 자연스럽게 나옵니다. 기본 분위기는 밝고 웃는 톤.',
     background: '예: "오후 햇빛이 드는 작은 카페 인테리어, 원목 테이블, 따뜻한 색감"',
     outfit: '예: "네이비 체크 정장, 흰 셔츠, 무늬 없는 타이"',
     prop: '예: "빈티지 가죽 노트, 황동 버클, 갈색 낡은 표지"',

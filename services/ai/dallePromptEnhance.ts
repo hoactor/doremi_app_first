@@ -25,12 +25,20 @@ function styleHint(artStyle: ArtStyle, customArtStyle?: string): string {
 // ─── 에셋 타입별 구조 지시 ────────────────────────────────────────────
 const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
     character: `
-- 용도: 캐릭터 레퍼런스 시트 (나중에 다른 AI가 얼굴 참조로 사용)
-- 구도: full body visible, 3/4 view OR front view, neutral standing pose
-- 배경: clean solid background OR simple gradient — NO complex scene
-- 얼굴: clearly visible, 명확한 표정 (neutral smile 기본)
-- 디테일: face / hair / outfit 모두 뚜렷하게 식별 가능
-- 금지: extreme camera angles, motion blur, complex backgrounds, cropped body`,
+- 용도: 자연스러운 일상 상황 속 단일 캐릭터 이미지 (얼굴/의상 참조용)
+- 필수 구도: SINGLE character, ONE pose, ONE composition — 절대 시트/여러 얼굴/여러 뷰 아님
+- 상황 설정: 구체적인 일상 장면 속에 배치 (자유롭게 발명 OK)
+  예) smiling in a sunlit park / studying at a cafe with coffee /
+       walking down a street / laughing by a window / relaxing on a bench /
+       taking a selfie-like candid / reading a book in a bookstore
+- 분위기 기본값: 밝고 따뜻하고 웃는 톤 (bright / warm / cheerful / inviting)
+  사용자가 다른 감정을 명시하면 그에 맞춤
+- 얼굴 가시성: 얼굴이 뚜렷이 보이는 각도 (front 또는 3/4 view)
+  자연스러운 candid 느낌 — 카메라를 의식하되 경직되지 않음
+- 디테일: face / hair / outfit 모두 식별 가능해야 함 (레퍼런스 용도)
+- 금지 (절대): character reference sheet, multiple views, turnaround,
+  color palette swatch, mannequin pose, empty white studio, plain solid
+  background, stiff standing, multiple faces in one image, split layout`,
 
     background: `
 - 용도: 장소/환경 참조 이미지 (나중에 씬 배경으로 활용)
@@ -69,6 +77,16 @@ RULES:
 6. Never describe minors in distress, violence, nudity, or any policy-sensitive content.
 7. If the user's description is too short/vague, invent reasonable defaults that fit the asset type.
 8. The art style block given by the user is mandatory — include it near the front.
+
+CHARACTER ASSETS — EXTRA RULES (MANDATORY):
+- Never produce a character reference sheet, turnaround, or multiple views in one image.
+- Always place the character in ONE specific natural everyday scene
+  (park, cafe, street, bedroom, bookstore, etc.). One pose, one composition.
+- Default mood: bright, warm, cheerful, smiling — unless the user specifies otherwise.
+- If the user description lacks a situation, invent a simple pleasant one
+  (e.g., "smiling in a sunlit park", "reading at a cozy cafe window").
+- Do NOT include phrases like "character sheet", "reference sheet", "multiple views",
+  "turnaround", "color palette", "mannequin" — these trigger sheet layouts.
 
 PROMPT SHAPE:
 <asset-type keyword> + <style block> + <subject specifics> + <composition/lighting>`;
