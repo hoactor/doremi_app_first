@@ -61,7 +61,7 @@ export const EnlargedCutModal: React.FC = () => {
                         </button>
                         <button onClick={() => actions.handleToggleIntenseEmotion(enlargedCutNumber)}
                             disabled={eCut.isIntensifying}
-                            className={`flex-1 px-3 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors ${eCut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : eCut.useIntenseEmotion ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500' : 'bg-transparent hover:bg-rose-500/10 text-rose-400 border border-rose-500/50'}`}>
+                            className={`flex-1 px-3 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all duration-200 ${eCut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : eCut.useIntenseEmotion ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500 shadow-[0_0_16px_rgba(244,63,94,0.45)]' : 'bg-gradient-to-br from-rose-500/15 to-rose-600/5 hover:from-rose-500/25 hover:to-rose-600/10 text-rose-300 hover:text-rose-200 border border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.12)] hover:shadow-[0_0_18px_rgba(244,63,94,0.28)]'}`}>
                             {eCut.isIntensifying ? '⏳ 생성중' : eCut.useIntenseEmotion ? '🔥 강화됨' : '🔥 강화'}
                         </button>
                         <button onClick={() => { actions.handlePrepareStudioForCut(enlargedCutNumber, eCut.sceneDescription); actions.setUIState({ enlargedCutNumber: null }); }}
