@@ -52,20 +52,20 @@ export const EnlargedCutModal: React.FC = () => {
                     {/* 버튼 */}
                     <div className="flex gap-2">
                         <button onClick={() => actions.handleGenerateForCut(enlargedCutNumber, 'rough')} disabled={eCut.imageLoading}
-                            className="flex-1 px-3 py-2.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                            className="flex-1 px-3 py-2.5 bg-transparent hover:bg-orange-500/10 disabled:opacity-50 text-orange-400 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-orange-500/50">
                             <RefreshIcon className="w-3.5 h-3.5" /> 러프
                         </button>
                         <button onClick={() => actions.handleGenerateForCut(enlargedCutNumber, 'normal')} disabled={eCut.imageLoading}
-                            className="flex-1 px-3 py-2.5 bg-orange-700 hover:bg-orange-600 disabled:opacity-50 text-orange-200 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors">
-                            <SparklesIcon className="w-3.5 h-3.5" /> 일반
+                            className="flex-1 px-3 py-2.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-md shadow-orange-500/20">
+                            <SparklesIcon className="w-4 h-4" /> 일반
                         </button>
                         <button onClick={() => actions.handleToggleIntenseEmotion(enlargedCutNumber)}
                             disabled={eCut.isIntensifying}
-                            className={`flex-1 px-3 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors ${eCut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : eCut.useIntenseEmotion ? 'bg-rose-600 text-white' : 'bg-zinc-700 hover:bg-rose-600/30 text-zinc-300 border border-zinc-600'}`}>
+                            className={`flex-1 px-3 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors ${eCut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : eCut.useIntenseEmotion ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500' : 'bg-transparent hover:bg-rose-500/10 text-rose-400 border border-rose-500/50'}`}>
                             {eCut.isIntensifying ? '⏳ 생성중' : eCut.useIntenseEmotion ? '🔥 강화됨' : '🔥 강화'}
                         </button>
                         <button onClick={() => { actions.handlePrepareStudioForCut(enlargedCutNumber, eCut.sceneDescription); actions.setUIState({ enlargedCutNumber: null }); }}
-                            className="flex-1 px-3 py-2.5 bg-zinc-700 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                            className="flex-1 px-3 py-2.5 bg-transparent hover:bg-zinc-700/50 text-zinc-300 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-zinc-600">
                             <PencilIcon className="w-3.5 h-3.5" /> Studio
                         </button>
                     </div>

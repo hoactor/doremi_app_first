@@ -505,8 +505,8 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
             <div className="mt-2 pt-3 border-t border-zinc-800/50 space-y-2">
                 <div className="flex gap-1.5">
                     <button onClick={() => actions.handleGenerateForCut(cut.cutNumber, 'rough')} disabled={cut.imageLoading} className="flex-1 px-2 py-1.5 bg-transparent hover:bg-orange-500/10 disabled:opacity-50 text-orange-400 text-[10px] font-bold rounded-md flex items-center justify-center gap-1 transition-colors border border-orange-500/50"><RefreshIcon className="w-3 h-3" /> 러프</button>
-                    <button onClick={() => actions.handleGenerateForCut(cut.cutNumber, 'normal')} disabled={cut.imageLoading} className="flex-1 px-2 py-1.5 bg-orange-950/60 hover:bg-orange-900/60 disabled:opacity-50 text-orange-500/80 text-[10px] font-bold rounded-md flex items-center justify-center gap-1 transition-colors border border-orange-800/40"><SparklesIcon className="w-3 h-3" /> 일반</button>
-                    <button onClick={() => actions.handleToggleIntenseEmotion(cut.cutNumber)} disabled={cut.isIntensifying} className={`flex-1 px-2 py-1.5 text-[10px] font-bold rounded-md flex items-center justify-center gap-1 transition-colors ${cut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : cut.useIntenseEmotion ? 'bg-rose-600 text-white' : 'bg-orange-800/50 hover:bg-rose-700/50 text-orange-300 border border-orange-600/40'}`}>{cut.isIntensifying ? '⏳ 생성중' : cut.useIntenseEmotion ? '🔥 강화됨' : '🔥 강화'}</button>
+                    <button onClick={() => actions.handleGenerateForCut(cut.cutNumber, 'normal')} disabled={cut.imageLoading} className="flex-1 px-2 py-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-[10px] font-bold rounded-md flex items-center justify-center gap-1 transition-all shadow-md shadow-orange-500/20"><SparklesIcon className="w-3.5 h-3.5" /> 일반</button>
+                    <button onClick={() => actions.handleToggleIntenseEmotion(cut.cutNumber)} disabled={cut.isIntensifying} className={`flex-1 px-2 py-1.5 text-[10px] font-bold rounded-md flex items-center justify-center gap-1 transition-colors ${cut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : cut.useIntenseEmotion ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500' : 'bg-transparent hover:bg-rose-500/10 text-rose-400 border border-rose-500/50'}`}>{cut.isIntensifying ? '⏳ 생성중' : cut.useIntenseEmotion ? '🔥 강화됨' : '🔥 강화'}</button>
                 </div>
                 <div className="flex gap-1.5">
                     <input type="text" value={refineInput} onChange={e => setRefineInput(e.target.value)}
@@ -534,12 +534,12 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                             const modelShort = image.model ? image.model.replace('nano-', '') : '';
                             const badgeLabel = tag === 'rough' ? '러프' : tag === 'normal' ? '일반' : 'HQ';
                             const badgeText = modelShort ? `${badgeLabel}/${modelShort}` : badgeLabel;
-                            const badgeCls = tag === 'rough' ? 'bg-zinc-600 text-zinc-300' : tag === 'normal' ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white';
+                            const badgeCls = tag === 'rough' ? 'bg-zinc-600 text-zinc-300' : tag === 'normal' ? 'bg-orange-600 text-white' : 'bg-emerald-600 text-white';
                             return (
                             <div key={image.id} className="relative">
                                 <button 
                                     onClick={() => actions.handleSelectImageForCut(cut.cutNumber, image.id)} 
-                                    className={`w-10 h-10 rounded-md overflow-hidden border transition-all duration-200 ${cut.selectedImageId === image.id ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-zinc-800 hover:border-zinc-600 opacity-60 hover:opacity-100'}`}
+                                    className={`w-10 h-10 rounded-md overflow-hidden border transition-all duration-200 ${cut.selectedImageId === image.id ? 'border-orange-500 ring-1 ring-orange-500/50' : 'border-zinc-800 hover:border-zinc-600 opacity-60 hover:opacity-100'}`}
                                     draggable={true}
                                     onDragStart={(e) => handleDragStart(e, image)}
                                 >
