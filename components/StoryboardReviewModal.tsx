@@ -325,7 +325,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
   const currentSceneId = currentScene ? currentScene.sceneNumber : 1;
 
   const renderContent = () => (
-    <div className={`bg-zinc-900 border border-zinc-700 shadow-2xl w-full h-full flex flex-col overflow-hidden ${isExternal ? 'rounded-none' : 'rounded-3xl'}`}>
+    <div className={`bg-zinc-900 border border-zinc-700 shadow-2xl w-full h-full flex flex-col overflow-hidden ${isExternal ? 'rounded-none' : 'rounded-2xl'}`}>
       <header className="flex justify-between items-center p-6 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
         <div className="flex items-center gap-4">
           <div className="p-3 bg-orange-600/20 rounded-2xl border border-orange-500/30">

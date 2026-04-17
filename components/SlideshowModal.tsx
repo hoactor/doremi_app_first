@@ -524,9 +524,9 @@ export const SlideshowModal: React.FC<SlideshowModalProps> = ({
 
     const renderContent = () => (
         <div className={`flex flex-col md:flex-row items-center justify-center gap-8 p-4 sm:p-8 w-full h-full min-h-screen ${isExternal ? 'bg-zinc-950' : ''}`} onClick={handleClose}>
-             <div className="h-[85vh] aspect-[9/16] bg-white rounded-3xl shadow-2xl relative overflow-hidden flex flex-col flex-shrink-0" onClick={e => e.stopPropagation()}>
+             <div className="h-[85vh] aspect-[9/16] bg-white rounded-2xl shadow-2xl relative overflow-hidden flex flex-col flex-shrink-0" onClick={e => e.stopPropagation()}>
                 {(isPreparingAudio || isExporting) && (
-                    <div className="absolute inset-0 bg-black/80 rounded-3xl flex flex-col items-center justify-center z-30">
+                    <div className="absolute inset-0 bg-black/80 rounded-2xl flex flex-col items-center justify-center z-30">
                         <SpinnerIcon className="w-12 h-12 text-orange-400" />
                         <p className="mt-4 text-white font-semibold">{isExporting ? exportMessage : preparingMessage}</p>
                     </div>
@@ -537,7 +537,7 @@ export const SlideshowModal: React.FC<SlideshowModalProps> = ({
                 </div>
             </div>
             
-            <div className="w-full max-w-md h-auto md:h-[85vh] bg-zinc-900/50 border border-zinc-700 rounded-3xl shadow-xl p-6 flex flex-col gap-6 overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="w-full max-w-md h-auto md:h-[85vh] bg-zinc-900/50 border border-zinc-700 rounded-2xl shadow-xl p-6 flex flex-col gap-6 overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center">
                     <h2 className="text-xl font-black text-white tracking-tighter">CONTROLS</h2>
                     <div className="flex items-center gap-2">

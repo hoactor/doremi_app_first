@@ -406,7 +406,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4 animate-fade-in">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 animate-fade-in">
       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
       <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-xl w-full max-w-screen-xl h-[90vh] flex flex-col">
         {/* Header */}

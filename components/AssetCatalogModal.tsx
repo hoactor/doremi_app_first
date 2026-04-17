@@ -333,7 +333,7 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4 animate-fade-in">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4 animate-fade-in">
             <div className="bg-zinc-800 rounded-2xl shadow-xl w-full max-w-5xl h-[85vh] flex flex-col"
                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 onDrop={handleDrop}

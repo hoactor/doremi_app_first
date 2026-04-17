@@ -209,7 +209,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fade-in">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in">
             <div className="bg-zinc-900 rounded-2xl shadow-2xl w-[640px] max-h-[90vh] overflow-y-auto border border-zinc-700">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">

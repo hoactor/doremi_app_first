@@ -107,7 +107,7 @@ export const AssetLibraryModal: React.FC<AssetLibraryModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100] p-4 animate-fade-in">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4 animate-fade-in">
       <div className="bg-zinc-800 rounded-2xl shadow-xl w-full max-w-6xl h-[90vh] flex flex-col">
         <input type="file" ref={importFileRef} className="hidden" accept="image/*" onChange={handleFileChange} />
         <div className="flex justify-between items-center p-4 border-b border-zinc-700">

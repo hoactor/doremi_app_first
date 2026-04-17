@@ -59,7 +59,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({ isOpen, onClos
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4 animate-fade-in" aria-modal="true" role="dialog">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 animate-fade-in" aria-modal="true" role="dialog">
       <div className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-xl w-full max-w-lg flex flex-col transform transition-all duration-300 scale-95 opacity-0 animate-fade-in-scale">
         <div className="flex justify-between items-center p-4 border-b border-zinc-700">
           <h2 className="text-xl font-bold text-white">텍스트 추가</h2>

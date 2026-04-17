@@ -97,7 +97,7 @@ export const StyleSelectionModal: React.FC<StyleSelectionModalProps> = ({ isOpen
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden max-h-[90vh]">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden max-h-[90vh]">
         <header className="flex justify-between items-center p-6 border-b border-zinc-800 bg-zinc-900/50 flex-shrink-0">
           <div>
             <h2 className="text-2xl font-black text-white tracking-tight uppercase">Visual Strategy Selection</h2>

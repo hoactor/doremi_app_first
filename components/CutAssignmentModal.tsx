@@ -29,7 +29,7 @@ export const CutAssignmentModal: React.FC<CutAssignmentModalProps> = ({
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-80 z-[90] flex items-center justify-center p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/80 z-[90] flex items-center justify-center p-4 animate-fade-in"
       aria-modal="true"
       role="dialog"
     >
