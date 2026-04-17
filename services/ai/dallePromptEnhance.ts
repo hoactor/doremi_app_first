@@ -32,16 +32,19 @@ const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
 - 기본값   : "bright smile, blushing cheeks" (감정 언급 없을 때만)
 
 ━━━ 배경 테이블 (장면에 맞는 것 하나 선택) ━━━
-- 헬스장    : "pastel gym background, workout bench, dumbbells, soft lighting"
-- 공원/야외 : "bright outdoor park, soft green grass, blue sky, warm sunlight"
-- 실내      : "cozy indoor room, warm lighting, soft pastel walls"
-- 카페      : "cozy cafe interior, wooden table, pastel tones, soft afternoon light"
-- 학교      : "school classroom or hallway, pastel tones, bright lighting"
-- 거리      : "clean city street, pastel buildings, soft daylight"
-- 한강/강가  : "riverside path, soft breeze, clear sky, bright morning light"
-- 침실      : "cozy pastel bedroom, soft bedding, warm lamp light"
-- 주방/식당  : "bright pastel kitchen, clean counter, natural light"
-- 서점/도서관: "soft pastel bookstore with wooden shelves, warm reading light"
+조명은 일괄적으로 soft / diffused / gentle 톤으로 통일 — 과도하게 밝은 조명 금지.
+
+- 헬스장    : "pastel gym background, workout bench, dumbbells, soft diffused lighting"
+- 공원/야외 : "outdoor park with soft green grass, blue sky, gentle daylight, slight haze"
+- 실내      : "cozy indoor room, soft pastel walls, gentle window light"
+- 카페      : "cozy cafe interior, wooden table, pastel tones, soft diffused afternoon light"
+- 학교      : "school classroom or hallway, pastel tones, soft diffused lighting"
+- 거리      : "quiet city street, pastel buildings, soft overcast daylight"
+- 한강/강가  : "riverside path, soft breeze, clear sky, gentle morning light with slight haze"
+- 침실      : "cozy pastel bedroom, soft bedding, warm dim lamp light"
+- 주방/식당  : "pastel kitchen with clean counter, soft diffused window light"
+- 서점/도서관: "soft pastel bookstore with wooden shelves, warm dim reading light"
+- 병원/진료실: "calm pastel hospital room, soft window light, muted tones"
 
 ━━━ 의상 테이블 (사용자가 의상을 언급했을 때만 포함, 없으면 생략) ━━━
 - 운동복 : "sleeveless workout shirt, athletic shorts, sweatbands"
@@ -110,6 +113,9 @@ STRICT RULES:
    (vibrant, lively, happy, energetic, amazing, beautiful, gorgeous, etc.)
 8. NEVER include style keywords: chibi, anime, illustration, cute style,
    sparkling, pastel, rendered, artwork, adorable.
+8a. NEVER add brightness intensifiers (bright, brightly, glowing, radiant,
+    vivid, saturated, intense sunlight, harsh light) outside what is already
+    in the background table row you selected. Lighting must stay soft.
 9. NEVER output: character sheet, multiple views, turnaround, side-by-side,
    split layout.
 10. Never describe minors in distress, violence, nudity, or policy-sensitive content.
@@ -117,19 +123,19 @@ STRICT RULES:
 GOOD OUTPUT EXAMPLES:
 Input: "20대 여대생이 한강에서 조깅"
 Output: "a 20s Korean female college student with ponytail jogging at a
-riverside path, soft breeze, clear sky, bright morning light, determined
-expression with sweat drops"
+riverside path, soft breeze, clear sky, gentle morning light with slight
+haze, determined expression with sweat drops"
 
 Input: "카페에서 공부하는 여자"
 Output: "a young Korean woman studying at a cozy cafe interior with wooden
-table, pastel tones, soft afternoon light, determined expression, furrowed
-eyebrows, puffed cheeks, sweat drops"
+table, pastel tones, soft diffused afternoon light, determined expression,
+furrowed eyebrows, puffed cheeks, sweat drops"
 
 Input: "놀라는 남자 대학생 교복"
 Output: "a male Korean university student standing in a school classroom with
-pastel tones and bright lighting, big round eyes wide open, small 'O' shaped
-mouth, sparkling stars near head, neat school uniform with blazer, tie, and
-dress pants"
+pastel tones and soft diffused lighting, big round eyes wide open, small 'O'
+shaped mouth, sparkling stars near head, neat school uniform with blazer, tie,
+and dress pants"
 
 Never prefix with "A/An DALL-E prompt:" or wrap in quotes.`;
 

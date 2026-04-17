@@ -49,7 +49,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     const [userInput, setUserInput] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(true);
     const [ratio, setRatio] = useState<ImageRatio>('1:1');
-    const [style, setStyle] = useState<'vivid' | 'natural'>('vivid');
+    const [style, setStyle] = useState<'vivid' | 'natural'>('natural');
 
     // ── 고정 프롬프트 (편집 가능) ──
     // 모달 오픈 시 또는 타입 변경 시 기본값으로 리셋.
@@ -83,7 +83,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
             setModification('');
             setAssetName('');
             setRatio(state.imageRatio || '1:1');
-            setStyle('vivid');
+            setStyle('natural');
             // 고정 프롬프트도 기본값으로 리셋
             setFixedPrompt(buildDefaultFixedPrompt(initialAssetType));
         }
