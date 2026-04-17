@@ -161,18 +161,21 @@ interface AssetCatalogModalProps {
     onSelectCharacter?: (asset: AssetCatalogEntry) => void;
     onSelectBackground?: (asset: AssetCatalogEntry, action: 'reference' | 'replace') => void;
     mode?: 'all' | 'character' | 'background';
+    /** DALL-E 원본 생성 모달을 부모에게 열어달라고 요청. 현재 필터 타입을 힌트로 전달. */
+    onRequestDalleGenerator?: (initialType?: 'character' | 'background' | 'outfit' | 'prop') => void;
 }
 
 // ─── 메인 모달 ────────────────────────────────────────────────────
 export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
     isOpen, onClose, currentArtStyle, onSelectCharacter, onSelectBackground, mode = 'all',
+    onRequestDalleGenerator,
 }) => {
     const { actions: ctxActions } = useAppContext();
     const [assets, setAssets] = useState<AssetCatalogEntry[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
-    const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'outfit' | 'background'>(
+    const [typeFilter, setTypeFilter] = useState<'all' | 'character' | 'outfit' | 'background' | 'prop'>(
         mode === 'character' ? 'character' : mode === 'background' ? 'background' : 'all'
     );
     const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
@@ -345,6 +348,18 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
                         <span className="text-xs text-zinc-500 font-normal ml-2">{assets.length}개</span>
                     </h2>
                     <div className="flex items-center gap-2">
+                        {onRequestDalleGenerator && (
+                            <button
+                                onClick={() => {
+                                    const hint = (typeFilter !== 'all' && typeFilter !== 'outfit') ? typeFilter : 'character';
+                                    onRequestDalleGenerator(hint as any);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600/80 hover:bg-amber-500 text-white transition-colors"
+                                title="DALL-E로 새 에셋 생성"
+                            >
+                                ✨ 원본 생성
+                            </button>
+                        )}
                         <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-orange-600 hover:bg-orange-500 text-white transition-colors">
                             <UploadIcon className="w-3.5 h-3.5" /> 외부 이미지 추가
                         </button>

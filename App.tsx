@@ -31,6 +31,8 @@ import { StoryboardReviewModal } from './components/StoryboardReviewModal';
 import { SceneAnalysisReviewModal } from './components/SceneAnalysisReviewModal';
 import { CutPreviewModal } from './components/CutPreviewModal';
 import { ApiKeySettings } from './components/ApiKeySettings';
+import { DalleGeneratorModal } from './components/DalleGeneratorModal';
+import type { DalleAssetType } from './services/openaiService';
 import { IS_TAURI, openAssetCatalog, listen, resetWindowSize } from './services/tauriAdapter';
 
 const NotificationToast: React.FC<{ notification: Notification, onDismiss: (id: number) => void }> = ({ notification, onDismiss }) => {
@@ -95,6 +97,8 @@ export const App: React.FC = () => {
     const [isAssetWindowOpen, setIsAssetWindowOpen] = useState(false);
     const [isProjectListOpen, setIsProjectListOpen] = useState(false);
     const [isCutDetailOpen, setIsCutDetailOpen] = useState(false);
+    const [isDalleGeneratorOpen, setIsDalleGeneratorOpen] = useState(false);
+    const [dalleInitialType, setDalleInitialType] = useState<DalleAssetType>('character');
     const [isBgMusicDragging, setIsBgMusicDragging] = useState(false);
     const [batchInput, setBatchInput] = useState('');
     const [collapsedScenes, setCollapsedScenes] = useState<Set<number>>(new Set());
@@ -273,9 +277,22 @@ export const App: React.FC = () => {
                 setIsAssetCatalogOpen={setIsAssetCatalogOpen}
                 setIsAssetWindowOpen={setIsAssetWindowOpen}
                 setIsProjectListOpen={setIsProjectListOpen}
+                setIsDalleGeneratorOpen={(v) => { setDalleInitialType('character'); setIsDalleGeneratorOpen(v); }}
             />
 
             <ApiKeySettings isOpen={isApiKeySettingsOpen} onClose={() => setIsApiKeySettingsOpen(false)} />
+
+            <DalleGeneratorModal
+                isOpen={isDalleGeneratorOpen}
+                onClose={() => setIsDalleGeneratorOpen(false)}
+                initialAssetType={dalleInitialType}
+                onAssetSaved={() => {
+                    // 에셋 카탈로그 리프레시 신호 (열려있으면)
+                    if (IS_TAURI) {
+                        import('./services/tauriAdapter').then(m => m.emit?.('asset-catalog-updated', null).catch(() => {}));
+                    }
+                }}
+            />
 
             {isResetConfirmOpen && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
@@ -530,6 +547,10 @@ export const App: React.FC = () => {
                     isOpen={isAssetCatalogOpen}
                     onClose={() => setIsAssetCatalogOpen(false)}
                     currentArtStyle={state.artStyle}
+                    onRequestDalleGenerator={(initialType) => {
+                        setDalleInitialType(initialType || 'character');
+                        setIsDalleGeneratorOpen(true);
+                    }}
                 />
             )}
 

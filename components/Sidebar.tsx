@@ -56,6 +56,7 @@ interface SidebarProps {
     setIsAssetCatalogOpen: (v: boolean) => void;
     setIsAssetWindowOpen: (v: boolean) => void;
     setIsProjectListOpen: (v: boolean) => void;
+    setIsDalleGeneratorOpen: (v: boolean) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -66,7 +67,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     isAssetWindowOpen, styleLoraId, styleLoraScaleOverride,
     downloadDropdownRef, importProjectFileRef, dispatch, actions,
     handleSaveWithStatus, setIsResetConfirmOpen, setIsCutDetailOpen,
-    setIsApiKeySettingsOpen, setIsAssetCatalogOpen, setIsAssetWindowOpen, setIsProjectListOpen
+    setIsApiKeySettingsOpen, setIsAssetCatalogOpen, setIsAssetWindowOpen, setIsProjectListOpen,
+    setIsDalleGeneratorOpen,
 }) => {
     // ── LoRA 상태 ──
     const [loraEntries, setLoraEntries] = useState<LoRAEntry[]>([]);
@@ -391,6 +393,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             >
                                 <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
                                 {isAssetWindowOpen && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full border border-zinc-800" />}
+                            </button>
+                            <button
+                                onClick={() => setIsDalleGeneratorOpen(true)}
+                                className="flex items-center px-2 py-2 text-xs font-medium rounded-lg bg-orange-900/30 hover:bg-orange-800/40 border border-orange-700/40 hover:border-orange-600/60 transition-all text-orange-300 hover:text-orange-200"
+                                title="DALL-E로 원본 에셋 생성"
+                            >
+                                <SparklesIcon className="w-3.5 h-3.5" />
                             </button>
                         </div>
                     )}
