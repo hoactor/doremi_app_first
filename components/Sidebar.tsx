@@ -322,7 +322,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             onChange={e => dispatch({ type: 'SET_ART_STYLE', payload: e.target.value })}
                                             className={`w-full h-full px-2 py-2.5 text-xs font-medium bg-zinc-800/40 hover:bg-zinc-800 border ${
                                                 selectedImageEngine === 'flux'
-                                                    ? 'border-teal-700/40 hover:border-teal-600 text-teal-400 focus:ring-teal-500'
+                                                    ? 'border-teal-700/40 hover:border-teal-600 text-teal-400 focus:ring-orange-500'
                                                     : 'border-orange-700/40 hover:border-orange-600 text-orange-400 focus:ring-orange-500'
                                             } rounded-xl focus:outline-none focus:ring-1 appearance-none cursor-pointer truncate pr-6`}
                                         >
@@ -339,7 +339,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             <select
                                                 value={styleLoraId || ''}
                                                 onChange={e => dispatch({ type: 'SET_STYLE_LORA', payload: { id: e.target.value || undefined, scaleOverride: undefined } })}
-                                                className="w-full h-full px-2 py-2.5 text-xs font-medium bg-zinc-800/40 hover:bg-zinc-800 border border-teal-700/40 hover:border-teal-600 rounded-xl text-teal-400 focus:outline-none focus:ring-1 focus:ring-teal-500 appearance-none cursor-pointer truncate pr-6"
+                                                className="w-full h-full px-2 py-2.5 text-xs font-medium bg-zinc-800/40 hover:bg-zinc-800 border border-teal-700/40 hover:border-teal-600 rounded-xl text-teal-400 focus:outline-none focus:ring-1 focus:ring-orange-500 appearance-none cursor-pointer truncate pr-6"
                                             >
                                                 <option value="">LoRA 없음</option>
                                                 {loraEntries.filter(e => e.type === 'style').map(e => (

@@ -60,7 +60,7 @@ const StyleOption: React.FC<StyleOptionProps> = ({ value, title, description, st
                       name="style-option"
                       checked={isSelected}
                       onChange={() => onSelect(value)}
-                      className="w-5 h-5 accent-teal-500 bg-zinc-700 border-zinc-500 focus:ring-teal-500 cursor-pointer z-10"
+                      className="w-5 h-5 accent-teal-500 bg-zinc-700 border-zinc-500 focus:ring-orange-500 cursor-pointer z-10"
                   />
               </div>
 

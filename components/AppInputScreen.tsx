@@ -414,7 +414,7 @@ export const AppInputScreen: React.FC<AppInputScreenProps> = ({ onImportClick })
                             onChange={(e) => dispatch({ type: 'SET_STORY_BRIEF', payload: e.target.value })}
                             placeholder="작품해설서 (선택) — 캐릭터 관계, 작품 톤, 타겟 독자, 참고 작품 등"
                             rows={3}
-                            className="w-full px-3 py-2 bg-zinc-900/60 border border-zinc-700/40 rounded-lg text-[12px] text-zinc-300 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-emerald-600/40 leading-relaxed"
+                            className="w-full px-3 py-2 bg-zinc-900/60 border border-zinc-700/40 rounded-lg text-[12px] text-zinc-300 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-orange-500/50 leading-relaxed"
                         />
                     </div>
                 )}

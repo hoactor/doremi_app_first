@@ -51,7 +51,7 @@ const InfoField: React.FC<{
             value={localValue}
             onChange={handleChange}
             rows={label === '장면 설명' || label === '최종 이미지 프롬프트' ? 4 : 2}
-            className={`w-full p-3 pr-10 text-sm rounded-md transition-colors focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-zinc-900/50 border ${hasChanged ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-zinc-700'}`}
+            className={`w-full p-3 pr-10 text-sm rounded-md transition-colors focus:outline-none focus:ring-1 focus:ring-orange-500 bg-zinc-900/50 border ${hasChanged ? 'border-amber-500 ring-1 ring-amber-500/50' : 'border-zinc-700'}`}
         />
         <button 
             onClick={handleUpdate} 
@@ -385,7 +385,7 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                         onChange={handleNarrationChange}
                         onBlur={handleNarrationBlur}
                         style={{ minHeight: '60px' }}
-                        className="w-full text-base font-medium text-zinc-100 bg-zinc-950 p-3 rounded-lg border border-zinc-800 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all resize-none overflow-hidden whitespace-pre-wrap leading-relaxed shadow-inner"
+                        className="w-full text-base font-medium text-zinc-100 bg-zinc-950 p-3 rounded-lg border border-zinc-800 focus:ring-1 focus:ring-orange-500 focus:border-orange-500 transition-all resize-none overflow-hidden whitespace-pre-wrap leading-relaxed shadow-inner"
                         placeholder="나레이션 입력..."
                     />
                     {cut.isFormattingNarration && (

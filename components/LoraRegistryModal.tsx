@@ -114,20 +114,20 @@ export const LoraRegistryModal: React.FC<LoraRegistryModalProps> = ({
                     <label className="text-[10px] font-bold text-zinc-400 uppercase">이름</label>
                     <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
                         placeholder="김주임 LoRA"
-                        className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 text-zinc-200" />
+                        className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-500 text-zinc-200" />
                 </div>
                 <div>
                     <label className="text-[10px] font-bold text-zinc-400 uppercase">트리거워드</label>
                     <input value={draft.triggerWord} onChange={e => setDraft(d => ({ ...d, triggerWord: e.target.value }))}
                         placeholder="dss_boy"
-                        className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 text-zinc-200 font-mono" />
+                        className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-500 text-zinc-200 font-mono" />
                 </div>
             </div>
             <div>
                 <label className="text-[10px] font-bold text-zinc-400 uppercase">URL (.safetensors)</label>
                 <input value={draft.url} onChange={e => setDraft(d => ({ ...d, url: e.target.value }))}
                     placeholder="https://v3b.fal.media/files/..."
-                    className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500 text-zinc-200 font-mono" />
+                    className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-500 text-zinc-200 font-mono" />
             </div>
             {/* baseAppearance — 캐릭터 LoRA 전용 */}
             {draft.type === 'character' && (
@@ -135,7 +135,7 @@ export const LoraRegistryModal: React.FC<LoraRegistryModalProps> = ({
                     <label className="text-[10px] font-bold text-zinc-400 uppercase">외형 묘사 <span className="text-amber-400">(baseAppearance)</span></label>
                     <input value={draft.baseAppearance || ''} onChange={e => setDraft(d => ({ ...d, baseAppearance: e.target.value }))}
                         placeholder="light brown wavy long hair, large golden eyes..."
-                        className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 text-zinc-200" />
+                        className="w-full mt-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-500 text-zinc-200" />
                 </div>
             )}
             <div className="flex items-center gap-4">

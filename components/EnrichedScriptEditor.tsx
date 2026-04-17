@@ -257,7 +257,7 @@ export const EnrichedScriptEditor: React.FC<Props> = ({ beats, onContinue, onRes
                             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddPendingLocation(); } }}
                             placeholder="새 장소명 입력 (Enter로 추가)"
                             className="flex-1 px-3 py-1.5 text-xs bg-[#0a0a0c] border border-[#333338] rounded-lg text-zinc-300
-                                placeholder-zinc-600 focus:outline-none focus:border-amber-500/50"
+                                placeholder-zinc-600 focus:outline-none focus:border-orange-500/50"
                         />
                         <button
                             onClick={handleAddPendingLocation}

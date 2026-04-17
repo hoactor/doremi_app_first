@@ -520,7 +520,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                                                 const id = e.target.value || undefined;
                                                 onUpdateCharacterDescription(selectedKey, { loraId: id, loraScaleOverride: undefined });
                                             }}
-                                            className="flex-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg text-zinc-200 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                                            className="flex-1 px-3 py-2 text-xs bg-zinc-900 border border-zinc-600 rounded-lg text-zinc-200 focus:outline-none focus:ring-1 focus:ring-orange-500"
                                         >
                                             <option value="">없음</option>
                                             {loraEntries.filter(e => e.type === 'character').map(e => (
