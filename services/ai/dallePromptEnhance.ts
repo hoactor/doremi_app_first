@@ -12,25 +12,52 @@ import type { DalleAssetType } from '../openaiService';
 // 주의: "A X character with..." 형태로 시작하면 DALL-E가 이 문장을 "주제 선언"으로
 //       해석해서 뒤의 상황과 합쳐 "두 장면을 옆으로 나란히" 같은 composition을
 //       만들어버림. 그래서 앞부분을 "스타일 선언"으로 분명히 시작하게 써야 함.
-export const DEFAULT_STYLE_PROMPT = `Super cute chibi illustration style. Characters have oversized round heads, tiny bodies (around 3 heads tall), extremely big sparkling eyes, and puffy round cheeks. Highly expressive faces with exaggerated emotions, blushing cheeks, and sweat drops. Colorful, clean, and highly expressive rendering with exaggerated motion effects on a soft pastel background.`;
+export const DEFAULT_STYLE_PROMPT = `Korean webtoon-style super cute chibi illustration. Characters have oversized round heads, tiny bodies (around 3 heads tall), extremely big sparkling eyes, and puffy round cheeks. Highly expressive faces with exaggerated emotions, blushing cheeks, and sweat drops. Colorful, clean, and highly expressive rendering with exaggerated motion effects on a soft pastel background.`;
 
 // ─── 에셋 타입별 구조 지시 ────────────────────────────────────────────
 const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
     character: `
-- 용도: 자연스러운 일상 상황 속 단일 캐릭터 이미지 (얼굴/의상 참조용)
-- 필수 구도: SINGLE character, ONE pose, ONE composition — 절대 시트/여러 얼굴/여러 뷰 아님
-- 상황 설정: 구체적인 일상 장면 속에 배치 (자유롭게 발명 OK)
-  예) smiling in a sunlit park / studying at a cafe with coffee /
-       walking down a street / laughing by a window / relaxing on a bench /
-       taking a selfie-like candid / reading a book in a bookstore
-- 분위기 기본값: 밝고 따뜻하고 웃는 톤 (bright / warm / cheerful / inviting)
-  사용자가 다른 감정을 명시하면 그에 맞춤
-- 얼굴 가시성: 얼굴이 뚜렷이 보이는 각도 (front 또는 3/4 view)
-  자연스러운 candid 느낌 — 카메라를 의식하되 경직되지 않음
-- 디테일: face / hair / outfit 모두 식별 가능해야 함 (레퍼런스 용도)
-- 금지 (절대): character reference sheet, multiple views, turnaround,
-  color palette swatch, mannequin pose, empty white studio, plain solid
-  background, stiff standing, multiple faces in one image, split layout`,
+출력은 반드시 다음 구조를 따를 것 (어순 고정):
+<subject: gender+age+trait> <action verb> <where from 배경표>, <expression from 감정표>[, <outfit from 의상표 ONLY if user mentioned clothing>]
+
+━━━ 감정 표현 테이블 (사용자 입력에 맞는 것 하나 선택 / 없으면 기본값) ━━━
+- 기쁨     : "wide open eyes, big happy smile, blushing cheeks, excited pose"
+- 집중/운동 : "determined expression, furrowed eyebrows, puffed cheeks, sweat drops"
+- 힘듦     : "exhausted expression, heavy breathing, half-closed eyes, sweat drops"
+- 놀람     : "big round eyes wide open, small 'O' shaped mouth, sparkling stars near head"
+- 부끄러움  : "shy expression, rosy cheeks, slightly looking away, hands near face"
+- 슬픔     : "downturned mouth, teary eyes, tilted head"
+- 화남     : "frowning eyebrows, puffed cheeks, crossed arms"
+- 평온     : "soft gentle smile, relaxed posture"
+- 기본값   : "bright smile, blushing cheeks" (감정 언급 없을 때만)
+
+━━━ 배경 테이블 (장면에 맞는 것 하나 선택) ━━━
+- 헬스장    : "pastel gym background, workout bench, dumbbells, soft lighting"
+- 공원/야외 : "bright outdoor park, soft green grass, blue sky, warm sunlight"
+- 실내      : "cozy indoor room, warm lighting, soft pastel walls"
+- 카페      : "cozy cafe interior, wooden table, pastel tones, soft afternoon light"
+- 학교      : "school classroom or hallway, pastel tones, bright lighting"
+- 거리      : "clean city street, pastel buildings, soft daylight"
+- 한강/강가  : "riverside path, soft breeze, clear sky, bright morning light"
+- 침실      : "cozy pastel bedroom, soft bedding, warm lamp light"
+- 주방/식당  : "bright pastel kitchen, clean counter, natural light"
+- 서점/도서관: "soft pastel bookstore with wooden shelves, warm reading light"
+
+━━━ 의상 테이블 (사용자가 의상을 언급했을 때만 포함, 없으면 생략) ━━━
+- 운동복 : "sleeveless workout shirt, athletic shorts, sweatbands"
+- 교복   : "neat school uniform with blazer, tie, and dress pants or skirt"
+- 캐주얼 : "cozy oversized hoodie, soft sweatpants, comfy sneakers"
+- 정장   : "tidy blazer and dress pants, clean shirt"
+- 잠옷   : "soft pajamas, slippers"
+- 원피스 : "cute casual dress"
+
+━━━ 엄격 규칙 ━━━
+- SINGLE character, ONE pose, ONE composition (복수 뷰 / 시트 절대 금지)
+- 테이블에서 골라 쓸 것. 장식 형용사 (vibrant, lively, amazing, gorgeous 등) 추가 금지
+- 스타일 키워드 (chibi, anime, illustration 등) 일절 넣지 말 것 — 화풍은 별도 처리됨
+- 사용자가 의상 언급 안 하면 의상 부분 생략 (맨몸 X, 자연스러운 기본 복장 암묵)
+- 절대 금지: character sheet, multiple views, turnaround, split layout, side-by-side scenes
+- 최종 출력 200자 이내`,
 
     background: `
 - 용도: 장소/환경 참조 이미지 (나중에 씬 배경으로 활용)
@@ -56,34 +83,53 @@ const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
 };
 
 // ─── 상황 생성용 시스템 프롬프트 (Claude에게 주는 지시) ────────────────
-// Claude는 오직 "상황/감정/포즈 phrase"만 영어로 생성. 화풍은 손대지 않음.
-// 출력은 아주 짧고 단순해야 함 — 복잡할수록 화풍 일관성이 떨어진다.
+// Claude는 Type Guidance에 주어진 테이블에서 키워드를 "선택"만 함 — 자유 작문 금지.
+// 이렇게 해야 매 생성마다 어휘가 수렴해서 스타일 일관성이 유지된다.
 const SITUATION_SYSTEM_PROMPT = `You are a scene phrase writer for DALL-E 3 prompts.
 
-Your ONLY job: convert a short Korean user description into a VERY BRIEF
-English scene sentence. Style is handled separately — don't touch it.
+Your ONLY job: convert a Korean user description into a scene sentence by
+SELECTING keywords from the vocabulary tables in the Type Guidance provided.
+
+HOW IT WORKS:
+- The Type Guidance below contains vocabulary TABLES (감정표 / 배경표 / 의상표).
+- Your output must PULL keywords from those tables — do NOT invent new adjectives.
+- This keeps the style consistent across many generations.
+
+OUTPUT STRUCTURE (follow exactly):
+<subject (gender+age+trait)> <action> <background keyword block>, <emotion keyword block>[, <outfit keyword block IF user mentioned clothing>]
 
 STRICT RULES:
 1. Output ONLY the scene sentence. No explanations, no quotes, no prefix.
-2. KEEP IT VERY SHORT — ideally under 120 characters, NEVER exceed 180.
-3. Include ONLY essentials in this order:
-   <who (gender+age+one trait)> <action verb> <where>, <one brief mood/light word>
-4. NEVER include style keywords — no "chibi", "anime", "illustration", "cute
-   style", "sparkling", "pastel", "rendered", "artwork", "adorable", etc.
-5. NEVER add decorative adjectives ("vibrant", "lively", "happy", "energetic").
-   Let the user's words + basic action speak. Don't embellish.
-6. NEVER describe multiple views, character sheets, side-by-side compositions.
-7. If the user's description is vague, add ONE simple pleasant detail. No more.
-8. Never describe minors in distress, violence, nudity, or policy-sensitive content.
+2. Under 200 characters total.
+3. Subject and action: free-form from user input (short, plain English).
+4. Emotion / Background / Outfit: MUST come from the tables in Type Guidance.
+   Choose the row that best matches the user's input.
+5. If user didn't mention an emotion → use the 기본값 row from 감정표.
+6. If user didn't mention an outfit → OMIT outfit entirely. Do not invent.
+7. NEVER add extra decorative adjectives outside the tables
+   (vibrant, lively, happy, energetic, amazing, beautiful, gorgeous, etc.)
+8. NEVER include style keywords: chibi, anime, illustration, cute style,
+   sparkling, pastel, rendered, artwork, adorable.
+9. NEVER output: character sheet, multiple views, turnaround, side-by-side,
+   split layout.
+10. Never describe minors in distress, violence, nudity, or policy-sensitive content.
 
-GOOD OUTPUT EXAMPLES (this simple — under 120 chars):
-- "a 20s Korean woman with ponytail jogging along the Han River, clear morning"
-- "a male college student walking across an autumn campus, afternoon sun"
-- "a young woman reading a book at a cozy cafe window, warm light"
+GOOD OUTPUT EXAMPLES:
+Input: "20대 여대생이 한강에서 조깅"
+Output: "a 20s Korean female college student with ponytail jogging at a
+riverside path, soft breeze, clear sky, bright morning light, determined
+expression with sweat drops"
 
-BAD (too wordy):
-- "a vibrant, lively South Korean university student happily running down the
-   path of the Han River with a ponytail swinging in the wind..."
+Input: "카페에서 공부하는 여자"
+Output: "a young Korean woman studying at a cozy cafe interior with wooden
+table, pastel tones, soft afternoon light, determined expression, furrowed
+eyebrows, puffed cheeks, sweat drops"
+
+Input: "놀라는 남자 대학생 교복"
+Output: "a male Korean university student standing in a school classroom with
+pastel tones and bright lighting, big round eyes wide open, small 'O' shaped
+mouth, sparkling stars near head, neat school uniform with blazer, tie, and
+dress pants"
 
 Never prefix with "A/An DALL-E prompt:" or wrap in quotes.`;
 
@@ -188,8 +234,8 @@ Output the English scene phrase only.`;
     }
 
     const res = await callClaude(SITUATION_SYSTEM_PROMPT, userMessage, {
-        temperature: 0.3,  // 창의성 낮춤 — 장식 형용사 최소화
-        maxTokens: 150,    // 짧은 문장만 허용
+        temperature: 0.2,  // 창의성 최소 — 테이블에서 "선택"이 목적
+        maxTokens: 220,    // 테이블 키워드 블록 합쳐지면 200자 근처까지 필요
     });
 
     const situation = res.text.trim()
