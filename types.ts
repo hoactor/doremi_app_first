@@ -173,10 +173,10 @@ export interface LibraryAsset {
         objects?: string[];
         mood?: string[];
         time?: string;
-        category?: ('인물' | '배경')[];
+        category?: ('인물' | '배경' | '의상' | '소품')[];
     };
     source: {
-        type: 'character' | 'background' | 'cut';
+        type: 'character' | 'background' | 'outfit' | 'prop' | 'cut';
         name: string;
     };
     createdAt: string;

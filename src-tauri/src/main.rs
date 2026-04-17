@@ -52,6 +52,7 @@ struct ApiKeys {
     gemini: Option<String>,
     supertone: Option<String>,
     fal: Option<String>,
+    openai: Option<String>,
 }
 
 /// 메모리 캐시 — 키체인 접근 1회로 제한
@@ -97,12 +98,13 @@ fn migrate_legacy_keys() {
     let gemini = keychain_get("GEMINI_API_KEY").ok();
     let supertone = keychain_get("SUPERTONE_API_KEY").ok();
     let fal = keychain_get("FAL_API_KEY").ok();
+    let openai = keychain_get("OPENAI_API_KEY").ok();
 
-    if claude.is_none() && gemini.is_none() && supertone.is_none() && fal.is_none() {
+    if claude.is_none() && gemini.is_none() && supertone.is_none() && fal.is_none() && openai.is_none() {
         return; // 아무 키도 없음 → 신규 설치
     }
 
-    let keys = ApiKeys { claude, gemini, supertone, fal };
+    let keys = ApiKeys { claude, gemini, supertone, fal, openai };
     if let Ok(json) = serde_json::to_string(&keys) {
         if keychain_set(UNIFIED_KEY, &json).is_ok() {
             // 마이그레이션 성공 → 기존 개별 키 삭제 (실패해도 무시)
@@ -110,6 +112,7 @@ fn migrate_legacy_keys() {
             let _ = keychain_delete("GEMINI_API_KEY");
             let _ = keychain_delete("SUPERTONE_API_KEY");
             let _ = keychain_delete("FAL_API_KEY");
+            let _ = keychain_delete("OPENAI_API_KEY");
             println!("[Keychain] 기존 개별 키 → 단일 JSON 마이그레이션 완료");
         }
     }
@@ -123,6 +126,7 @@ fn get_api_key(field: &str) -> Result<String, String> {
         "gemini" => keys.gemini.filter(|s| !s.is_empty()).ok_or_else(|| "GEMINI_API_KEY not found".to_string()),
         "supertone" => keys.supertone.filter(|s| !s.is_empty()).ok_or_else(|| "SUPERTONE_API_KEY not found".to_string()),
         "fal" => keys.fal.filter(|s| !s.is_empty()).ok_or_else(|| "FAL_API_KEY not found".to_string()),
+        "openai" => keys.openai.filter(|s| !s.is_empty()).ok_or_else(|| "OPENAI_API_KEY not found".to_string()),
         _ => Err(format!("Unknown key field: {field}")),
     }
 }
@@ -157,6 +161,9 @@ fn save_api_keys(keys: ApiKeys) -> Result<(), String> {
     if let Some(k) = &keys.fal {
         if !k.is_empty() { current.fal = Some(k.clone()); }
     }
+    if let Some(k) = &keys.openai {
+        if !k.is_empty() { current.openai = Some(k.clone()); }
+    }
     save_unified_keys(&current)
 }
 
@@ -173,6 +180,7 @@ fn check_api_keys() -> Result<serde_json::Value, String> {
         "gemini": keys.gemini.as_ref().map_or(false, |k| !k.is_empty()),
         "supertone": keys.supertone.as_ref().map_or(false, |k| !k.is_empty()),
         "fal": keys.fal.as_ref().map_or(false, |k| !k.is_empty()),
+        "openai": keys.openai.as_ref().map_or(false, |k| !k.is_empty()),
     }))
 }
 
@@ -184,6 +192,7 @@ fn delete_api_key(key_name: String) -> Result<(), String> {
         "GEMINI_API_KEY" => keys.gemini = None,
         "SUPERTONE_API_KEY" => keys.supertone = None,
         "FAL_API_KEY" => keys.fal = None,
+        "OPENAI_API_KEY" => keys.openai = None,
         _ => return Err(format!("알 수 없는 키: {key_name}")),
     }
     save_unified_keys(&keys)
@@ -847,7 +856,7 @@ fn parse_iso_to_epoch(iso: &str) -> Option<u64> {
 
 #[tauri::command]
 fn save_asset(
-    asset_type: String,   // "character" | "outfit" | "background"
+    asset_type: String,   // "character" | "outfit" | "background" | "prop"
     filename: String,
     base64_data: String,
     metadata_json: String,
@@ -861,6 +870,7 @@ fn save_asset(
         "character" => "characters",
         "outfit" => "outfits",
         "background" => "backgrounds",
+        "prop" => "props",
         _ => return Err(format!("잘못된 에셋 타입: {}", asset_type)),
     };
     let dir = root.join("assets").join(sub);

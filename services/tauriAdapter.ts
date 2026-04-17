@@ -43,13 +43,20 @@ export interface ApiKeys {
     gemini: string | null;
     supertone: string | null;
     fal: string | null;
+    openai: string | null;
 }
 
 // API 키: localStorage 전용 (dev 빌드 코드서명이 매번 달라 Keychain 접근 거부됨)
 const _KEYS_STORE = 'doremissul_api_keys';
 function _readKeys(): ApiKeys {
     const s = JSON.parse(localStorage.getItem(_KEYS_STORE) || '{}');
-    return { claude: s.claude || null, gemini: s.gemini || null, supertone: s.supertone || null, fal: s.fal || null };
+    return {
+        claude: s.claude || null,
+        gemini: s.gemini || null,
+        supertone: s.supertone || null,
+        fal: s.fal || null,
+        openai: s.openai || null,
+    };
 }
 
 export async function saveApiKeys(keys: Partial<ApiKeys>): Promise<void> {
@@ -60,9 +67,9 @@ export async function loadApiKeys(): Promise<ApiKeys> {
     return _readKeys();
 }
 
-export async function checkApiKeys(): Promise<{ claude: boolean; gemini: boolean; supertone: boolean; fal: boolean }> {
+export async function checkApiKeys(): Promise<{ claude: boolean; gemini: boolean; supertone: boolean; fal: boolean; openai: boolean }> {
     const k = _readKeys();
-    return { claude: !!k.claude, gemini: !!k.gemini, supertone: !!k.supertone, fal: !!k.fal };
+    return { claude: !!k.claude, gemini: !!k.gemini, supertone: !!k.supertone, fal: !!k.fal, openai: !!k.openai };
 }
 
 /** fal.ai API key를 가져오기 (falService 초기화용) */
@@ -444,7 +451,7 @@ export async function cleanupOldProjects(maxAgeDays: number = 30): Promise<{ del
 
 export interface AssetCatalogEntry {
     id: string;
-    type: 'character' | 'outfit' | 'background';
+    type: 'character' | 'outfit' | 'background' | 'prop';
     name: string;
     imagePath: string;
     thumbnailPath: string;
@@ -463,7 +470,7 @@ export interface AssetCatalogEntry {
 
 /** 에셋 저장 (이미지 + 메타데이터) → ID 반환 */
 export async function saveAsset(
-    assetType: 'character' | 'outfit' | 'background',
+    assetType: 'character' | 'outfit' | 'background' | 'prop',
     filename: string,
     base64Data: string,
     metadata: Partial<AssetCatalogEntry>

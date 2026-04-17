@@ -13,9 +13,9 @@ interface ApiKeySettingsProps {
 }
 
 export function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps) {
-    const [keys, setKeys] = useState<ApiKeys>({ claude: null, gemini: null, supertone: null, fal: null });
-    const [status, setStatus] = useState<{ claude: boolean; gemini: boolean; supertone: boolean; fal: boolean }>({
-        claude: false, gemini: false, supertone: false, fal: false,
+    const [keys, setKeys] = useState<ApiKeys>({ claude: null, gemini: null, supertone: null, fal: null, openai: null });
+    const [status, setStatus] = useState<{ claude: boolean; gemini: boolean; supertone: boolean; fal: boolean; openai: boolean }>({
+        claude: false, gemini: false, supertone: false, fal: false, openai: false,
     });
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState('');
@@ -39,7 +39,7 @@ export function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps) {
             await saveApiKeys(keys);
             const newStatus = await checkApiKeys();
             setStatus(newStatus);
-            setKeys({ claude: null, gemini: null, supertone: null, fal: null });
+            setKeys({ claude: null, gemini: null, supertone: null, fal: null, openai: null });
             setMessage('✅ API 키가 안전하게 저장되었습니다.');
         } catch (err: any) {
             setMessage(`❌ 저장 오류: ${err.message}`);
@@ -53,6 +53,7 @@ export function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps) {
         { id: 'gemini', label: 'Gemini API', desc: '이미지 생성', link: 'https://aistudio.google.com/apikey' },
         { id: 'supertone', label: 'Supertone API', desc: 'TTS 음성합성', link: '' },
         { id: 'fal', label: 'fal.ai API', desc: 'Flux 이미지 생성', link: 'https://fal.ai/dashboard/keys' },
+        { id: 'openai', label: 'OpenAI API', desc: 'DALL-E 3 원본 이미지 생성 (선택)', link: 'https://platform.openai.com/api-keys' },
     ] as const;
 
     return (
@@ -114,7 +115,7 @@ export function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps) {
                         </button>
                         <button
                             onClick={handleSave}
-                            disabled={saving || (!keys.claude && !keys.gemini && !keys.supertone && !keys.fal)}
+                            disabled={saving || (!keys.claude && !keys.gemini && !keys.supertone && !keys.fal && !keys.openai)}
                             className="px-5 py-2 bg-orange-600 hover:bg-orange-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg transition-colors"
                         >
                             {saving ? '저장 중...' : '저장'}
