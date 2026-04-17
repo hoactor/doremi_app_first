@@ -338,10 +338,10 @@ export const App: React.FC = () => {
 
                 {isLoading && (
                     <div className="absolute inset-0 bg-black/80 z-[99] flex flex-col items-center justify-center backdrop-blur-sm pt-16">
-                        <div className="w-full max-w-md p-8 bg-zinc-900/90 rounded-3xl border border-zinc-700 shadow-2xl flex flex-col items-center">
-                            <SpinnerIcon className="w-16 h-16 text-orange-500 mb-6" />
-                            
-                            <h3 className="text-xl font-bold text-white mb-2">{analysisStage !== 'idle' ? STAGE_LABELS[analysisStage] : loadingMessage}</h3>
+                        <div className="w-full max-w-lg p-6 bg-zinc-900/90 rounded-2xl border border-zinc-700 shadow-2xl flex flex-col items-center">
+                            <SpinnerIcon className="w-14 h-14 text-orange-500 mb-5" />
+
+                            <h3 className="text-base font-semibold text-white mb-2 text-center break-keep leading-snug">{analysisStage !== 'idle' ? STAGE_LABELS[analysisStage] : loadingMessage}</h3>
                             
                             {/* [작업2] 전체 러프/일반 진행률 표시 — loadingMessage에서 (X/Y) 파싱 */}
                             {analysisStage === 'idle' && (() => {
