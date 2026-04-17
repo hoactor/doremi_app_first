@@ -97,77 +97,91 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [assetType]);
 
-    // ═══ 생성 메인 플로우 ═══
-    const runGenerate = async (mode: 'new' | 'refine' | 'regenerate') => {
+    // ═══ 1. 프롬프트 생성 (Claude only — 이미지는 만들지 않음) ═══
+    const handleGeneratePrompt = async () => {
+        if (!userInput.trim()) {
+            setError({ message: '무엇을 그릴지 설명을 입력해주세요.' });
+            return;
+        }
         setError(null);
         setIsEnhancing(true);
-
         try {
-            let promptToUse = currentPrompt;
-
-            if (mode === 'new') {
-                if (!userInput.trim()) {
-                    setError({ message: '무엇을 그릴지 설명을 입력해주세요.' });
-                    setIsEnhancing(false);
-                    return;
-                }
-                const enhanced = await enhancePromptForDalle({
-                    userInput,
-                    assetType,
-                    fixedPrompt,
-                });
-                promptToUse = enhanced.prompt;
-                actions.handleAddUsage?.(enhanced.tokenCount, 'claude');
-                setCurrentPrompt(promptToUse);
-            } else if (mode === 'refine') {
-                if (!modification.trim()) {
-                    setError({ message: '어떻게 바꿀지 추가 요청을 입력해주세요.' });
-                    setIsEnhancing(false);
-                    return;
-                }
-                if (!currentPrompt) {
-                    setError({ message: '먼저 원본을 한 번 생성해주세요.' });
-                    setIsEnhancing(false);
-                    return;
-                }
-                const refined = await enhancePromptForDalle({
-                    userInput,
-                    assetType,
-                    fixedPrompt,
-                    refineFrom: { previousPrompt: currentPrompt, modification },
-                });
-                promptToUse = refined.prompt;
-                actions.handleAddUsage?.(refined.tokenCount, 'claude');
-                setCurrentPrompt(promptToUse);
-            }
-            // mode === 'regenerate': 같은 currentPrompt 그대로 재호출
-
+            const enhanced = await enhancePromptForDalle({
+                userInput,
+                assetType,
+                fixedPrompt,
+            });
+            setCurrentPrompt(enhanced.prompt);
+            actions.handleAddUsage?.(enhanced.tokenCount, 'claude');
+        } catch (err) {
+            handleError(err);
+        } finally {
             setIsEnhancing(false);
-            setIsGenerating(true);
+        }
+    };
 
+    // ═══ 2. 프롬프트 수정 (Claude only — 이미지는 만들지 않음) ═══
+    const handleRefinePrompt = async () => {
+        if (!modification.trim()) {
+            setError({ message: '어떻게 바꿀지 추가 요청을 입력해주세요.' });
+            return;
+        }
+        if (!currentPrompt.trim()) {
+            setError({ message: '먼저 프롬프트를 생성해주세요.' });
+            return;
+        }
+        setError(null);
+        setIsEnhancing(true);
+        try {
+            const refined = await enhancePromptForDalle({
+                userInput,
+                assetType,
+                fixedPrompt,
+                refineFrom: { previousPrompt: currentPrompt, modification },
+            });
+            setCurrentPrompt(refined.prompt);
+            actions.handleAddUsage?.(refined.tokenCount, 'claude');
+            setModification('');
+        } catch (err) {
+            handleError(err);
+        } finally {
+            setIsEnhancing(false);
+        }
+    };
+
+    // ═══ 3. 이미지 생성 (DALL-E only — 현재 프롬프트 그대로 실행) ═══
+    const handleGenerateImage = async () => {
+        if (!currentPrompt.trim()) {
+            setError({ message: '먼저 프롬프트를 생성하거나 직접 입력해주세요.' });
+            return;
+        }
+        setError(null);
+        setIsGenerating(true);
+        try {
             const dalleRes = await generateImageWithDalle({
-                prompt: promptToUse,
+                prompt: currentPrompt,
                 assetType,
                 ratio,
                 style,
                 quality: 'hd',
             });
             setResult(dalleRes);
-
-            if (mode === 'refine') setModification('');
         } catch (err) {
-            if (err instanceof DalleError) {
-                setError({ message: err.message, kind: err.kind });
-                // 정책 위반 시 추가 요청 입력창 자동 포커스 (결과가 있을 때만 refine 가능)
-                if (err.kind === 'content-policy' && result) {
-                    setTimeout(() => modificationInputRef.current?.focus(), 50);
-                }
-            } else {
-                setError({ message: err instanceof Error ? err.message : String(err) });
-            }
+            handleError(err);
         } finally {
-            setIsEnhancing(false);
             setIsGenerating(false);
+        }
+    };
+
+    // ═══ 공통 에러 핸들러 ═══
+    const handleError = (err: unknown) => {
+        if (err instanceof DalleError) {
+            setError({ message: err.message, kind: err.kind });
+            if (err.kind === 'content-policy' && result) {
+                setTimeout(() => modificationInputRef.current?.focus(), 50);
+            }
+        } else {
+            setError({ message: err instanceof Error ? err.message : String(err) });
         }
     };
 
@@ -368,15 +382,15 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                         )}
                     </div>
 
-                    {/* ── 생성 버튼 ── */}
+                    {/* ── 1단계 버튼: 프롬프트 생성 (Claude) ── */}
                     <button
-                        onClick={() => runGenerate('new')}
+                        onClick={handleGeneratePrompt}
                         disabled={isBusy || !userInput.trim()}
                         className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-white bg-orange-600 hover:bg-orange-500 rounded-xl shadow-lg shadow-orange-600/15 disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.98] transition-all"
                     >
-                        {isEnhancing ? <><SpinnerIcon className="w-4 h-4" /> Claude로 프롬프트 다듬는 중...</>
-                            : isGenerating ? <><SpinnerIcon className="w-4 h-4" /> DALL-E로 이미지 생성 중... (약 10~20초)</>
-                            : <><SparklesIcon className="w-4 h-4" /> 생성</>}
+                        {isEnhancing
+                            ? <><SpinnerIcon className="w-4 h-4" /> Claude가 프롬프트 만드는 중...</>
+                            : <><SparklesIcon className="w-4 h-4" /> 프롬프트 생성 (Claude)</>}
                     </button>
 
                     {/* ── 에러 ── */}
@@ -440,17 +454,15 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                 ) : (
                                     <>
                                         <div className="w-full aspect-square rounded-lg border border-dashed border-[#2a2a2e] bg-[#0a0a0c] flex items-center justify-center">
-                                            {isBusy ? (
+                                            {isGenerating ? (
                                                 <div className="flex flex-col items-center gap-2 text-zinc-600">
                                                     <SpinnerIcon className="w-6 h-6" />
-                                                    <span className="text-[10px]">
-                                                        {isEnhancing ? 'Claude 프롬프트 생성 중' : 'DALL-E 이미지 생성 중'}
-                                                    </span>
+                                                    <span className="text-[10px]">DALL-E 이미지 생성 중</span>
                                                 </div>
                                             ) : (
                                                 <div className="flex flex-col items-center gap-2 text-zinc-700">
                                                     <SparklesIcon className="w-8 h-8" />
-                                                    <span className="text-[10px]">생성 전</span>
+                                                    <span className="text-[10px]">이미지 생성 전</span>
                                                 </div>
                                             )}
                                         </div>
@@ -460,27 +472,42 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                             </div>
                             <div className="flex-1 space-y-2">
                                 <div>
-                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">DALL-E가 쓴 프롬프트</label>
-                                    <div className="mt-1 p-2 bg-[#0a0a0c] rounded border border-[#2a2a2e] text-[10px] text-zinc-400 max-h-[120px] overflow-y-auto min-h-[90px]">
-                                        {result?.revisedPrompt || <span className="text-zinc-700">생성 완료 후 여기에 표시됩니다.</span>}
-                                    </div>
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">DALL-E 프롬프트 (편집 가능)</label>
+                                    <textarea
+                                        value={currentPrompt}
+                                        onChange={(e) => setCurrentPrompt(e.target.value)}
+                                        placeholder="먼저 위의 [프롬프트 생성] 버튼을 누르거나, 이 칸에 직접 프롬프트를 입력하세요."
+                                        disabled={isBusy}
+                                        rows={7}
+                                        spellCheck={false}
+                                        className="mt-1 w-full p-2 bg-[#0a0a0c] rounded border border-[#2a2a2e] text-[10px] text-zinc-300 resize-y focus:outline-none focus:border-orange-500/50 font-mono leading-relaxed disabled:opacity-50"
+                                    />
                                 </div>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => runGenerate('regenerate')}
-                                        disabled={isBusy || !result}
-                                        className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-semibold text-zinc-300 bg-[#111114] hover:bg-[#1a1a1e] border border-[#2a2a2e] rounded-md disabled:opacity-30 disabled:cursor-not-allowed"
-                                    >
-                                        <RefreshIcon className="w-3 h-3" /> 다시 생성
-                                    </button>
-                                </div>
+                                {/* ── 2단계 버튼: 이미지 생성 (DALL-E) — 누를 때마다 실행 ── */}
+                                <button
+                                    onClick={handleGenerateImage}
+                                    disabled={isBusy || !currentPrompt.trim()}
+                                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-[12px] font-bold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-lg shadow-sky-600/15 disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.98] transition-all"
+                                >
+                                    {isGenerating
+                                        ? <><SpinnerIcon className="w-3.5 h-3.5" /> DALL-E로 이미지 생성 중... (10~20초)</>
+                                        : <><RefreshIcon className="w-3.5 h-3.5" /> 이미지 생성 (DALL-E)</>}
+                                </button>
+                                {result?.revisedPrompt && result.revisedPrompt !== currentPrompt && (
+                                    <details className="text-[9px] text-zinc-600">
+                                        <summary className="cursor-pointer hover:text-zinc-400">▸ DALL-E가 내부에서 재작성한 버전 (참고)</summary>
+                                        <div className="mt-1 p-2 bg-[#0a0a0c] rounded border border-[#2a2a2e] text-[10px] text-zinc-500 max-h-[100px] overflow-y-auto">
+                                            {result.revisedPrompt}
+                                        </div>
+                                    </details>
+                                )}
                             </div>
                         </div>
 
-                        {/* ── refine ── */}
+                        {/* ── refine (Claude가 위 프롬프트를 수정, 이미지는 만들지 않음) ── */}
                         <div>
                             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-1 block">
-                                추가 요청 (수정 사항)
+                                추가 요청 — Claude가 위 프롬프트를 수정 (이미지 생성은 따로)
                             </label>
                             <div className="flex gap-2">
                                 <input
@@ -488,19 +515,20 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                     type="text"
                                     value={modification}
                                     onChange={(e) => setModification(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && modification.trim() && result) runGenerate('refine'); }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && modification.trim() && currentPrompt.trim()) handleRefinePrompt(); }}
                                     placeholder='예: "머리를 더 짧게, 안경 추가"'
-                                    disabled={isBusy || !result}
+                                    disabled={isBusy || !currentPrompt.trim()}
                                     className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50 disabled:opacity-50"
                                 />
                                 <button
-                                    onClick={() => runGenerate('refine')}
-                                    disabled={isBusy || !modification.trim() || !result}
+                                    onClick={handleRefinePrompt}
+                                    disabled={isBusy || !modification.trim() || !currentPrompt.trim()}
                                     className="px-3 py-2 text-[11px] font-bold text-white bg-orange-600/70 hover:bg-orange-500 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
                                 >
-                                    수정 반영
+                                    프롬프트 수정
                                 </button>
                             </div>
+                            <p className="text-[9px] text-zinc-600 mt-1">수정 후 위 [이미지 생성] 버튼을 눌러 새 이미지 확인</p>
                         </div>
 
                         {/* ── 저장 ── */}
