@@ -57,7 +57,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     const [assetType, setAssetType] = useState<DalleAssetType>(initialAssetType);
     const [showAdvanced, setShowAdvanced] = useState(true);
     const [ratio, setRatio] = useState<ImageRatio>('1:1');
-    const [style, setStyle] = useState<'vivid' | 'natural'>('natural');
+    const [style, setStyle] = useState<'vivid' | 'natural'>('vivid');
     const [quality, setQuality] = useState<'standard' | 'hd'>('standard');
 
     // ── 프롬프트 / 결과 ──
@@ -85,7 +85,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
             setRequest('');
             setAssetName('');
             setRatio(state.imageRatio || '1:1');
-            setStyle('natural');
+            setStyle('vivid');
             setQuality('standard');
         }
     }, [isOpen, initialAssetType, state.imageRatio]);
