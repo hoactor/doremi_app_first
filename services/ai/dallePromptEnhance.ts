@@ -91,13 +91,35 @@ CHARACTER ASSETS — EXTRA RULES (MANDATORY):
 PROMPT SHAPE:
 <asset-type keyword> + <style block> + <subject specifics> + <composition/lighting>`;
 
+// ─── 고정 프롬프트 생성기 ──────────────────────────────────────────────
+// 모달에서 화풍/타입을 고를 때 이 함수로 기본 텍스트를 채워넣고, 사용자는
+// 그 텍스트를 자유롭게 편집한 뒤 enhancePromptForDalle에 그대로 전달.
+
+/**
+ * 현재 화풍 + 에셋 타입 조합에 대한 기본 고정 프롬프트 텍스트 생성.
+ * 이 문자열이 모달의 "고정 프롬프트" 편집 영역의 초기값이 됨.
+ */
+export function buildDefaultFixedPrompt(
+    assetType: DalleAssetType,
+    artStyle: ArtStyle,
+    customArtStyle?: string,
+): string {
+    const style = styleHint(artStyle, customArtStyle);
+    const typeInstructions = TYPE_INSTRUCTIONS[assetType].trim();
+    return `# 화풍 (프롬프트 앞쪽에 들어감)
+${style}
+
+# 용도별 구도/분위기 지시
+${typeInstructions}`;
+}
+
 // ─── 엔트리 함수 ──────────────────────────────────────────────────────
 
 export interface EnhanceOptions {
     userInput: string;              // 사용자가 입력한 짧은 묘사 (한국어 가능)
     assetType: DalleAssetType;
-    artStyle: ArtStyle;
-    customArtStyle?: string;        // artStyle === 'custom'일 때
+    /** 사용자가 편집한 고정 프롬프트 블록 (화풍 + 용도 지시) — 모달이 직접 관리 */
+    fixedPrompt: string;
     /** refine 모드: 기존 DALL-E 프롬프트 + 수정 요청 */
     refineFrom?: {
         previousPrompt: string;
@@ -112,20 +134,16 @@ export interface EnhanceResult {
 
 /**
  * 사용자 입력 → DALL-E 최적화 프롬프트
+ * fixedPrompt(편집 가능)를 그대로 받아 Claude에게 전달.
  * refine 모드면 previousPrompt를 기준으로 수정만 적용.
  */
 export async function enhancePromptForDalle(opts: EnhanceOptions): Promise<EnhanceResult> {
-    const style = styleHint(opts.artStyle, opts.customArtStyle);
-    const typeInstructions = TYPE_INSTRUCTIONS[opts.assetType];
-
     let userMessage: string;
     if (opts.refineFrom) {
         // Refine: 기존 프롬프트 유지하면서 수정 지시만 반영
         userMessage = `Asset type: ${opts.assetType}
-Required art style (must include near the front): ${style}
 
-Type-specific instructions:
-${typeInstructions}
+${opts.fixedPrompt}
 
 Previous DALL-E prompt (to be refined, not rewritten from scratch):
 """
@@ -139,15 +157,13 @@ Output the revised DALL-E 3 prompt. Keep all successful elements of the previous
     } else {
         // 신규 생성
         userMessage = `Asset type: ${opts.assetType}
-Required art style (must include near the front): ${style}
 
-Type-specific instructions:
-${typeInstructions}
+${opts.fixedPrompt}
 
 User description (in Korean or English):
 "${opts.userInput}"
 
-Output the DALL-E 3 prompt.`;
+Output the DALL-E 3 prompt. The style block above must appear near the front of the prompt.`;
     }
 
     const res = await callClaude(SYSTEM_PROMPT, userMessage, {
@@ -156,8 +172,8 @@ Output the DALL-E 3 prompt.`;
     });
 
     const prompt = res.text.trim()
-        .replace(/^["'`]+|["'`]+$/g, '')   // 혹시 모를 감싸는 따옴표 제거
-        .replace(/^(DALL-E.{0,20}:|Prompt:)\s*/i, '');  // "DALL-E 3 prompt:" 같은 접두어 제거
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .replace(/^(DALL-E.{0,20}:|Prompt:)\s*/i, '');
 
     return {
         prompt,

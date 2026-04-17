@@ -11,7 +11,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../AppContext';
 import { XIcon, SparklesIcon, SpinnerIcon, RefreshIcon } from './icons';
 import { generateImageWithDalle, DalleError, type DalleAssetType, type DalleGenerateResult } from '../services/openaiService';
-import { enhancePromptForDalle, suggestAssetName } from '../services/ai/dallePromptEnhance';
+import { enhancePromptForDalle, suggestAssetName, buildDefaultFixedPrompt } from '../services/ai/dallePromptEnhance';
 import { saveAsset, IS_TAURI } from '../services/tauriAdapter';
 import type { ArtStyle, ImageRatio } from '../types';
 
@@ -52,6 +52,11 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     const [style, setStyle] = useState<'vivid' | 'natural'>('vivid');
     const [overrideArtStyle, setOverrideArtStyle] = useState<ArtStyle | ''>('');
 
+    // ── 고정 프롬프트 (편집 가능) ──
+    // 모달 오픈 시 또는 타입/화풍 변경 시 기본값으로 리셋.
+    // 사용자가 직접 편집할 수 있으며 생성 시 그대로 Claude에게 전달됨.
+    const [fixedPrompt, setFixedPrompt] = useState<string>('');
+
     // ── 생성 상태 ──
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -67,6 +72,8 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     const [isNameSuggesting, setIsNameSuggesting] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
+    const effectiveArtStyle: ArtStyle = overrideArtStyle || state.artStyle || 'dalle-chibi';
+
     // 모달 열릴 때 초기값 세팅
     useEffect(() => {
         if (isOpen) {
@@ -80,10 +87,18 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
             setRatio(state.imageRatio || '1:1');
             setStyle('vivid');
             setOverrideArtStyle('');
+            // 고정 프롬프트도 기본값으로 리셋
+            setFixedPrompt(buildDefaultFixedPrompt(initialAssetType, state.artStyle || 'dalle-chibi', state.customArtStyle));
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, initialAssetType, state.imageRatio]);
 
-    const effectiveArtStyle: ArtStyle = overrideArtStyle || state.artStyle || 'dalle-chibi';
+    // 타입 또는 화풍 변경 시 고정 프롬프트 자동 동기화 (모달 열린 상태 한정)
+    useEffect(() => {
+        if (!isOpen) return;
+        setFixedPrompt(buildDefaultFixedPrompt(assetType, effectiveArtStyle, state.customArtStyle));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [assetType, overrideArtStyle]);
 
     // ═══ 생성 메인 플로우 ═══
     const runGenerate = async (mode: 'new' | 'refine' | 'regenerate') => {
@@ -102,8 +117,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                 const enhanced = await enhancePromptForDalle({
                     userInput,
                     assetType,
-                    artStyle: effectiveArtStyle,
-                    customArtStyle: state.customArtStyle,
+                    fixedPrompt,
                 });
                 promptToUse = enhanced.prompt;
                 actions.handleAddUsage?.(enhanced.tokenCount, 'claude');
@@ -122,8 +136,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                 const refined = await enhancePromptForDalle({
                     userInput,
                     assetType,
-                    artStyle: effectiveArtStyle,
-                    customArtStyle: state.customArtStyle,
+                    fixedPrompt,
                     refineFrom: { previousPrompt: currentPrompt, modification },
                 });
                 promptToUse = refined.prompt;
@@ -257,10 +270,38 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                         </div>
                     </div>
 
+                    {/* ── 고정 프롬프트 (편집 가능) ── */}
+                    <div>
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em]">
+                                고정 프롬프트 (화풍 + 구도 지시 · 편집 가능)
+                            </label>
+                            <button
+                                onClick={() => setFixedPrompt(buildDefaultFixedPrompt(assetType, effectiveArtStyle, state.customArtStyle))}
+                                disabled={isBusy}
+                                className="px-2 py-1 text-[9px] text-zinc-500 hover:text-zinc-300 border border-[#2a2a2e] rounded flex items-center gap-1 disabled:opacity-30"
+                                title="현재 타입/화풍의 기본값으로 되돌리기"
+                            >
+                                <RefreshIcon className="w-3 h-3" /> 기본값 복원
+                            </button>
+                        </div>
+                        <textarea
+                            value={fixedPrompt}
+                            onChange={(e) => setFixedPrompt(e.target.value)}
+                            rows={9}
+                            disabled={isBusy}
+                            spellCheck={false}
+                            className="w-full px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-300 resize-y focus:outline-none focus:border-orange-500/50 font-mono leading-relaxed"
+                        />
+                        <p className="text-[9px] text-zinc-600 mt-1">
+                            이 텍스트가 매 생성마다 Claude에게 "스타일 + 구도 지시"로 전달됩니다. 화풍을 바꾸면 기본값이 자동 갱신됩니다.
+                        </p>
+                    </div>
+
                     {/* ── 설명 입력 ── */}
                     <div>
                         <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-2 block">
-                            설명 (한국어 OK)
+                            설명 (한국어 OK) — 매번 바뀌는 부분
                         </label>
                         <textarea
                             value={userInput}
