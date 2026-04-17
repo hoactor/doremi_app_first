@@ -50,6 +50,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     const [showAdvanced, setShowAdvanced] = useState(true);
     const [ratio, setRatio] = useState<ImageRatio>('1:1');
     const [style, setStyle] = useState<'vivid' | 'natural'>('natural');
+    const [quality, setQuality] = useState<'standard' | 'hd'>('standard');
 
     // ── 고정 프롬프트 (편집 가능) ──
     // 모달 오픈 시 또는 타입 변경 시 기본값으로 리셋.
@@ -84,6 +85,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
             setAssetName('');
             setRatio(state.imageRatio || '1:1');
             setStyle('natural');
+            setQuality('standard');
             // 고정 프롬프트도 기본값으로 리셋
             setFixedPrompt(buildDefaultFixedPrompt(initialAssetType));
         }
@@ -163,7 +165,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                 assetType,
                 ratio,
                 style,
-                quality: 'hd',
+                quality,
             });
             setResult(dalleRes);
         } catch (err) {
@@ -378,6 +380,31 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                         ))}
                                     </div>
                                 </div>
+                                {/* 품질 */}
+                                <div>
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">품질 (DALL-E)</label>
+                                    <div className="flex gap-1">
+                                        {([
+                                            { key: 'standard' as const, label: 'Standard', hint: '소프트 일러스트 · $0.04' },
+                                            { key: 'hd' as const,       label: 'HD',       hint: '샤프 · 정돈 · $0.08' },
+                                        ]).map(q => (
+                                            <button
+                                                key={q.key}
+                                                onClick={() => setQuality(q.key)}
+                                                disabled={isBusy}
+                                                className={`flex-1 px-2 py-1 text-[10px] rounded border flex flex-col items-center ${
+                                                    quality === q.key
+                                                        ? 'bg-orange-500/15 border-orange-500/50 text-orange-300'
+                                                        : 'bg-transparent border-[#2a2a2e] text-zinc-500'
+                                                }`}
+                                            >
+                                                <span className="font-semibold">{q.label}</span>
+                                                <span className="text-[8px] opacity-60">{q.hint}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="text-[9px] text-zinc-600 mt-1">ChatGPT DALL-E 모드는 standard 사용. Standard가 더 소프트한 일러스트 느낌.</p>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -466,7 +493,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                                 </div>
                                             )}
                                         </div>
-                                        <p className="text-[9px] text-zinc-700 mt-1 text-center">1024×1024 · hd · {style}</p>
+                                        <p className="text-[9px] text-zinc-700 mt-1 text-center">1024×1024 · {quality} · {style}</p>
                                     </>
                                 )}
                             </div>
