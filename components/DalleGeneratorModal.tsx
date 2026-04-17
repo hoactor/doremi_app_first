@@ -83,8 +83,6 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         }
     }, [isOpen, initialAssetType, state.imageRatio]);
 
-    if (!isOpen) return null;
-
     const effectiveArtStyle: ArtStyle = overrideArtStyle || state.artStyle || 'dalle-chibi';
 
     // ═══ 생성 메인 플로우 ═══
@@ -179,11 +177,12 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
 
     // 결과가 나올 때마다 이름 자동 제안 (비어있을 때만)
     useEffect(() => {
+        if (!isOpen) return;
         if (result && !assetName && currentPrompt) {
             handleSuggestName();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [result]);
+    }, [result, isOpen]);
 
     // ═══ 에셋 저장 ═══
     const handleSaveAsset = async () => {
@@ -218,6 +217,9 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     };
 
     const isBusy = isEnhancing || isGenerating;
+
+    // 모든 hook이 안정적으로 호출된 후 early return — 'Rendered more hooks' 오류 방지
+    if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fade-in">
