@@ -9,7 +9,10 @@ import type { DalleAssetType } from '../openaiService';
 
 // ─── 기본 화풍 프롬프트 (DALL-E 고정 baseline) ─────────────────────────
 // 이 앱의 DALL-E 생성 기본값. 사용자가 모달의 편집 textarea에서 직접 수정 가능.
-export const DEFAULT_STYLE_PROMPT = `A super cute chibi-style character with an oversized round head, tiny body (around 3 heads tall), extremely big sparkling eyes, and puffy round cheeks. The character has a highly expressive face with exaggerated emotions, blushing cheeks, and sweat drops. The style is colorful, clean, and highly expressive, with exaggerated motion effects and a soft pastel background.`;
+// 주의: "A X character with..." 형태로 시작하면 DALL-E가 이 문장을 "주제 선언"으로
+//       해석해서 뒤의 상황과 합쳐 "두 장면을 옆으로 나란히" 같은 composition을
+//       만들어버림. 그래서 앞부분을 "스타일 선언"으로 분명히 시작하게 써야 함.
+export const DEFAULT_STYLE_PROMPT = `Super cute chibi illustration style. Characters have oversized round heads, tiny bodies (around 3 heads tall), extremely big sparkling eyes, and puffy round cheeks. Highly expressive faces with exaggerated emotions, blushing cheeks, and sweat drops. Colorful, clean, and highly expressive rendering with exaggerated motion effects on a soft pastel background.`;
 
 // ─── 에셋 타입별 구조 지시 ────────────────────────────────────────────
 const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
@@ -54,26 +57,33 @@ const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
 
 // ─── 상황 생성용 시스템 프롬프트 (Claude에게 주는 지시) ────────────────
 // Claude는 오직 "상황/감정/포즈 phrase"만 영어로 생성. 화풍은 손대지 않음.
+// 출력은 아주 짧고 단순해야 함 — 복잡할수록 화풍 일관성이 떨어진다.
 const SITUATION_SYSTEM_PROMPT = `You are a scene phrase writer for DALL-E 3 prompts.
 
-Your ONLY job: convert a short Korean user description into a brief English
-phrase describing the SUBJECT, SITUATION, EMOTION, POSE, and LIGHTING MOOD.
+Your ONLY job: convert a short Korean user description into a VERY BRIEF
+English scene sentence. Style is handled separately — don't touch it.
 
 STRICT RULES:
-1. Output ONLY the scene phrase. No explanations, no quotes, no prefix.
-2. Under 250 characters.
-3. Do NOT include any style keywords — no "chibi", "anime", "illustration",
-   "cute style", "sparkling", "pastel", "rendered", "artwork", etc.
-   (Style is handled separately — don't touch it.)
-4. Include: who the subject is, what they are doing, where, emotion, light mood.
-5. Never describe minors in distress, violence, nudity, or policy-sensitive content.
-6. If the user's description is vague, invent a simple pleasant everyday situation.
-7. Never output "character sheet", "multiple views", "turnaround", "color palette",
-   "mannequin" — these trigger sheet layouts.
+1. Output ONLY the scene sentence. No explanations, no quotes, no prefix.
+2. KEEP IT VERY SHORT — ideally under 120 characters, NEVER exceed 180.
+3. Include ONLY essentials in this order:
+   <who (gender+age+one trait)> <action verb> <where>, <one brief mood/light word>
+4. NEVER include style keywords — no "chibi", "anime", "illustration", "cute
+   style", "sparkling", "pastel", "rendered", "artwork", "adorable", etc.
+5. NEVER add decorative adjectives ("vibrant", "lively", "happy", "energetic").
+   Let the user's words + basic action speak. Don't embellish.
+6. NEVER describe multiple views, character sheets, side-by-side compositions.
+7. If the user's description is vague, add ONE simple pleasant detail. No more.
+8. Never describe minors in distress, violence, nudity, or policy-sensitive content.
 
-OUTPUT SHAPE (one natural English phrase):
-"a smiling university student in his 20s walking through a sunlit autumn
-campus, holding a coffee cup, warm afternoon light"
+GOOD OUTPUT EXAMPLES (this simple — under 120 chars):
+- "a 20s Korean woman with ponytail jogging along the Han River, clear morning"
+- "a male college student walking across an autumn campus, afternoon sun"
+- "a young woman reading a book at a cozy cafe window, warm light"
+
+BAD (too wordy):
+- "a vibrant, lively South Korean university student happily running down the
+   path of the Han River with a ponytail swinging in the wind..."
 
 Never prefix with "A/An DALL-E prompt:" or wrap in quotes.`;
 
@@ -178,8 +188,8 @@ Output the English scene phrase only.`;
     }
 
     const res = await callClaude(SITUATION_SYSTEM_PROMPT, userMessage, {
-        temperature: 0.4,
-        maxTokens: 300,
+        temperature: 0.3,  // 창의성 낮춤 — 장식 형용사 최소화
+        maxTokens: 150,    // 짧은 문장만 허용
     });
 
     const situation = res.text.trim()
