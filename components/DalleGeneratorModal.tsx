@@ -47,7 +47,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     // ── 사용자 입력 ──
     const [assetType, setAssetType] = useState<DalleAssetType>(initialAssetType);
     const [userInput, setUserInput] = useState('');
-    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [showAdvanced, setShowAdvanced] = useState(true);
     const [ratio, setRatio] = useState<ImageRatio>('1:1');
     const [style, setStyle] = useState<'vivid' | 'natural'>('vivid');
     const [overrideArtStyle, setOverrideArtStyle] = useState<ArtStyle | ''>('');
@@ -401,102 +401,123 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                         </div>
                     )}
 
-                    {/* ── 결과 프리뷰 ── */}
-                    {result && (
-                        <div className="pt-4 border-t border-zinc-800 space-y-3">
-                            <div className="flex gap-3">
-                                <div className="flex-shrink-0 w-[240px]">
-                                    <img
-                                        src={result.imageUrl}
-                                        alt="DALL-E 결과"
-                                        className="w-full rounded-lg border border-zinc-700"
-                                    />
-                                    <p className="text-[9px] text-zinc-600 mt-1 text-center">
-                                        {result.size} · {result.quality} · {result.style}
-                                    </p>
-                                </div>
-                                <div className="flex-1 space-y-2">
-                                    <div>
-                                        <label className="text-[9px] font-bold text-zinc-500 uppercase">DALL-E가 쓴 프롬프트</label>
-                                        <div className="mt-1 p-2 bg-[#0a0a0c] rounded border border-[#2a2a2e] text-[10px] text-zinc-400 max-h-[120px] overflow-y-auto">
-                                            {result.revisedPrompt}
+                    {/* ── 결과 영역 (항상 표시, 결과 전에는 빈 슬롯) ── */}
+                    <div className="pt-4 border-t border-zinc-800 space-y-3">
+                        <div className="flex gap-3">
+                            <div className="flex-shrink-0 w-[240px]">
+                                {result ? (
+                                    <>
+                                        <img
+                                            src={result.imageUrl}
+                                            alt="DALL-E 결과"
+                                            className="w-full rounded-lg border border-zinc-700"
+                                        />
+                                        <p className="text-[9px] text-zinc-600 mt-1 text-center">
+                                            {result.size} · {result.quality} · {result.style}
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="w-full aspect-square rounded-lg border border-dashed border-[#2a2a2e] bg-[#0a0a0c] flex items-center justify-center">
+                                            {isBusy ? (
+                                                <div className="flex flex-col items-center gap-2 text-zinc-600">
+                                                    <SpinnerIcon className="w-6 h-6" />
+                                                    <span className="text-[10px]">
+                                                        {isEnhancing ? 'Claude 프롬프트 생성 중' : 'DALL-E 이미지 생성 중'}
+                                                    </span>
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col items-center gap-2 text-zinc-700">
+                                                    <SparklesIcon className="w-8 h-8" />
+                                                    <span className="text-[10px]">생성 전</span>
+                                                </div>
+                                            )}
                                         </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={() => runGenerate('regenerate')}
-                                            disabled={isBusy}
-                                            className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-semibold text-zinc-300 bg-[#111114] hover:bg-[#1a1a1e] border border-[#2a2a2e] rounded-md disabled:opacity-40"
-                                        >
-                                            <RefreshIcon className="w-3 h-3" /> 다시 생성
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* ── refine ── */}
-                            <div>
-                                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-1 block">
-                                    추가 요청 (수정 사항)
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        ref={modificationInputRef}
-                                        type="text"
-                                        value={modification}
-                                        onChange={(e) => setModification(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && modification.trim()) runGenerate('refine'); }}
-                                        placeholder='예: "머리를 더 짧게, 안경 추가"'
-                                        disabled={isBusy}
-                                        className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
-                                    />
-                                    <button
-                                        onClick={() => runGenerate('refine')}
-                                        disabled={isBusy || !modification.trim()}
-                                        className="px-3 py-2 text-[11px] font-bold text-white bg-orange-600/70 hover:bg-orange-500 rounded-lg disabled:opacity-30"
-                                    >
-                                        수정 반영
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* ── 저장 ── */}
-                            <div className="pt-3 border-t border-zinc-800">
-                                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-1 block">
-                                    에셋 이름
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={assetName}
-                                        onChange={(e) => setAssetName(e.target.value)}
-                                        placeholder={isNameSuggesting ? '이름 제안 중...' : `예: ${TYPE_LABELS[assetType]} 시안 A`}
-                                        disabled={isBusy || isSaving}
-                                        className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
-                                    />
-                                    <button
-                                        onClick={handleSuggestName}
-                                        disabled={isBusy || isSaving || isNameSuggesting || !currentPrompt}
-                                        className="px-2 py-1 text-[10px] text-zinc-500 hover:text-zinc-300 border border-[#2a2a2e] rounded"
-                                        title="Claude로 이름 다시 제안"
-                                    >
-                                        {isNameSuggesting ? <SpinnerIcon className="w-3 h-3" /> : '🎲'}
-                                    </button>
-                                </div>
-                                <button
-                                    onClick={handleSaveAsset}
-                                    disabled={isBusy || isSaving || !assetName.trim() || !IS_TAURI}
-                                    className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 text-[12px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.98] transition-all"
-                                >
-                                    {isSaving ? <><SpinnerIcon className="w-4 h-4" /> 저장 중...</>
-                                        : `"${TYPE_LABELS[assetType]}" 에셋으로 저장`}
-                                </button>
-                                {!IS_TAURI && (
-                                    <p className="text-[9px] text-zinc-600 mt-1 text-center">Tauri 데스크톱에서만 저장 가능합니다.</p>
+                                        <p className="text-[9px] text-zinc-700 mt-1 text-center">1024×1024 · hd · {style}</p>
+                                    </>
                                 )}
                             </div>
+                            <div className="flex-1 space-y-2">
+                                <div>
+                                    <label className="text-[9px] font-bold text-zinc-500 uppercase">DALL-E가 쓴 프롬프트</label>
+                                    <div className="mt-1 p-2 bg-[#0a0a0c] rounded border border-[#2a2a2e] text-[10px] text-zinc-400 max-h-[120px] overflow-y-auto min-h-[90px]">
+                                        {result?.revisedPrompt || <span className="text-zinc-700">생성 완료 후 여기에 표시됩니다.</span>}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => runGenerate('regenerate')}
+                                        disabled={isBusy || !result}
+                                        className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-semibold text-zinc-300 bg-[#111114] hover:bg-[#1a1a1e] border border-[#2a2a2e] rounded-md disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                        <RefreshIcon className="w-3 h-3" /> 다시 생성
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    )}
+
+                        {/* ── refine ── */}
+                        <div>
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-1 block">
+                                추가 요청 (수정 사항)
+                            </label>
+                            <div className="flex gap-2">
+                                <input
+                                    ref={modificationInputRef}
+                                    type="text"
+                                    value={modification}
+                                    onChange={(e) => setModification(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && modification.trim() && result) runGenerate('refine'); }}
+                                    placeholder='예: "머리를 더 짧게, 안경 추가"'
+                                    disabled={isBusy || !result}
+                                    className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50 disabled:opacity-50"
+                                />
+                                <button
+                                    onClick={() => runGenerate('refine')}
+                                    disabled={isBusy || !modification.trim() || !result}
+                                    className="px-3 py-2 text-[11px] font-bold text-white bg-orange-600/70 hover:bg-orange-500 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    수정 반영
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* ── 저장 ── */}
+                        <div className="pt-3 border-t border-zinc-800">
+                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-1 block">
+                                에셋 이름
+                            </label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={assetName}
+                                    onChange={(e) => setAssetName(e.target.value)}
+                                    placeholder={isNameSuggesting ? '이름 제안 중...' : `예: ${TYPE_LABELS[assetType]} 시안 A`}
+                                    disabled={isBusy || isSaving || !result}
+                                    className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50 disabled:opacity-50"
+                                />
+                                <button
+                                    onClick={handleSuggestName}
+                                    disabled={isBusy || isSaving || isNameSuggesting || !currentPrompt || !result}
+                                    className="px-2 py-1 text-[10px] text-zinc-500 hover:text-zinc-300 border border-[#2a2a2e] rounded disabled:opacity-30"
+                                    title="Claude로 이름 다시 제안"
+                                >
+                                    {isNameSuggesting ? <SpinnerIcon className="w-3 h-3" /> : '🎲'}
+                                </button>
+                            </div>
+                            <button
+                                onClick={handleSaveAsset}
+                                disabled={isBusy || isSaving || !assetName.trim() || !IS_TAURI || !result}
+                                className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 text-[12px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.98] transition-all"
+                            >
+                                {isSaving ? <><SpinnerIcon className="w-4 h-4" /> 저장 중...</>
+                                    : `"${TYPE_LABELS[assetType]}" 에셋으로 저장`}
+                            </button>
+                            {!IS_TAURI && (
+                                <p className="text-[9px] text-zinc-600 mt-1 text-center">Tauri 데스크톱에서만 저장 가능합니다.</p>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
