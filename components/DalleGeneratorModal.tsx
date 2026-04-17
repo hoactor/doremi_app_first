@@ -1,8 +1,15 @@
 /**
- * DalleGeneratorModal — DALL-E 3 원본 이미지 생성기
+ * DalleGeneratorModal — DALL-E 3 원본 이미지 생성기 (OpenAI only, Claude 미사용)
  *
- * 플로우: 사용자 입력(한국어) → Claude enhance → DALL-E 3 호출 → 프리뷰
- *         → (선택) 추가 요청으로 refine → 에셋 카탈로그 저장
+ * 플로우:
+ *  1. 사용자가 "요청" 입력 → [프롬프트 생성/수정] 클릭
+ *     → OpenAI Chat (gpt-4o) 호출 → DALL-E 프롬프트 textarea 채움
+ *     (이미지는 만들지 않음)
+ *  2. textarea 내용 직접 편집 가능
+ *  3. [이미지 생성 (DALL-E)] 클릭 → DALL-E 3 호출 → 이미지 프리뷰
+ *     같은 프롬프트로 여러 번 누를 수 있음 (variant 생성)
+ *  4. 필요 시 "요청"에 수정 지시 → 다시 [프롬프트 생성/수정] → [이미지 생성]
+ *  5. 에셋 이름 확정 → 저장
  *
  * 진입: 사이드바 "원본 생성" 버튼 + 에셋 카탈로그 헤더 "+ 새 에셋"
  */
@@ -10,8 +17,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../AppContext';
 import { XIcon, SparklesIcon, SpinnerIcon, RefreshIcon } from './icons';
-import { generateImageWithDalle, DalleError, type DalleAssetType, type DalleGenerateResult } from '../services/openaiService';
-import { enhancePromptForDalle, suggestAssetName, buildDefaultFixedPrompt } from '../services/ai/dallePromptEnhance';
+import {
+    generateImageWithDalle, generateDallePromptViaOpenAI, suggestAssetNameViaOpenAI,
+    DalleError,
+    type DalleAssetType, type DalleGenerateResult,
+} from '../services/openaiService';
 import { saveAsset, IS_TAURI } from '../services/tauriAdapter';
 import type { ImageRatio } from '../types';
 
@@ -20,7 +30,6 @@ interface DalleGeneratorModalProps {
     onClose: () => void;
     initialAssetType?: DalleAssetType;
     onAssetSaved?: (assetId: string) => void;
-    /** missing-key 에러 시 API 키 설정 모달 여는 콜백 */
     onOpenApiKeySettings?: () => void;
 }
 
@@ -31,127 +40,80 @@ const TYPE_LABELS: Record<DalleAssetType, string> = {
     prop: '소품',
 };
 
-const TYPE_HINTS: Record<DalleAssetType, string> = {
-    character: '예: "20대 여성, 긴 갈색 웨이브 머리, 카페에서 커피 마시며 웃고 있는"\n상황(공원/카페/거리 등)까지 넣으면 더 자연스럽게 나옵니다. 기본 분위기는 밝고 웃는 톤.',
-    background: '예: "오후 햇빛이 드는 작은 카페 인테리어, 원목 테이블, 따뜻한 색감"',
-    outfit: '예: "네이비 체크 정장, 흰 셔츠, 무늬 없는 타이"',
-    prop: '예: "빈티지 가죽 노트, 황동 버클, 갈색 낡은 표지"',
+const REQUEST_HINTS: Record<DalleAssetType, string> = {
+    character: '예: "20대 여대생이 한강에서 조깅 중, 밝게 웃는"',
+    background: '예: "오후 햇빛 드는 작은 카페 인테리어, 따뜻한 색감"',
+    outfit: '예: "네이비 체크 정장, 흰 셔츠"',
+    prop: '예: "빈티지 가죽 노트, 황동 버클"',
 };
 
 export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     isOpen, onClose, initialAssetType = 'character', onAssetSaved, onOpenApiKeySettings,
 }) => {
-    const modificationInputRef = React.useRef<HTMLInputElement>(null);
     const { state, actions } = useAppContext();
+    const requestInputRef = React.useRef<HTMLInputElement>(null);
 
-    // ── 사용자 입력 ──
+    // ── 입력 ──
     const [assetType, setAssetType] = useState<DalleAssetType>(initialAssetType);
-    const [userInput, setUserInput] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(true);
     const [ratio, setRatio] = useState<ImageRatio>('1:1');
     const [style, setStyle] = useState<'vivid' | 'natural'>('natural');
     const [quality, setQuality] = useState<'standard' | 'hd'>('standard');
 
-    // ── 고정 프롬프트 (편집 가능) ──
-    // 모달 오픈 시 또는 타입 변경 시 기본값으로 리셋.
-    // 사용자가 직접 편집할 수 있으며 생성 시 그대로 Claude에게 전달됨.
-    // 화풍 자체도 이 텍스트 편집으로 바꿈 (별도 화풍 선택기 없음).
-    const [fixedPrompt, setFixedPrompt] = useState<string>('');
-
-    // ── 생성 상태 ──
-    const [isEnhancing, setIsEnhancing] = useState(false);
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [currentPrompt, setCurrentPrompt] = useState<string>('');   // Claude 생성 프롬프트
+    // ── 프롬프트 / 결과 ──
+    const [currentPrompt, setCurrentPrompt] = useState<string>('');
     const [result, setResult] = useState<DalleGenerateResult | null>(null);
     const [error, setError] = useState<{ message: string; kind?: string } | null>(null);
+    const [request, setRequest] = useState('');
 
-    // ── refine ──
-    const [modification, setModification] = useState('');
+    // ── 상태 플래그 ──
+    const [isPromptBusy, setIsPromptBusy] = useState(false);   // OpenAI Chat 호출 중
+    const [isGenerating, setIsGenerating] = useState(false);   // DALL-E 호출 중
 
-    // ── 저장 상태 ──
+    // ── 저장 ──
     const [assetName, setAssetName] = useState('');
     const [isNameSuggesting, setIsNameSuggesting] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    // 모달 열릴 때 초기값 세팅
+    // 모달 오픈 시 초기값
     useEffect(() => {
         if (isOpen) {
             setAssetType(initialAssetType);
-            setUserInput('');
             setCurrentPrompt('');
             setResult(null);
             setError(null);
-            setModification('');
+            setRequest('');
             setAssetName('');
             setRatio(state.imageRatio || '1:1');
             setStyle('natural');
             setQuality('standard');
-            // 고정 프롬프트도 기본값으로 리셋
-            setFixedPrompt(buildDefaultFixedPrompt(initialAssetType));
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, initialAssetType, state.imageRatio]);
 
-    // 타입 변경 시 고정 프롬프트 자동 동기화 (모달 열린 상태 한정)
-    useEffect(() => {
-        if (!isOpen) return;
-        setFixedPrompt(buildDefaultFixedPrompt(assetType));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [assetType]);
-
-    // ═══ 1. 프롬프트 생성 (Claude only — 이미지는 만들지 않음) ═══
-    const handleGeneratePrompt = async () => {
-        if (!userInput.trim()) {
-            setError({ message: '무엇을 그릴지 설명을 입력해주세요.' });
+    // ═══ 1. 프롬프트 생성/수정 (OpenAI Chat only) ═══
+    const handleGenerateOrRefinePrompt = async () => {
+        if (!request.trim()) {
+            setError({ message: '요청을 입력해주세요. (예: "20대 여대생이 한강에서 조깅")' });
             return;
         }
         setError(null);
-        setIsEnhancing(true);
+        setIsPromptBusy(true);
         try {
-            const enhanced = await enhancePromptForDalle({
-                userInput,
+            const { prompt } = await generateDallePromptViaOpenAI({
+                request,
                 assetType,
-                fixedPrompt,
+                currentPrompt,
             });
-            setCurrentPrompt(enhanced.prompt);
-            actions.handleAddUsage?.(enhanced.tokenCount, 'claude');
+            setCurrentPrompt(prompt);
+            setRequest('');
         } catch (err) {
             handleError(err);
         } finally {
-            setIsEnhancing(false);
+            setIsPromptBusy(false);
         }
     };
 
-    // ═══ 2. 프롬프트 수정 (Claude only — 이미지는 만들지 않음) ═══
-    const handleRefinePrompt = async () => {
-        if (!modification.trim()) {
-            setError({ message: '어떻게 바꿀지 추가 요청을 입력해주세요.' });
-            return;
-        }
-        if (!currentPrompt.trim()) {
-            setError({ message: '먼저 프롬프트를 생성해주세요.' });
-            return;
-        }
-        setError(null);
-        setIsEnhancing(true);
-        try {
-            const refined = await enhancePromptForDalle({
-                userInput,
-                assetType,
-                fixedPrompt,
-                refineFrom: { previousPrompt: currentPrompt, modification },
-            });
-            setCurrentPrompt(refined.prompt);
-            actions.handleAddUsage?.(refined.tokenCount, 'claude');
-            setModification('');
-        } catch (err) {
-            handleError(err);
-        } finally {
-            setIsEnhancing(false);
-        }
-    };
-
-    // ═══ 3. 이미지 생성 (DALL-E only — 현재 프롬프트 그대로 실행) ═══
+    // ═══ 2. 이미지 생성 (DALL-E only) ═══
     const handleGenerateImage = async () => {
         if (!currentPrompt.trim()) {
             setError({ message: '먼저 프롬프트를 생성하거나 직접 입력해주세요.' });
@@ -162,10 +124,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         try {
             const dalleRes = await generateImageWithDalle({
                 prompt: currentPrompt,
-                assetType,
-                ratio,
-                style,
-                quality,
+                assetType, ratio, style, quality,
             });
             setResult(dalleRes);
         } catch (err) {
@@ -175,24 +134,12 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         }
     };
 
-    // ═══ 공통 에러 핸들러 ═══
-    const handleError = (err: unknown) => {
-        if (err instanceof DalleError) {
-            setError({ message: err.message, kind: err.kind });
-            if (err.kind === 'content-policy' && result) {
-                setTimeout(() => modificationInputRef.current?.focus(), 50);
-            }
-        } else {
-            setError({ message: err instanceof Error ? err.message : String(err) });
-        }
-    };
-
-    // ═══ 이름 자동 제안 ═══
+    // ═══ 3. 에셋 이름 자동 제안 (OpenAI Chat) ═══
     const handleSuggestName = async () => {
         if (!currentPrompt) return;
         setIsNameSuggesting(true);
         try {
-            const name = await suggestAssetName(assetType, currentPrompt);
+            const name = await suggestAssetNameViaOpenAI(assetType, currentPrompt);
             setAssetName(name);
         } catch (err) {
             console.warn('이름 제안 실패:', err);
@@ -201,7 +148,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         }
     };
 
-    // 결과가 나올 때마다 이름 자동 제안 (비어있을 때만)
+    // 결과가 나올 때 이름 자동 제안 (비어있을 때만)
     useEffect(() => {
         if (!isOpen) return;
         if (result && !assetName && currentPrompt) {
@@ -210,7 +157,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [result, isOpen]);
 
-    // ═══ 에셋 저장 ═══
+    // ═══ 4. 에셋 저장 ═══
     const handleSaveAsset = async () => {
         if (!result || !assetName.trim()) return;
         if (!IS_TAURI) {
@@ -226,7 +173,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                 name: safeName,
                 tags: {
                     character: null,
-                    artStyle: 'dalle-chibi',    // DALL-E 에셋은 치비 카테고리로 분류
+                    artStyle: 'dalle-chibi',
                     location: null,
                     description: result.revisedPrompt,
                 },
@@ -242,9 +189,20 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         }
     };
 
-    const isBusy = isEnhancing || isGenerating;
+    // ═══ 공통 에러 핸들러 ═══
+    const handleError = (err: unknown) => {
+        if (err instanceof DalleError) {
+            setError({ message: err.message, kind: err.kind });
+            if (err.kind === 'content-policy') {
+                setTimeout(() => requestInputRef.current?.focus(), 50);
+            }
+        } else {
+            setError({ message: err instanceof Error ? err.message : String(err) });
+        }
+    };
 
-    // 모든 hook이 안정적으로 호출된 후 early return — 'Rendered more hooks' 오류 방지
+    const isBusy = isPromptBusy || isGenerating;
+
     if (!isOpen) return null;
 
     return (
@@ -255,6 +213,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                     <h2 className="text-sm font-black text-zinc-100 flex items-center gap-2">
                         <SparklesIcon className="w-4 h-4 text-orange-400" />
                         DALL-E 원본 생성
+                        <span className="text-[9px] font-normal text-zinc-500 ml-1">OpenAI only</span>
                     </h2>
                     <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300" disabled={isBusy || isSaving}>
                         <XIcon className="w-5 h-5" />
@@ -283,52 +242,40 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                         </div>
                     </div>
 
-                    {/* ── 고정 프롬프트 (편집 가능) ── */}
+                    {/* ── 요청 입력 (OpenAI Chat으로 프롬프트 생성/수정) ── */}
                     <div>
-                        <div className="flex items-center justify-between mb-2">
-                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em]">
-                                고정 프롬프트 (화풍 + 구도 지시 · 편집 가능)
-                            </label>
-                            <button
-                                onClick={() => setFixedPrompt(buildDefaultFixedPrompt(assetType))}
+                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-2 block">
+                            요청 — GPT가 아래 프롬프트를 생성/수정 (이미지 생성은 따로)
+                        </label>
+                        <div className="flex gap-2">
+                            <input
+                                ref={requestInputRef}
+                                type="text"
+                                value={request}
+                                onChange={(e) => setRequest(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && request.trim()) handleGenerateOrRefinePrompt(); }}
+                                placeholder={currentPrompt ? '예: "머리를 더 짧게, 안경 추가"' : REQUEST_HINTS[assetType]}
                                 disabled={isBusy}
-                                className="px-2 py-1 text-[9px] text-zinc-500 hover:text-zinc-300 border border-[#2a2a2e] rounded flex items-center gap-1 disabled:opacity-30"
-                                title="현재 타입의 기본값으로 되돌리기"
+                                className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[12px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
+                            />
+                            <button
+                                onClick={handleGenerateOrRefinePrompt}
+                                disabled={isBusy || !request.trim()}
+                                className="px-4 py-2 text-[11px] font-bold text-white bg-orange-600 hover:bg-orange-500 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap"
                             >
-                                <RefreshIcon className="w-3 h-3" /> 기본값 복원
+                                {isPromptBusy
+                                    ? <><SpinnerIcon className="w-3.5 h-3.5 inline" /> GPT 생성 중…</>
+                                    : currentPrompt ? '프롬프트 수정' : '프롬프트 생성'}
                             </button>
                         </div>
-                        <textarea
-                            value={fixedPrompt}
-                            onChange={(e) => setFixedPrompt(e.target.value)}
-                            rows={9}
-                            disabled={isBusy}
-                            spellCheck={false}
-                            className="w-full px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-300 resize-y focus:outline-none focus:border-orange-500/50 font-mono leading-relaxed"
-                        />
-                        <p className="text-[9px] text-zinc-600 mt-1 leading-relaxed">
-                            <span className="text-zinc-500">"# 화풍"</span> 블록은 DALL-E에 <span className="text-orange-400/80">그대로 전송</span>됩니다 (Claude가 수정 안 함 → 화풍 일관성 보장).
-                            <br />
-                            <span className="text-zinc-500">"# 용도별"</span> 블록은 Claude가 상황/감정 phrase 만들 때의 <span className="text-zinc-400">참고 가이드</span>로만 사용됩니다.
+                        <p className="text-[9px] text-zinc-600 mt-1">
+                            {currentPrompt
+                                ? '현재 프롬프트를 기반으로 수정됩니다. 비우려면 아래 textarea를 지우고 새로 요청.'
+                                : '한국어 OK. Enter로 제출.'}
                         </p>
                     </div>
 
-                    {/* ── 설명 입력 ── */}
-                    <div>
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-2 block">
-                            설명 (한국어 OK) — 매번 바뀌는 부분
-                        </label>
-                        <textarea
-                            value={userInput}
-                            onChange={(e) => setUserInput(e.target.value)}
-                            placeholder={TYPE_HINTS[assetType]}
-                            rows={3}
-                            disabled={isBusy}
-                            className="w-full px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[12px] text-zinc-200 placeholder:text-zinc-600 resize-none focus:outline-none focus:border-orange-500/50"
-                        />
-                    </div>
-
-                    {/* ── 고급 설정 (접을 수 있음) ── */}
+                    {/* ── 고급 설정 ── */}
                     <div>
                         <button
                             onClick={() => setShowAdvanced(v => !v)}
@@ -338,7 +285,6 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                         </button>
                         {showAdvanced && (
                             <div className="mt-3 p-3 bg-[#0a0a0c] rounded-lg border border-[#2a2a2e] space-y-3">
-                                {/* 비율 (배경만 의미 있음) */}
                                 <div>
                                     <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">비율</label>
                                     <div className="flex gap-1">
@@ -360,7 +306,6 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                     </div>
                                     <p className="text-[9px] text-zinc-600 mt-1">캐릭터/의상/소품은 1:1 고정 (레퍼런스용)</p>
                                 </div>
-                                {/* 스타일 */}
                                 <div>
                                     <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">스타일 (DALL-E)</label>
                                     <div className="flex gap-1">
@@ -380,13 +325,12 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                         ))}
                                     </div>
                                 </div>
-                                {/* 품질 */}
                                 <div>
                                     <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">품질 (DALL-E)</label>
                                     <div className="flex gap-1">
                                         {([
-                                            { key: 'standard' as const, label: 'Standard', hint: '소프트 일러스트 · $0.04' },
-                                            { key: 'hd' as const,       label: 'HD',       hint: '샤프 · 정돈 · $0.08' },
+                                            { key: 'standard' as const, label: 'Standard', hint: '소프트 · $0.04' },
+                                            { key: 'hd' as const,       label: 'HD',       hint: '샤프 · $0.08' },
                                         ]).map(q => (
                                             <button
                                                 key={q.key}
@@ -403,22 +347,10 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                             </button>
                                         ))}
                                     </div>
-                                    <p className="text-[9px] text-zinc-600 mt-1">ChatGPT DALL-E 모드는 standard 사용. Standard가 더 소프트한 일러스트 느낌.</p>
                                 </div>
                             </div>
                         )}
                     </div>
-
-                    {/* ── 1단계 버튼: 프롬프트 생성 (Claude) ── */}
-                    <button
-                        onClick={handleGeneratePrompt}
-                        disabled={isBusy || !userInput.trim()}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-white bg-orange-600 hover:bg-orange-500 rounded-xl shadow-lg shadow-orange-600/15 disabled:opacity-30 disabled:cursor-not-allowed active:scale-[0.98] transition-all"
-                    >
-                        {isEnhancing
-                            ? <><SpinnerIcon className="w-4 h-4" /> Claude가 프롬프트 만드는 중...</>
-                            : <><SparklesIcon className="w-4 h-4" /> 프롬프트 생성 (Claude)</>}
-                    </button>
 
                     {/* ── 에러 ── */}
                     {error && (
@@ -430,53 +362,28 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                             <span className="font-black">⚠️</span>
                             <div className="flex-1">
                                 <div>{error.message}</div>
-                                {error.kind === 'content-policy' && result && (
-                                    <div className="text-[10px] text-amber-300/60 mt-1">
-                                        아래 "추가 요청"에서 민감한 표현을 순화해 재시도하거나, 설명 자체를 바꿔 새로 생성하세요.
-                                    </div>
-                                )}
-                                {error.kind === 'missing-key' && (
+                                {error.kind === 'missing-key' && onOpenApiKeySettings && (
                                     <div className="mt-2">
-                                        {onOpenApiKeySettings ? (
-                                            <button
-                                                onClick={onOpenApiKeySettings}
-                                                className="px-2 py-1 text-[10px] font-bold text-white bg-red-600 hover:bg-red-500 rounded"
-                                            >
-                                                API 키 설정 열기
-                                            </button>
-                                        ) : (
-                                            <div className="text-[10px] text-red-300/60">사이드바의 "API 키" 버튼에서 등록 가능합니다.</div>
-                                        )}
-                                    </div>
-                                )}
-                                {error.kind === 'rate-limit' && (
-                                    <div className="text-[10px] text-red-300/60 mt-1">
-                                        OpenAI 대시보드의 사용량 탭에서 rate limit을 확인할 수 있습니다.
-                                    </div>
-                                )}
-                                {error.kind === 'network' && (
-                                    <div className="text-[10px] text-red-300/60 mt-1">
-                                        방화벽/프록시/VPN 설정도 함께 확인해주세요.
+                                        <button
+                                            onClick={onOpenApiKeySettings}
+                                            className="px-2 py-1 text-[10px] font-bold text-white bg-red-600 hover:bg-red-500 rounded"
+                                        >
+                                            API 키 설정 열기
+                                        </button>
                                     </div>
                                 )}
                             </div>
                         </div>
                     )}
 
-                    {/* ── 결과 영역 (항상 표시, 결과 전에는 빈 슬롯) ── */}
+                    {/* ── 결과 영역 ── */}
                     <div className="pt-4 border-t border-zinc-800 space-y-3">
                         <div className="flex gap-3">
                             <div className="flex-shrink-0 w-[240px]">
                                 {result ? (
                                     <>
-                                        <img
-                                            src={result.imageUrl}
-                                            alt="DALL-E 결과"
-                                            className="w-full rounded-lg border border-zinc-700"
-                                        />
-                                        <p className="text-[9px] text-zinc-600 mt-1 text-center">
-                                            {result.size} · {result.quality} · {result.style}
-                                        </p>
+                                        <img src={result.imageUrl} alt="DALL-E 결과" className="w-full rounded-lg border border-zinc-700" />
+                                        <p className="text-[9px] text-zinc-600 mt-1 text-center">{result.size} · {result.quality} · {result.style}</p>
                                     </>
                                 ) : (
                                     <>
@@ -503,14 +410,13 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                     <textarea
                                         value={currentPrompt}
                                         onChange={(e) => setCurrentPrompt(e.target.value)}
-                                        placeholder="먼저 위의 [프롬프트 생성] 버튼을 누르거나, 이 칸에 직접 프롬프트를 입력하세요."
+                                        placeholder="위 '요청' 입력 후 [프롬프트 생성]을 누르거나, 여기에 직접 프롬프트를 입력하세요."
                                         disabled={isBusy}
                                         rows={7}
                                         spellCheck={false}
                                         className="mt-1 w-full p-2 bg-[#0a0a0c] rounded border border-[#2a2a2e] text-[10px] text-zinc-300 resize-y focus:outline-none focus:border-orange-500/50 font-mono leading-relaxed disabled:opacity-50"
                                     />
                                 </div>
-                                {/* ── 2단계 버튼: 이미지 생성 (DALL-E) — 누를 때마다 실행 ── */}
                                 <button
                                     onClick={handleGenerateImage}
                                     disabled={isBusy || !currentPrompt.trim()}
@@ -531,33 +437,6 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                             </div>
                         </div>
 
-                        {/* ── refine (Claude가 위 프롬프트를 수정, 이미지는 만들지 않음) ── */}
-                        <div>
-                            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-1 block">
-                                추가 요청 — Claude가 위 프롬프트를 수정 (이미지 생성은 따로)
-                            </label>
-                            <div className="flex gap-2">
-                                <input
-                                    ref={modificationInputRef}
-                                    type="text"
-                                    value={modification}
-                                    onChange={(e) => setModification(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && modification.trim() && currentPrompt.trim()) handleRefinePrompt(); }}
-                                    placeholder='예: "머리를 더 짧게, 안경 추가"'
-                                    disabled={isBusy || !currentPrompt.trim()}
-                                    className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50 disabled:opacity-50"
-                                />
-                                <button
-                                    onClick={handleRefinePrompt}
-                                    disabled={isBusy || !modification.trim() || !currentPrompt.trim()}
-                                    className="px-3 py-2 text-[11px] font-bold text-white bg-orange-600/70 hover:bg-orange-500 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
-                                >
-                                    프롬프트 수정
-                                </button>
-                            </div>
-                            <p className="text-[9px] text-zinc-600 mt-1">수정 후 위 [이미지 생성] 버튼을 눌러 새 이미지 확인</p>
-                        </div>
-
                         {/* ── 저장 ── */}
                         <div className="pt-3 border-t border-zinc-800">
                             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.15em] mb-1 block">
@@ -576,7 +455,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                     onClick={handleSuggestName}
                                     disabled={isBusy || isSaving || isNameSuggesting || !currentPrompt || !result}
                                     className="px-2 py-1 text-[10px] text-zinc-500 hover:text-zinc-300 border border-[#2a2a2e] rounded disabled:opacity-30"
-                                    title="Claude로 이름 다시 제안"
+                                    title="GPT로 이름 다시 제안"
                                 >
                                     {isNameSuggesting ? <SpinnerIcon className="w-3 h-3" /> : '🎲'}
                                 </button>
