@@ -15,7 +15,7 @@
 - **Rust 코드는 `src-tauri/src/main.rs` 하나에만 있어야 한다.** `lib.rs` 새로 만들지 마.
 - **`tauri.conf.json`의 plugins 섹션은 빈 `{}` 유지.** 내용 넣으면 빌드 실패.
 - API 키는 macOS Keychain 저장 (`keyring` crate, feature = `apple-native`, service = `"doremissul-studio"`).
-- 키 종류: `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `SUPERTONE_API_KEY`, `FAL_API_KEY`.
+- 키 종류: `CLAUDE_API_KEY`, `GEMINI_API_KEY`, `SUPERTONE_API_KEY`, `FAL_API_KEY`, `OPENAI_API_KEY`.
 - HTTP 타임아웃: `from_secs(300)` — 줄이지 마.
 - `dragDropEnabled: false` 유지.
 
@@ -55,6 +55,17 @@
 - 러프/일반 모두 Gemini 2.5 Flash (Gemini 경로일 때). 차이는 레퍼런스 유무.
 - 인서트 컷은 `sceneImageMap`으로 같은 location 이미지를 스타일 레퍼런스로 자동 첨부.
 - Studio는 studioId `'a'` 단일 사용.
+
+### DALL-E 3 원본 생성 (Phase N — Sidebar `✨` + AssetCatalog `원본 생성`)
+- 용도: **참조 이미지 소스** — 대표 캐릭터/배경/의상/소품의 레퍼런스를 DALL-E 3로 생성.
+  본편 이미지는 여전히 Gemini/Flux. DALL-E는 치비 품질이 원탑이라 참조용으로 최적.
+- 플로우: 사용자 한국어 묘사 → `enhancePromptForDalle` (Claude) → `generateImageWithDalle`
+  → 프리뷰 → 선택적 `refine`(기존 프롬프트 + 수정 요청) → `saveAsset` → 카탈로그
+- `quality: 'hd'` 기본. character/outfit/prop은 1024x1024 강제, background만 ratio 반영.
+- 에러 `DalleError.kind`: missing-key / content-policy / rate-limit / server / network / invalid-response.
+  정책 위반 시 추가 요청 입력창 자동 포커스.
+- 타입: `DalleAssetType = 'character' | 'background' | 'outfit' | 'prop'`.
+- **openaiService는 Gemini/Flux 경로와 격리** — 본편 이미지 생성에는 관여 안 함.
 
 ### 프롬프트 수정
 - Claude 수정: CutFieldChanges JSON 반환 → buildFinalPrompt 재조립.
@@ -115,7 +126,7 @@ doremi_app_first/
 │   ├── falService.ts        # fal.ai Flux API 클라이언트
 │   ├── supertoneService.ts  # Supertone TTS (BatchAudioModal에서 선택 가능)
 │   ├── typecastService.ts   # Typecast TTS (BatchAudioModal 기본 엔진)
-│   ├── openaiService.ts     # ⚠️ 미구현/준비 중 — 대표캐릭·배경 DALL-E 원본 생성용 예정. 현재 호출처 없음
+│   ├── openaiService.ts     # DALL-E 3 원본 이미지 생성 (캐릭/배경/의상/소품 레퍼런스). API 키 Keychain 자동 로드. DalleError kind 분류
 │   ├── tauriAdapter.ts      # Tauri IPC 브릿지 + emit/listen/openAssetCatalog
 │   └── ai/
 │       ├── aiCore.ts        # AI 공유 헬퍼 + Vision 리사이즈 + MIME 감지
@@ -135,7 +146,8 @@ doremi_app_first/
 │   ├── ImageEditorModal.tsx  # Nano Image Editor (다중 레퍼런스 최대 5개)
 │   ├── CharacterStudio.tsx   # 캐릭터 스튜디오 3컬럼
 │   ├── ProportionStudioModal.tsx # 캐릭터 비율 스튜디오 (등신 조절)
-│   ├── AssetCatalogModal.tsx # 에셋 카탈로그 (모달)
+│   ├── AssetCatalogModal.tsx # 에셋 카탈로그 (모달) + DalleGenerator 연결 버튼
+│   ├── DalleGeneratorModal.tsx # DALL-E 3 원본 생성기 (character/background/outfit/prop)
 │   └── AssetCatalogPage.tsx  # 에셋 카탈로그 (독립 윈도우, AppContext 미사용)
 ├── src-tauri/
 │   ├── src/main.rs           # Rust 백엔드 (유일한 진입점)
@@ -240,7 +252,6 @@ cd ~/Downloads && zip -r doremi_app-backup-$(date +%Y%m%d-%H%M).zip doremi_app_f
 - fix 스크립트는 `.py` 파일 또는 단일 커맨드로 제공할 것 (멀티라인 터미널 붙여넣기 실패함).
 
 ## 현재 작업 큐
-- **OpenAI DALL-E 통합** — `services/openaiService.ts`에 `generateImageWithDalle` 정의만 있음. 대표 캐릭터·배경 원본 이미지 생성용. 호출처 아직 없음, 연결 예정.
 - **Flux 프롬프트 엔진 완성** — `appFluxPromptEngine.ts` (712줄)가 최종 버전(1109줄) 대비 미완. Gemini 품질 확정 후 진행.
 
 ## 호환성 주의 — 기존 프로젝트가 깨지면 안 된다

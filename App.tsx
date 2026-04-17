@@ -286,6 +286,10 @@ export const App: React.FC = () => {
                 isOpen={isDalleGeneratorOpen}
                 onClose={() => setIsDalleGeneratorOpen(false)}
                 initialAssetType={dalleInitialType}
+                onOpenApiKeySettings={() => {
+                    setIsDalleGeneratorOpen(false);
+                    setIsApiKeySettingsOpen(true);
+                }}
                 onAssetSaved={() => {
                     // 에셋 카탈로그 리프레시 신호 (열려있으면)
                     if (IS_TAURI) {

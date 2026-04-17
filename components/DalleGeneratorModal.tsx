@@ -20,6 +20,8 @@ interface DalleGeneratorModalProps {
     onClose: () => void;
     initialAssetType?: DalleAssetType;
     onAssetSaved?: (assetId: string) => void;
+    /** missing-key 에러 시 API 키 설정 모달 여는 콜백 */
+    onOpenApiKeySettings?: () => void;
 }
 
 const TYPE_LABELS: Record<DalleAssetType, string> = {
@@ -37,8 +39,9 @@ const TYPE_HINTS: Record<DalleAssetType, string> = {
 };
 
 export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
-    isOpen, onClose, initialAssetType = 'character', onAssetSaved,
+    isOpen, onClose, initialAssetType = 'character', onAssetSaved, onOpenApiKeySettings,
 }) => {
+    const modificationInputRef = React.useRef<HTMLInputElement>(null);
     const { state, actions } = useAppContext();
 
     // ── 사용자 입력 ──
@@ -147,6 +150,10 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
         } catch (err) {
             if (err instanceof DalleError) {
                 setError({ message: err.message, kind: err.kind });
+                // 정책 위반 시 추가 요청 입력창 자동 포커스 (결과가 있을 때만 refine 가능)
+                if (err.kind === 'content-policy' && result) {
+                    setTimeout(() => modificationInputRef.current?.focus(), 50);
+                }
             } else {
                 setError({ message: err instanceof Error ? err.message : String(err) });
             }
@@ -359,9 +366,33 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                             <span className="font-black">⚠️</span>
                             <div className="flex-1">
                                 <div>{error.message}</div>
-                                {error.kind === 'missing-key' && (
+                                {error.kind === 'content-policy' && result && (
                                     <div className="text-[10px] text-amber-300/60 mt-1">
-                                        사이드바의 "API 키" 버튼에서 등록 가능합니다.
+                                        아래 "추가 요청"에서 민감한 표현을 순화해 재시도하거나, 설명 자체를 바꿔 새로 생성하세요.
+                                    </div>
+                                )}
+                                {error.kind === 'missing-key' && (
+                                    <div className="mt-2">
+                                        {onOpenApiKeySettings ? (
+                                            <button
+                                                onClick={onOpenApiKeySettings}
+                                                className="px-2 py-1 text-[10px] font-bold text-white bg-red-600 hover:bg-red-500 rounded"
+                                            >
+                                                API 키 설정 열기
+                                            </button>
+                                        ) : (
+                                            <div className="text-[10px] text-red-300/60">사이드바의 "API 키" 버튼에서 등록 가능합니다.</div>
+                                        )}
+                                    </div>
+                                )}
+                                {error.kind === 'rate-limit' && (
+                                    <div className="text-[10px] text-red-300/60 mt-1">
+                                        OpenAI 대시보드의 사용량 탭에서 rate limit을 확인할 수 있습니다.
+                                    </div>
+                                )}
+                                {error.kind === 'network' && (
+                                    <div className="text-[10px] text-red-300/60 mt-1">
+                                        방화벽/프록시/VPN 설정도 함께 확인해주세요.
                                     </div>
                                 )}
                             </div>
@@ -408,9 +439,11 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                 </label>
                                 <div className="flex gap-2">
                                     <input
+                                        ref={modificationInputRef}
                                         type="text"
                                         value={modification}
                                         onChange={(e) => setModification(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && modification.trim()) runGenerate('refine'); }}
                                         placeholder='예: "머리를 더 짧게, 안경 추가"'
                                         disabled={isBusy}
                                         className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
