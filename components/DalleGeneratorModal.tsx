@@ -203,6 +203,9 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
 
     const isBusy = isPromptBusy || isGenerating;
 
+    // ⌘+Enter (Mac) / Ctrl+Enter (Win) 단축키 감지 — 각 입력창의 기본 액션 트리거
+    const isCmdEnter = (e: React.KeyboardEvent) => e.key === 'Enter' && (e.metaKey || e.ctrlKey);
+
     if (!isOpen) return null;
 
     return (
@@ -253,7 +256,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                 type="text"
                                 value={request}
                                 onChange={(e) => setRequest(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter' && !isBusy && request.trim()) handleGenerateOrRefinePrompt(); }}
+                                onKeyDown={(e) => { if (isCmdEnter(e) && !isBusy && request.trim()) { e.preventDefault(); handleGenerateOrRefinePrompt(); } }}
                                 placeholder={currentPrompt ? '예: "머리를 더 짧게, 안경 추가"' : REQUEST_HINTS[assetType]}
                                 disabled={isBusy}
                                 className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[12px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
@@ -270,8 +273,8 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                         </div>
                         <p className="text-[9px] text-zinc-600 mt-1">
                             {currentPrompt
-                                ? '현재 프롬프트를 기반으로 수정됩니다. 비우려면 아래 textarea를 지우고 새로 요청.'
-                                : '한국어 OK. Enter로 제출.'}
+                                ? '현재 프롬프트를 기반으로 수정됩니다. ⌘+Enter로 제출.'
+                                : '한국어 OK. ⌘+Enter로 제출.'}
                         </p>
                     </div>
 
@@ -410,7 +413,8 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                     <textarea
                                         value={currentPrompt}
                                         onChange={(e) => setCurrentPrompt(e.target.value)}
-                                        placeholder="위 '요청' 입력 후 [프롬프트 생성]을 누르거나, 여기에 직접 프롬프트를 입력하세요."
+                                        onKeyDown={(e) => { if (isCmdEnter(e) && !isBusy && currentPrompt.trim()) { e.preventDefault(); handleGenerateImage(); } }}
+                                        placeholder="위 '요청' 입력 후 [프롬프트 생성]을 누르거나, 여기에 직접 프롬프트를 입력하세요. ⌘+Enter로 이미지 생성."
                                         disabled={isBusy}
                                         rows={7}
                                         spellCheck={false}
@@ -447,7 +451,8 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                     type="text"
                                     value={assetName}
                                     onChange={(e) => setAssetName(e.target.value)}
-                                    placeholder={isNameSuggesting ? '이름 제안 중...' : `예: ${TYPE_LABELS[assetType]} 시안 A`}
+                                    onKeyDown={(e) => { if (isCmdEnter(e) && !isBusy && !isSaving && result && assetName.trim() && IS_TAURI) { e.preventDefault(); handleSaveAsset(); } }}
+                                    placeholder={isNameSuggesting ? '이름 제안 중...' : `예: ${TYPE_LABELS[assetType]} 시안 A (⌘+Enter로 저장)`}
                                     disabled={isBusy || isSaving || !result}
                                     className="flex-1 px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50 disabled:opacity-50"
                                 />
