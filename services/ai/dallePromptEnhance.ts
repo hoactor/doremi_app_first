@@ -52,33 +52,30 @@ const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
 - 금지: people interacting with the prop, complex scenes, multiple objects`,
 };
 
-// ─── 시스템 프롬프트 (Claude에게 주는 지시) ────────────────────────────
-const SYSTEM_PROMPT = `You are a DALL-E 3 prompt engineer for an animated storytelling app.
+// ─── 상황 생성용 시스템 프롬프트 (Claude에게 주는 지시) ────────────────
+// Claude는 오직 "상황/감정/포즈 phrase"만 영어로 생성. 화풍은 손대지 않음.
+const SITUATION_SYSTEM_PROMPT = `You are a scene phrase writer for DALL-E 3 prompts.
 
-Your job: convert a short Korean user description into a DALL-E 3 image prompt.
+Your ONLY job: convert a short Korean user description into a brief English
+phrase describing the SUBJECT, SITUATION, EMOTION, POSE, and LIGHTING MOOD.
 
-RULES:
-1. Output ONLY the DALL-E 3 English prompt. No explanations, no JSON, no quotes.
-2. Keep the prompt under 400 characters.
-3. Front-load the most important element (subject type + style + key identity).
-4. Use descriptive phrases, not structured sections or markdown headers.
-5. Never include text overlays, speech bubbles, watermarks.
-6. Never describe minors in distress, violence, nudity, or any policy-sensitive content.
-7. If the user's description is too short/vague, invent reasonable defaults that fit the asset type.
-8. The art style block given by the user is mandatory — include it near the front.
+STRICT RULES:
+1. Output ONLY the scene phrase. No explanations, no quotes, no prefix.
+2. Under 250 characters.
+3. Do NOT include any style keywords — no "chibi", "anime", "illustration",
+   "cute style", "sparkling", "pastel", "rendered", "artwork", etc.
+   (Style is handled separately — don't touch it.)
+4. Include: who the subject is, what they are doing, where, emotion, light mood.
+5. Never describe minors in distress, violence, nudity, or policy-sensitive content.
+6. If the user's description is vague, invent a simple pleasant everyday situation.
+7. Never output "character sheet", "multiple views", "turnaround", "color palette",
+   "mannequin" — these trigger sheet layouts.
 
-CHARACTER ASSETS — EXTRA RULES (MANDATORY):
-- Never produce a character reference sheet, turnaround, or multiple views in one image.
-- Always place the character in ONE specific natural everyday scene
-  (park, cafe, street, bedroom, bookstore, etc.). One pose, one composition.
-- Default mood: bright, warm, cheerful, smiling — unless the user specifies otherwise.
-- If the user description lacks a situation, invent a simple pleasant one
-  (e.g., "smiling in a sunlit park", "reading at a cozy cafe window").
-- Do NOT include phrases like "character sheet", "reference sheet", "multiple views",
-  "turnaround", "color palette", "mannequin" — these trigger sheet layouts.
+OUTPUT SHAPE (one natural English phrase):
+"a smiling university student in his 20s walking through a sunlit autumn
+campus, holding a coffee cup, warm afternoon light"
 
-PROMPT SHAPE:
-<asset-type keyword> + <style block> + <subject specifics> + <composition/lighting>`;
+Never prefix with "A/An DALL-E prompt:" or wrap in quotes.`;
 
 // ─── 고정 프롬프트 생성기 ──────────────────────────────────────────────
 // 모달에서 화풍/타입을 고를 때 이 함수로 기본 텍스트를 채워넣고, 사용자는
@@ -91,11 +88,35 @@ PROMPT SHAPE:
  */
 export function buildDefaultFixedPrompt(assetType: DalleAssetType): string {
     const typeInstructions = TYPE_INSTRUCTIONS[assetType].trim();
-    return `# 화풍 (프롬프트 앞쪽에 들어감)
+    return `# 화풍 (이 블록은 DALL-E에 그대로 전송 — Claude가 손대지 않음)
 ${DEFAULT_STYLE_PROMPT}
 
-# 용도별 구도/분위기 지시
+# 용도별 구도/분위기 지시 (Claude가 상황 phrase 만들 때 참고만 함)
 ${typeInstructions}`;
+}
+
+// ─── 고정 프롬프트 파싱 ───────────────────────────────────────────────
+// "# 화풍 ..." / "# 용도별 ..." 섹션을 분리.
+// 사용자가 마커를 지웠거나 바꿨어도 동작하도록 느슨하게 처리.
+
+function parseFixedPrompt(text: string): { styleBlock: string; typeInstructions: string } {
+    const styleMatch = text.match(/#\s*화풍[^\n]*\n([\s\S]*?)(?=\n#\s|$)/);
+    const typeMatch = text.match(/#\s*용도별[^\n]*\n([\s\S]*?)(?=\n#\s|$)/);
+
+    const styleBlock = styleMatch?.[1]?.trim() || text.trim();  // 마커 없으면 전체를 스타일로
+    const typeInstructions = typeMatch?.[1]?.trim() || '';
+
+    return { styleBlock, typeInstructions };
+}
+
+// 이전 생성 프롬프트에서 상황 phrase만 추출 (refine 시 Claude에게 이전 상황만 전달)
+function extractSituationFromPrompt(fullPrompt: string, styleBlock: string): string {
+    if (styleBlock && fullPrompt.startsWith(styleBlock)) {
+        return fullPrompt.slice(styleBlock.length).trim();
+    }
+    // 폴백: 마지막 단락을 상황으로 간주
+    const parts = fullPrompt.split(/\n\n+/);
+    return parts[parts.length - 1]?.trim() || fullPrompt;
 }
 
 // ─── 엔트리 함수 ──────────────────────────────────────────────────────
@@ -103,9 +124,9 @@ ${typeInstructions}`;
 export interface EnhanceOptions {
     userInput: string;              // 사용자가 입력한 짧은 묘사 (한국어 가능)
     assetType: DalleAssetType;
-    /** 사용자가 편집한 고정 프롬프트 블록 (화풍 + 용도 지시) — 모달이 직접 관리 */
+    /** 사용자가 편집한 고정 프롬프트 블록 (화풍 + 용도 지시). 화풍 부분은 verbatim 사용. */
     fixedPrompt: string;
-    /** refine 모드: 기존 DALL-E 프롬프트 + 수정 요청 */
+    /** refine 모드: 기존 프롬프트의 상황 phrase + 수정 요청 */
     refineFrom?: {
         previousPrompt: string;
         modification: string;       // 예: "머리를 더 짧게, 안경 추가"
@@ -118,50 +139,60 @@ export interface EnhanceResult {
 }
 
 /**
- * 사용자 입력 → DALL-E 최적화 프롬프트
- * fixedPrompt(편집 가능)를 그대로 받아 Claude에게 전달.
- * refine 모드면 previousPrompt를 기준으로 수정만 적용.
+ * 2단계 생성:
+ *   1) Claude는 상황/감정/포즈 phrase만 영어로 생성 (화풍 키워드 일절 추가 안 함)
+ *   2) 고정 프롬프트의 "화풍" 부분은 verbatim으로 앞에 붙여 최종 DALL-E 프롬프트 조립
+ *
+ * 이렇게 분리하면 Claude가 형용사를 보태면서 화풍이 매 생성마다 흔들리는 문제가 없어짐.
  */
 export async function enhancePromptForDalle(opts: EnhanceOptions): Promise<EnhanceResult> {
+    const { styleBlock, typeInstructions } = parseFixedPrompt(opts.fixedPrompt);
+
     let userMessage: string;
     if (opts.refineFrom) {
-        // Refine: 기존 프롬프트 유지하면서 수정 지시만 반영
+        const prevSituation = extractSituationFromPrompt(opts.refineFrom.previousPrompt, styleBlock);
         userMessage = `Asset type: ${opts.assetType}
 
-${opts.fixedPrompt}
+Type guidance (how to shape the scene — for your reference only, do not copy literally):
+${typeInstructions}
 
-Previous DALL-E prompt (to be refined, not rewritten from scratch):
+Previous scene phrase (to be refined, not rewritten from scratch):
 """
-${opts.refineFrom.previousPrompt}
+${prevSituation}
 """
 
-User's refinement request (in Korean or English):
+User's refinement request (Korean or English):
 "${opts.refineFrom.modification}"
 
-Output the revised DALL-E 3 prompt. Keep all successful elements of the previous prompt and apply ONLY the changes the user requested. Don't drift the style or composition.`;
+Output the revised English scene phrase only. Apply only what the user requested, keep the rest.`;
     } else {
-        // 신규 생성
         userMessage = `Asset type: ${opts.assetType}
 
-${opts.fixedPrompt}
+Type guidance (how to shape the scene — for your reference only, do not copy literally):
+${typeInstructions}
 
-User description (in Korean or English):
+User description (Korean or English):
 "${opts.userInput}"
 
-Output the DALL-E 3 prompt. The style block above must appear near the front of the prompt.`;
+Output the English scene phrase only.`;
     }
 
-    const res = await callClaude(SYSTEM_PROMPT, userMessage, {
+    const res = await callClaude(SITUATION_SYSTEM_PROMPT, userMessage, {
         temperature: 0.4,
-        maxTokens: 600,
+        maxTokens: 300,
     });
 
-    const prompt = res.text.trim()
+    const situation = res.text.trim()
         .replace(/^["'`]+|["'`]+$/g, '')
-        .replace(/^(DALL-E.{0,20}:|Prompt:)\s*/i, '');
+        .replace(/^(DALL-E.{0,20}:|Prompt:|Scene:)\s*/i, '');
+
+    // 최종 조립: 고정 화풍 블록을 그대로 앞에 + Claude가 만든 상황 phrase
+    const finalPrompt = styleBlock
+        ? `${styleBlock}\n\n${situation}`
+        : situation;
 
     return {
-        prompt,
+        prompt: finalPrompt,
         tokenCount: res.totalTokens,
     };
 }

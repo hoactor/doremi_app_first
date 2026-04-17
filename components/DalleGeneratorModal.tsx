@@ -290,8 +290,10 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                             spellCheck={false}
                             className="w-full px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-300 resize-y focus:outline-none focus:border-orange-500/50 font-mono leading-relaxed"
                         />
-                        <p className="text-[9px] text-zinc-600 mt-1">
-                            이 텍스트가 매 생성마다 Claude에게 "스타일 + 구도 지시"로 전달됩니다. 화풍 변경은 이 텍스트를 직접 수정하세요.
+                        <p className="text-[9px] text-zinc-600 mt-1 leading-relaxed">
+                            <span className="text-zinc-500">"# 화풍"</span> 블록은 DALL-E에 <span className="text-orange-400/80">그대로 전송</span>됩니다 (Claude가 수정 안 함 → 화풍 일관성 보장).
+                            <br />
+                            <span className="text-zinc-500">"# 용도별"</span> 블록은 Claude가 상황/감정 phrase 만들 때의 <span className="text-zinc-400">참고 가이드</span>로만 사용됩니다.
                         </p>
                     </div>
 
