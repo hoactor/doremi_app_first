@@ -755,7 +755,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                             <p className="mt-2 text-white text-sm">{isGeneratingMask ? 'AI 마스크 생성 중...' : localLoadingMessage}</p>
                             <button 
                                 onClick={handleStopLoading}
-                                className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm transition-colors shadow-md"
+                                className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-md text-sm transition-colors shadow-md"
                             >
                                 중지
                             </button>
@@ -849,7 +849,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                         <button
                             onClick={() => onCopyOriginalToCurrent(studioId)}
                             disabled={!originalImage || isLoading}
-                            className="p-2 text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+                            className="p-2 text-white bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
                             title="원본 이미지를 편집창으로 복사"
                         >
                             <DocumentDuplicateIcon className="w-4 h-4" />
@@ -857,7 +857,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                         <button
                             onClick={() => onRevert(studioId)}
                             disabled={!currentImage || !hasBeenEdited || isLoading}
-                            className="p-2 text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+                            className="p-2 text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
                             title="최초로 되돌리기"
                         >
                             <RefreshIcon className="w-4 h-4" />
@@ -865,7 +865,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                         <button
                             onClick={() => onSaveToHistory(studioId)}
                             disabled={!currentImage || isLoading}
-                            className="p-2 text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+                            className="p-2 text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
                             title="히스토리에 저장"
                         >
                             <BookmarkSquareIcon className="w-4 h-4" />
@@ -940,7 +940,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                             onClick={handleEdit}
                             disabled={!currentImage || !(editPrompt || '').trim() || isLoading}
                             title={!currentImage ? "수정할 이미지가 없습니다." : (!(editPrompt || '').trim() ? "프롬프트를 입력하세요." : "현재 이미지를 수정합니다.")}
-                            className="flex-1 flex items-center justify-center py-1.5 text-xs font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            className="flex-1 flex items-center justify-center py-1.5 text-xs font-medium rounded-md text-white bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             <SparklesIcon className="w-4 h-4 mr-1.5" />
                             수정
@@ -949,7 +949,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                             onClick={handleCreate}
                             disabled={!originalImage || !(editPrompt || '').trim() || isLoading}
                             title={!originalImage ? "원본 이미지가 없습니다." : (!(editPrompt || '').trim() ? "프롬프트를 입력하세요." : "원본 캐릭터를 기반으로 새 이미지를 생성합니다.")}
-                            className="flex-1 flex items-center justify-center py-1.5 text-xs font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            className="flex-1 flex items-center justify-center py-1.5 text-xs font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             <PencilIcon className="w-4 h-4 mr-1.5" />
                             생성

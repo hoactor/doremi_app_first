@@ -126,7 +126,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({ isOpen, onClos
           <button
             onClick={handleSubmit}
             disabled={isLoading}
-            className="w-full flex items-center justify-center px-6 py-3 text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50"
+            className="w-full flex items-center justify-center px-6 py-3 text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-500 disabled:opacity-50"
           >
             {isLoading ? <SpinnerIcon className="w-5 h-5 mr-2"/> : null}
             {isLoading ? '생성 중...' : 'AI로 텍스트 렌더링'}

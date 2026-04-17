@@ -179,7 +179,7 @@ const OutfitCard: React.FC<{
                                 <button
                                     onClick={onGeneratePreview}
                                     disabled={preview.imageLoading}
-                                    className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition-colors ${preview.imageLoading ? 'bg-orange-500 cursor-wait' : 'bg-orange-600 hover:bg-orange-700'}`}
+                                    className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md text-white transition-colors ${preview.imageLoading ? 'bg-orange-500 cursor-wait' : 'bg-orange-600 hover:bg-orange-500'}`}
                                 >
                                     {preview.imageLoading ? <SpinnerIcon className="w-4 h-4"/> : <RefreshIcon className="w-4 h-4"/>}
                                     {preview.imageLoading ? '생성 중...' : '재생성'}
@@ -486,7 +486,7 @@ export const CostumeStudioModal: React.FC<CharacterSheetStudioModalProps> = (pro
                                                 disabled={char.isEditingSheet}
                                             />
                                             <div className="flex gap-2">
-                                                <button onClick={() => handleEditSignaturePose(key, editPrompts[key] || '')} disabled={char.isEditingSheet || !(editPrompts[key] || '').trim()} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-md bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-50">
+                                                <button onClick={() => handleEditSignaturePose(key, editPrompts[key] || '')} disabled={char.isEditingSheet || !(editPrompts[key] || '').trim()} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-md bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50">
                                                     {char.isEditingSheet ? <SpinnerIcon className="w-4 h-4"/> : <SparklesIcon className="w-4 h-4"/>}
                                                     {char.isEditingSheet ? '수정 중...' : '수정'}
                                                 </button>
@@ -530,7 +530,7 @@ export const CostumeStudioModal: React.FC<CharacterSheetStudioModalProps> = (pro
                                                 disabled={char.isApplyingCostume}
                                             />
                                             <div className="flex gap-2">
-                                                <button onClick={() => handleEditMannequin(key, editPrompts[key] || '')} disabled={char.isApplyingCostume || !(editPrompts[key] || '').trim()} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-md bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-50">
+                                                <button onClick={() => handleEditMannequin(key, editPrompts[key] || '')} disabled={char.isApplyingCostume || !(editPrompts[key] || '').trim()} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-md bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50">
                                                     {char.isApplyingCostume ? <SpinnerIcon className="w-4 h-4"/> : <SparklesIcon className="w-4 h-4"/>}
                                                     {char.isApplyingCostume ? '수정 중...' : '수정'}
                                                 </button>

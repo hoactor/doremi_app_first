@@ -413,7 +413,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         <div className="flex justify-between items-center p-3 border-b border-zinc-700 flex-shrink-0">
           <h2 className="text-xl font-bold text-white">Nano Image Editor</h2>
           <div className="flex items-center gap-3">
-            <button onClick={() => handleSaveWrapper(url => { onSave(url); onClose(); })} disabled={isLoading} className="px-4 py-2 text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50">
+            <button onClick={() => handleSaveWrapper(url => { onSave(url); onClose(); })} disabled={isLoading} className="px-4 py-2 text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-500 disabled:opacity-50">
               저장 & 닫기
             </button>
             <button onClick={onClose} className="p-2 rounded-full text-zinc-400 hover:bg-zinc-700">
@@ -496,7 +496,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                  <button
                     onClick={handleRunTextEdit}
                     disabled={isLoading || !editPrompt.trim()}
-                    className="w-full mt-2 flex items-center justify-center px-4 py-2.5 text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50"
+                    className="w-full mt-2 flex items-center justify-center px-4 py-2.5 text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-500 disabled:opacity-50"
                 >
                     적용
                 </button>
