@@ -1,26 +1,15 @@
 // services/ai/dallePromptEnhance.ts
 // 짧은 사용자 묘사 → DALL-E 3 최적화 영문 프롬프트
-// 에셋 타입(character/background/outfit/prop)별 템플릿 + 현재 ArtStyle 반영
+// 고정 화풍은 하드코딩된 DEFAULT_STYLE_PROMPT로 통일.
+// 사용자가 모달에서 이 텍스트를 편집해 다른 화풍으로 바꿀 수 있음.
 // 재요청(refine)도 지원: 기존 DALL-E 프롬프트 + 추가 지시 → 수정된 프롬프트
 
 import { callClaude } from '../claudeService';
-import type { ArtStyle } from '../../types';
 import type { DalleAssetType } from '../openaiService';
 
-// ─── 화풍 힌트 (DALL-E 3 용어에 맞게) ─────────────────────────────────
-const ART_STYLE_HINTS: Record<ArtStyle, string> = {
-    'normal':       'clean Korean webtoon, cel-shaded flat colors, black outlines, readable simple composition',
-    'moe':          'moe chibi sticker illustration, flat pastel candy colors, thick brown outlines, no shadows, cute SD proportions',
-    'dalle-chibi':  'premium super-deformed chibi anime, warm amber and rose-gold glow, sparkle particles, soft airbrush shading, dreamy bloom, big head tiny body',
-    'vibrant':      'glamorous idol anime, jewel-tone palette, dramatic stage lighting, glossy polished rendering, mature adult proportions',
-    'kyoto':        'cinematic Kyoto Animation anime, natural sunlight, detailed atmospheric background, thin delicate lines',
-    'custom':       '',
-};
-
-function styleHint(artStyle: ArtStyle, customArtStyle?: string): string {
-    if (artStyle === 'custom' && customArtStyle?.trim()) return customArtStyle.trim();
-    return ART_STYLE_HINTS[artStyle] || ART_STYLE_HINTS['dalle-chibi'];
-}
+// ─── 기본 화풍 프롬프트 (DALL-E 고정 baseline) ─────────────────────────
+// 이 앱의 DALL-E 생성 기본값. 사용자가 모달의 편집 textarea에서 직접 수정 가능.
+export const DEFAULT_STYLE_PROMPT = `A super cute chibi-style character with an oversized round head, tiny body (around 3 heads tall), extremely big sparkling eyes, and puffy round cheeks. The character has a highly expressive face with exaggerated emotions, blushing cheeks, and sweat drops. The style is colorful, clean, and highly expressive, with exaggerated motion effects and a soft pastel background.`;
 
 // ─── 에셋 타입별 구조 지시 ────────────────────────────────────────────
 const TYPE_INSTRUCTIONS: Record<DalleAssetType, string> = {
@@ -96,18 +85,14 @@ PROMPT SHAPE:
 // 그 텍스트를 자유롭게 편집한 뒤 enhancePromptForDalle에 그대로 전달.
 
 /**
- * 현재 화풍 + 에셋 타입 조합에 대한 기본 고정 프롬프트 텍스트 생성.
+ * 기본 고정 프롬프트 텍스트 생성 (DEFAULT_STYLE_PROMPT + 타입별 구도 지시).
  * 이 문자열이 모달의 "고정 프롬프트" 편집 영역의 초기값이 됨.
+ * 사용자는 자유롭게 편집 가능 — 스타일 자체도 바꿀 수 있음.
  */
-export function buildDefaultFixedPrompt(
-    assetType: DalleAssetType,
-    artStyle: ArtStyle,
-    customArtStyle?: string,
-): string {
-    const style = styleHint(artStyle, customArtStyle);
+export function buildDefaultFixedPrompt(assetType: DalleAssetType): string {
     const typeInstructions = TYPE_INSTRUCTIONS[assetType].trim();
     return `# 화풍 (프롬프트 앞쪽에 들어감)
-${style}
+${DEFAULT_STYLE_PROMPT}
 
 # 용도별 구도/분위기 지시
 ${typeInstructions}`;

@@ -13,7 +13,7 @@ import { XIcon, SparklesIcon, SpinnerIcon, RefreshIcon } from './icons';
 import { generateImageWithDalle, DalleError, type DalleAssetType, type DalleGenerateResult } from '../services/openaiService';
 import { enhancePromptForDalle, suggestAssetName, buildDefaultFixedPrompt } from '../services/ai/dallePromptEnhance';
 import { saveAsset, IS_TAURI } from '../services/tauriAdapter';
-import type { ArtStyle, ImageRatio } from '../types';
+import type { ImageRatio } from '../types';
 
 interface DalleGeneratorModalProps {
     isOpen: boolean;
@@ -50,11 +50,11 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     const [showAdvanced, setShowAdvanced] = useState(true);
     const [ratio, setRatio] = useState<ImageRatio>('1:1');
     const [style, setStyle] = useState<'vivid' | 'natural'>('vivid');
-    const [overrideArtStyle, setOverrideArtStyle] = useState<ArtStyle | ''>('');
 
     // ── 고정 프롬프트 (편집 가능) ──
-    // 모달 오픈 시 또는 타입/화풍 변경 시 기본값으로 리셋.
+    // 모달 오픈 시 또는 타입 변경 시 기본값으로 리셋.
     // 사용자가 직접 편집할 수 있으며 생성 시 그대로 Claude에게 전달됨.
+    // 화풍 자체도 이 텍스트 편집으로 바꿈 (별도 화풍 선택기 없음).
     const [fixedPrompt, setFixedPrompt] = useState<string>('');
 
     // ── 생성 상태 ──
@@ -72,8 +72,6 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
     const [isNameSuggesting, setIsNameSuggesting] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    const effectiveArtStyle: ArtStyle = overrideArtStyle || state.artStyle || 'dalle-chibi';
-
     // 모달 열릴 때 초기값 세팅
     useEffect(() => {
         if (isOpen) {
@@ -86,19 +84,18 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
             setAssetName('');
             setRatio(state.imageRatio || '1:1');
             setStyle('vivid');
-            setOverrideArtStyle('');
             // 고정 프롬프트도 기본값으로 리셋
-            setFixedPrompt(buildDefaultFixedPrompt(initialAssetType, state.artStyle || 'dalle-chibi', state.customArtStyle));
+            setFixedPrompt(buildDefaultFixedPrompt(initialAssetType));
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, initialAssetType, state.imageRatio]);
 
-    // 타입 또는 화풍 변경 시 고정 프롬프트 자동 동기화 (모달 열린 상태 한정)
+    // 타입 변경 시 고정 프롬프트 자동 동기화 (모달 열린 상태 한정)
     useEffect(() => {
         if (!isOpen) return;
-        setFixedPrompt(buildDefaultFixedPrompt(assetType, effectiveArtStyle, state.customArtStyle));
+        setFixedPrompt(buildDefaultFixedPrompt(assetType));
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [assetType, overrideArtStyle]);
+    }, [assetType]);
 
     // ═══ 생성 메인 플로우 ═══
     const runGenerate = async (mode: 'new' | 'refine' | 'regenerate') => {
@@ -213,7 +210,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                 name: safeName,
                 tags: {
                     character: null,
-                    artStyle: effectiveArtStyle,
+                    artStyle: 'dalle-chibi',    // DALL-E 에셋은 치비 카테고리로 분류
                     location: null,
                     description: result.revisedPrompt,
                 },
@@ -277,10 +274,10 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                 고정 프롬프트 (화풍 + 구도 지시 · 편집 가능)
                             </label>
                             <button
-                                onClick={() => setFixedPrompt(buildDefaultFixedPrompt(assetType, effectiveArtStyle, state.customArtStyle))}
+                                onClick={() => setFixedPrompt(buildDefaultFixedPrompt(assetType))}
                                 disabled={isBusy}
                                 className="px-2 py-1 text-[9px] text-zinc-500 hover:text-zinc-300 border border-[#2a2a2e] rounded flex items-center gap-1 disabled:opacity-30"
-                                title="현재 타입/화풍의 기본값으로 되돌리기"
+                                title="현재 타입의 기본값으로 되돌리기"
                             >
                                 <RefreshIcon className="w-3 h-3" /> 기본값 복원
                             </button>
@@ -294,7 +291,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                             className="w-full px-3 py-2 bg-[#0a0a0c] border border-[#2a2a2e] rounded-lg text-[11px] text-zinc-300 resize-y focus:outline-none focus:border-orange-500/50 font-mono leading-relaxed"
                         />
                         <p className="text-[9px] text-zinc-600 mt-1">
-                            이 텍스트가 매 생성마다 Claude에게 "스타일 + 구도 지시"로 전달됩니다. 화풍을 바꾸면 기본값이 자동 갱신됩니다.
+                            이 텍스트가 매 생성마다 Claude에게 "스타일 + 구도 지시"로 전달됩니다. 화풍 변경은 이 텍스트를 직접 수정하세요.
                         </p>
                     </div>
 
@@ -364,25 +361,6 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                                             </button>
                                         ))}
                                     </div>
-                                </div>
-                                {/* 화풍 오버라이드 */}
-                                <div>
-                                    <label className="text-[9px] font-bold text-zinc-500 uppercase block mb-1">
-                                        화풍 (기본: 현재 프로젝트 '{state.artStyle || 'dalle-chibi'}')
-                                    </label>
-                                    <select
-                                        value={overrideArtStyle}
-                                        onChange={(e) => setOverrideArtStyle(e.target.value as ArtStyle | '')}
-                                        disabled={isBusy}
-                                        className="w-full px-2 py-1 text-[10px] bg-transparent border border-[#2a2a2e] rounded text-zinc-300"
-                                    >
-                                        <option value="">프로젝트 기본 사용</option>
-                                        <option value="dalle-chibi">dalle-chibi (프리미엄 치비 · 추천)</option>
-                                        <option value="moe">moe (귀요미 치비)</option>
-                                        <option value="vibrant">vibrant (도파민)</option>
-                                        <option value="kyoto">kyoto (감성)</option>
-                                        <option value="normal">normal (정통 웹툰)</option>
-                                    </select>
                                 </div>
                             </div>
                         )}
