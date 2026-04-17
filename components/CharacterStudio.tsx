@@ -43,8 +43,8 @@ const getCharStatus = (char: CharacterDescription): CharacterStatus => {
 
 const STATUS_ICON: Record<CharacterStatus, { icon: string; color: string }> = {
     none: { icon: '✗', color: 'text-red-400' },
-    partial: { icon: '⚠', color: 'text-orange-400' },
-    ready: { icon: '✓', color: 'text-orange-400' },
+    partial: { icon: '⚠', color: 'text-amber-400' },
+    ready: { icon: '✓', color: 'text-emerald-400' },
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -698,7 +698,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                                                         })()}
                                                     </div>
                                                 </div>
-                                                {mismatch && <div className="absolute top-0.5 left-0.5 p-0.5 bg-yellow-600/90 text-white rounded" title="화풍 불일치"><ExclamationTriangleIcon className="w-2.5 h-2.5" /></div>}
+                                                {mismatch && <div className="absolute top-0.5 left-0.5 p-0.5 bg-amber-600/90 text-white rounded" title="화풍 불일치"><ExclamationTriangleIcon className="w-2.5 h-2.5" /></div>}
                                                 {/* ★ 호버 메뉴: 다운로드 + 삭제 */}
                                                 <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-zinc-900/90 rounded-md p-0.5 backdrop-blur-sm border border-zinc-700/50">
                                                     <button onClick={(e) => { e.stopPropagation(); setEditingAsset(asset); }} className="p-1 text-zinc-300 hover:text-orange-300 hover:bg-zinc-700 rounded transition-colors" title="태그 편집"><PencilIcon className="w-3 h-3" /></button>

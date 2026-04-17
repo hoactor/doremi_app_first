@@ -161,7 +161,7 @@ export const AssetLibraryModal: React.FC<AssetLibraryModalProps> = ({
                   </div>
                   <button 
                     onClick={(e) => handleDownload(e, asset)}
-                    className="absolute top-1 left-1 p-1.5 bg-green-600/80 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-1 left-1 p-1.5 bg-emerald-600/80 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                     title="에셋 다운로드"
                   >
                     <DownloadIcon className="w-4 h-4" />

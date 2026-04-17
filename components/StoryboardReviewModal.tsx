@@ -38,7 +38,7 @@ const DraftCutCard: React.FC<{
           v{versionCount}
         </div>
       )}
-      {hasModified && <div className="absolute top-0 right-0 w-2 h-2 rounded-full bg-green-500 border border-zinc-900 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>}
+      {hasModified && <div className="absolute top-0 right-0 w-2 h-2 rounded-full bg-amber-500 border border-zinc-900 shadow-[0_0_8px_rgba(245,158,11,0.6)]"></div>}
       {outfitMismatch && <div className="absolute top-0 left-0 w-2 h-2 rounded-full bg-red-500 border border-zinc-900 shadow-[0_0_8px_rgba(239,68,68,0.6)]" title="의상 매칭 실패"></div>}
     </div>
     <div className="flex-grow min-w-0">
@@ -400,7 +400,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                     <div className="flex items-center gap-3">
                       <span className="text-3xl font-black text-orange-500/50 italic tracking-tighter">#{currentCut.id}</span>
                       <div className="h-1 w-12 bg-zinc-800 rounded-full"></div>
-                      {hasModified && <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-[10px] font-black text-green-400 border border-green-500/30 uppercase tracking-tighter">Modified</span>}
+                      {hasModified && <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-[10px] font-black text-amber-400 border border-amber-500/30 uppercase tracking-tighter">Modified</span>}
                     </div>
                     <div className="flex gap-2">
                       <button

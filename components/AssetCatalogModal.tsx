@@ -416,7 +416,7 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
                                                 {asset.tags?.artStyle && <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-700 text-zinc-400">{STYLE_NAMES[asset.tags.artStyle] || asset.tags.artStyle}</span>}
                                             </div>
                                         </div>
-                                        {styleMismatch && <div className="absolute top-1 left-1 p-1 bg-yellow-600/90 text-white rounded-md" title="화풍 불일치"><ExclamationTriangleIcon className="w-3.5 h-3.5" /></div>}
+                                        {styleMismatch && <div className="absolute top-1 left-1 p-1 bg-amber-600/90 text-white rounded-md" title="화풍 불일치"><ExclamationTriangleIcon className="w-3.5 h-3.5" /></div>}
                                         <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-zinc-900/90 rounded-lg p-1 backdrop-blur-sm border border-zinc-700/50">
                                             <TagEditButton onEdit={() => setEditingAsset(asset)} />
                                             <button onClick={(e) => handleDownloadAsset(e, asset)} className="p-1.5 text-zinc-300 hover:text-white hover:bg-zinc-700 rounded transition-colors" title="다운로드"><DownloadIcon className="w-3.5 h-3.5" /></button>

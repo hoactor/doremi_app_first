@@ -436,7 +436,7 @@ export const CutSplitterModal: React.FC<CutSplitterModalProps> = ({ isOpen, onCl
                         <button
                             onClick={handleConfirm}
                             disabled={isLoading || !audioBuffer || splitPoints.length === 0}
-                            className="group inline-flex items-center justify-center gap-2 px-6 py-2 text-sm font-bold text-white bg-green-600 hover:bg-green-500 rounded-lg disabled:opacity-50"
+                            className="group inline-flex items-center justify-center gap-2 px-6 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50"
                         >
                             <SparklesIcon className="w-5 h-5"/>
                             컷 분할 확정

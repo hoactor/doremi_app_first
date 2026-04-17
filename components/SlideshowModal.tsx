@@ -532,8 +532,8 @@ export const SlideshowModal: React.FC<SlideshowModalProps> = ({
                     </div>
                 )}
                 <canvas ref={previewCanvasRef} width={1080} height={1920} className="w-full h-full object-contain" />
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-300 z-20">
-                    <div className="h-full bg-red-500 transition-all duration-300" style={{ width: `${((currentIndex + 1) / sortedItems.length) * 100}%` }}/>
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-700 z-20">
+                    <div className="h-full bg-orange-500 transition-all duration-300" style={{ width: `${((currentIndex + 1) / sortedItems.length) * 100}%` }}/>
                 </div>
             </div>
             

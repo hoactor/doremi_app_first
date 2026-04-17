@@ -623,7 +623,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
         >
             <div className="flex justify-between items-center flex-shrink-0">
                 <h3 className="text-lg font-bold text-stone-200 flex items-center gap-2">
-                    {isActiveTarget && <div className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse" title="활성 타겟"></div>}
+                    {isActiveTarget && <div className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse" title="활성 타겟"></div>}
                     {title}
                 </h3>
                 {originalImage && (
@@ -813,7 +813,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                     {isTransformed && !isLocalLoading && (
                         <button 
                             onClick={handleCommitTransform}
-                            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-green-600 hover:bg-green-500 text-white shadow-lg transition-all hover:scale-105"
+                            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg transition-all hover:scale-105"
                         >
                             <CheckIcon className="w-5 h-5"/>
                             현재 뷰로 확정
@@ -865,7 +865,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                         <button
                             onClick={() => onSaveToHistory(studioId)}
                             disabled={!currentImage || isLoading}
-                            className="p-2 text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+                            className="p-2 text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
                             title="히스토리에 저장"
                         >
                             <BookmarkSquareIcon className="w-4 h-4" />
@@ -949,7 +949,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
                             onClick={handleCreate}
                             disabled={!originalImage || !(editPrompt || '').trim() || isLoading}
                             title={!originalImage ? "원본 이미지가 없습니다." : (!(editPrompt || '').trim() ? "프롬프트를 입력하세요." : "원본 캐릭터를 기반으로 새 이미지를 생성합니다.")}
-                            className="flex-1 flex items-center justify-center py-1.5 text-xs font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            className="flex-1 flex items-center justify-center py-1.5 text-xs font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                             <PencilIcon className="w-4 h-4 mr-1.5" />
                             생성

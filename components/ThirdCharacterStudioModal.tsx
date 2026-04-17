@@ -212,7 +212,7 @@ export const ThirdCharacterStudioModal: React.FC<ThirdCharacterStudioModalProps>
                     <button
                         onClick={handleConfirmClick}
                         disabled={isLoading || !baseImage || !referenceImage || !characterToReplace.trim()}
-                        className="flex items-center gap-2 px-6 py-3 font-bold text-white bg-green-600 hover:bg-green-500 rounded-lg disabled:opacity-50"
+                        className="flex items-center gap-2 px-6 py-3 font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50"
                     >
                         {isLoading ? <SpinnerIcon className="w-5 h-5"/> : <SparklesIcon className="w-5 h-5"/>}
                         {isLoading ? '교체 중...' : 'AI로 제3인물 교체'}

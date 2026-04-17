@@ -36,7 +36,7 @@ import type { DalleAssetType } from './services/openaiService';
 import { IS_TAURI, openAssetCatalog, listen, resetWindowSize } from './services/tauriAdapter';
 
 const NotificationToast: React.FC<{ notification: Notification, onDismiss: (id: number) => void }> = ({ notification, onDismiss }) => {
-    const colors: Record<string, string> = { error: 'bg-red-500', success: 'bg-green-500', info: 'bg-blue-500', warning: 'bg-orange-500' };
+    const colors: Record<string, string> = { error: 'bg-red-500', success: 'bg-emerald-500', info: 'bg-blue-500', warning: 'bg-amber-500' };
     const bgColor = colors[notification.type] || 'bg-zinc-600';
     return (
         <div className={`flex items-center w-full max-w-sm p-4 text-white ${bgColor} rounded-lg shadow-lg transform transition-all duration-300 animate-fade-in-scale`} role="alert">

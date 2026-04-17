@@ -16,19 +16,31 @@ export const BTN_GHOST =
   'bg-transparent text-orange-400 border border-orange-500/50 hover:bg-orange-500/10 font-medium px-4 py-2 rounded-lg transition-colors ' +
   FOCUS_RING_2;
 
+// 상태/의미 색상 체계
+//   ready/success → emerald  (완료)
+//   partial/modified/warning → amber  (주의/진행중)
+//   error → red
+//   info → blue  (UI 관례, orange(=primary)와 혼동 방지)
+//   primary/accent/focus → orange  (기본 액션)
 export const STATUS = {
   ready: 'text-emerald-400',
+  success: 'text-emerald-400',
   partial: 'text-amber-400',
   modified: 'text-amber-400',
+  warning: 'text-amber-400',
   error: 'text-red-400',
-  info: 'text-orange-400',
+  info: 'text-blue-400',
+  primary: 'text-orange-400',
 } as const;
 
 export const STATUS_BG = {
   ready: 'bg-emerald-500',
+  success: 'bg-emerald-500',
   partial: 'bg-amber-500',
+  warning: 'bg-amber-500',
   error: 'bg-red-500',
-  info: 'bg-orange-500',
+  info: 'bg-blue-500',
+  primary: 'bg-orange-500',
 } as const;
 
 export const INPUT_BASE =
