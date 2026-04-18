@@ -460,6 +460,7 @@ export interface AssetCatalogEntry {
         artStyle: string | null;
         location: string | null;
         description: string | null;
+        extraTypes?: string | null;
     };
     visualDNA: any | null;
     outfitData: any | null;

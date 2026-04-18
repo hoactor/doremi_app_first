@@ -253,7 +253,7 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
 
     // 외부 이미지 파일 선택 (복수)
     const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(e.target.files || []);
+        const files = Array.from(e.target.files || []) as File[];
         if (files.length === 0) return;
         let loaded = 0;
         const results: { dataUrl: string; fileName: string }[] = [];
@@ -274,7 +274,7 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
     // 드래그앤드롭 (복수)
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault(); e.stopPropagation();
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        const files = (Array.from(e.dataTransfer.files) as File[]).filter(f => f.type.startsWith('image/'));
         if (files.length === 0) return;
         let loaded = 0;
         const results: { dataUrl: string; fileName: string }[] = [];

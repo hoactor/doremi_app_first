@@ -144,7 +144,7 @@ export const AssetCatalogPage: React.FC = () => {
 
     // 파일 추가
     const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(e.target.files || []);
+        const files = Array.from(e.target.files || []) as File[];
         files.forEach(file => {
             const reader = new FileReader();
             reader.onload = () => {
@@ -160,7 +160,7 @@ export const AssetCatalogPage: React.FC = () => {
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        const files = (Array.from(e.dataTransfer.files) as File[]).filter(f => f.type.startsWith('image/'));
         files.forEach(file => {
             const reader = new FileReader();
             reader.onload = () => {

@@ -302,7 +302,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
 
   const allCuts = localScenes.flatMap(s => s.cuts);
   // ★ Phase 10: 레지스트리 기반 장소 목록 (레지스트리 우선 + 컷에 있지만 레지스트리에 없는 장소 추가)
-  const cutLocations = [...new Set(allCuts.map(c => c.location))];
+  const cutLocations = [...new Set<string>(allCuts.map(c => c.location))];
   const registry = (locationRegistry && locationRegistry.length > 0) ? locationRegistry : [];
   const allLocations = [...registry, ...cutLocations.filter(loc => !registry.includes(loc))];
 

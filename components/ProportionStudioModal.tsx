@@ -109,7 +109,7 @@ export const ProportionStudioModal: React.FC<ProportionStudioModalProps> = ({
     onUpdateCharacterDescription,
 }) => {
     const charEntries = useMemo(() =>
-        Object.entries(characterDescriptions).filter(([, c]) => c.sourceImageUrl),
+        (Object.entries(characterDescriptions) as [string, CharacterDescription][]).filter(([, c]) => c.sourceImageUrl),
         [characterDescriptions]
     );
 
@@ -230,7 +230,7 @@ ${artPrompt}`;
     };
 
     const handleApplyAll = () => {
-        Object.entries(charStates).forEach(([key, st]) => {
+        (Object.entries(charStates) as [string, CharState][]).forEach(([key, st]) => {
             if (st.markedForReplace && st.previewUrl) {
                 const char = characterDescriptions[key];
                 const history = [...(char.characterSheetHistory || []), st.previewUrl];
@@ -271,7 +271,7 @@ ${artPrompt}`;
         }
     };
 
-    const hasAnyMarked = Object.values(charStates).some(s => s.markedForReplace);
+    const hasAnyMarked = (Object.values(charStates) as CharState[]).some(s => s.markedForReplace);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
