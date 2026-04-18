@@ -426,7 +426,7 @@ export async function resumeFromEnrichedPause(
                 if (meta.characters?.length) parts.push(`등장: ${meta.characters.join(', ')}`);
                 if (meta.direction) parts.push(`연출: ${meta.direction}`);
                 if (meta.imagePrompt) parts.push(`이미지힌트: ${meta.imagePrompt}`);
-                return parts.length ? `[Line ${lineIdx}] ${parts.join(' | ')}` : '';
+                return parts.length ? `[Line ${Number(lineIdx) + 1}] ${parts.join(' | ')}` : '';
             }).filter(Boolean);
             if (hints.length) {
                 scriptWithHints = `${userInputScript}\n\n--- 작가 메타데이터 (참고용, 컷 분할과 연출에 활용) ---\n${hints.join('\n')}`;
