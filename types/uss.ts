@@ -32,6 +32,7 @@ export interface USSCharacter {
     body?: string;               // ★ 체형 (선택): 키, 체형, 특징
     personality: string;
     defaultOutfit: string;
+    outfitByLocation?: { [locationName: string]: string };
     behaviorPatterns?: {
         nervous?: string;
         angry?: string;
@@ -57,4 +58,6 @@ export interface USSCut {
     sfxNote?: string;
     cutType?: 'dialogue' | 'action' | 'reaction' | 'insert' | 'montage';
     originLine?: number;
+    /** AI가 action 외에 별도 시각 묘사를 넣어줄 때 사용 (location 정규화 컨텍스트). */
+    visualDescription?: string;
 }

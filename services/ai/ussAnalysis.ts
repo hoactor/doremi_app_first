@@ -139,7 +139,7 @@ export async function analyzeUSSStructure(
     }
 
     console.log(`[USS] 구조 분석 완료: ${parsed.characters.length}명, ${parsed.locations.length}장소, 막구분 1→${parsed.meta.actBoundaries.setupEndLine}/${parsed.meta.actBoundaries.confrontationEndLine}/${lines.length}`);
-    return { structure: parsed, tokenCount: result.tokenCount || 0 };
+    return { structure: parsed, tokenCount: result.totalTokens || 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -278,7 +278,7 @@ export async function convertNarrationToCutsBatch(
         if (!cut.originLine) cut.originLine = lines[0].lineNum;
     }
 
-    return { cuts: parsed, tokenCount: result.tokenCount || 0 };
+    return { cuts: parsed, tokenCount: result.totalTokens || 0 };
 }
 
 /**

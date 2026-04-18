@@ -56,6 +56,9 @@ const NotificationToast: React.FC<{ notification: Notification, onDismiss: (id: 
 
 /** React 에러 바운더리 — 렌더링 크래시 시 블랙 화면 대신 에러 표시 */
 export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
+    declare state: { hasError: boolean; error: string };
+    declare props: { children: React.ReactNode };
+    declare setState: (s: Partial<{ hasError: boolean; error: string }>) => void;
     constructor(props: any) { super(props); this.state = { hasError: false, error: '' }; }
     static getDerivedStateFromError(error: any) { return { hasError: true, error: String(error?.message || error) }; }
     componentDidCatch(error: any, info: any) { console.error('🔴 React render crash:', error, info?.componentStack); }
@@ -212,7 +215,8 @@ export const App: React.FC = () => {
                 borderStyle: 'border-[6px] border-emerald-500 shadow-[inset_0_0_50px_rgba(16,185,129,0.5)]',
                 badgeLabel: 'FLUX LORA', badgeColor: 'bg-emerald-600 text-white',
             };
-            if (fm === 'flux-2-flex' || fm === 'flux-flex') return {
+            // 'flux-2-flex'는 구 프로젝트 호환용 (현재 정규 키는 'flux-flex')
+            if ((fm as string) === 'flux-2-flex' || fm === 'flux-flex') return {
                 borderStyle: 'border-[6px] border-cyan-500 shadow-[inset_0_0_50px_rgba(6,182,212,0.5)]',
                 badgeLabel: 'FLUX FLEX', badgeColor: 'bg-cyan-600 text-white',
             };
