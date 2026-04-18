@@ -18,8 +18,9 @@ export function createGeneratedImage(params: {
     tag?: 'rough' | 'normal' | 'hq';
     localPath?: string;
     id?: string;
+    artStyleLabel?: string;
 }): GeneratedImage {
-    const { imageUrl, sourceCutNumber, prompt, model, tag = 'hq', localPath, id } = params;
+    const { imageUrl, sourceCutNumber, prompt, model, tag = 'hq', localPath, id, artStyleLabel } = params;
     return {
         id: id || window.crypto.randomUUID(),
         imageUrl,
@@ -30,6 +31,7 @@ export function createGeneratedImage(params: {
         tag,
         model: model as NanoModel,
         createdAt: new Date().toISOString(),
+        ...(artStyleLabel !== undefined ? { artStyleLabel } : {}),
     };
 }
 

@@ -228,6 +228,10 @@ export interface EditableCut {
     directorialIntent?: string;
     context_analysis?: string;
     primary_emotion?: string;
+    useIntenseEmotion?: boolean;
+    sceneDescriptionIntense?: string;
+    characterPoseIntense?: string;
+    characterEmotionAndExpressionIntense?: string;
 }
 
 export interface EditableScene {

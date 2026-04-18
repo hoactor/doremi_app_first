@@ -14,7 +14,7 @@ import {
 
 // ─── Style names ─────────────────────────────────────────────────────
 const STYLE_NAMES: Record<string, string> = {
-    'dalle-chibi': '프리미엄', 'dalle-chibi': 'DALL-E 치비',
+    'dalle-chibi': '프리미엄',
     'ghibli-anime': '지브리 애니메', 'webtoon-line': '웹툰 라인', 'custom': '커스텀',
 };
 
