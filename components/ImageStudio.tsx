@@ -240,7 +240,7 @@ export const ImageStudio: React.FC<ImageStudioProps> = (props) => {
             const maskUrl = await onGenerateMask(currentImage.imageUrl);
             if (abortRef.current) return;
             if (maskUrl && maskingCanvasRef.current) {
-                maskingCanvasRef.current.loadMaskFromUrl(maskUrl);
+                maskingCanvasRef.current.drawMaskFromUrl(maskUrl);
                 setIsMaskingMode(true);
             }
         } catch (error) {

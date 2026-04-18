@@ -77,8 +77,6 @@ interface AppContextType {
         handleEditForCut: (cutNumber: string, img: GeneratedImage, prompt: string, refs: string[], mask?: string) => Promise<void>;
         handleCreateForCut: (cutNumber: string, base: GeneratedImage, prompt: string) => Promise<void>;
         handleConfirmCutAssignment: (cutNumber: string) => void;
-        handleOpenTargetCutSelector: (studioId: 'a') => void;
-        handleConfirmTargetCutSelection: (cutNumber: string) => void;
         handleReplaceBackground: (newBackgroundPrompt: string, cutNumber: string) => Promise<void>;
         handleClearStudioSession: (studioId: 'a') => void;
         handleRevertInStudio: (studioId: 'a') => void;
@@ -858,31 +856,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 updateUIState({ isCutAssignmentModalOpen: false, imageToAssign: null }); 
             }
         },
-        handleConfirmTargetCutSelection: (cutNumber: string) => { 
-            const studioId = stateRef.current.targetCutSelectionStudioId;
-            if (studioId) { 
-                const session = stateRef.current.studioSessions[studioId];
-                
-                // Update history images within session to the new target cut for consistency
-                const nextHistory = session.history.map(img => ({ ...img, sourceCutNumber: cutNumber }));
-                const nextCurrent = session.currentImage ? { ...session.currentImage, sourceCutNumber: cutNumber } : null;
-                const nextOriginal = session.originalImage ? { ...session.originalImage, sourceCutNumber: cutNumber } : null;
-
-                dispatch({ 
-                    type: 'UPDATE_STUDIO_SESSION', 
-                    payload: { 
-                        studioId: studioId, 
-                        data: { 
-                            sourceCutForNextEdit: cutNumber,
-                            history: nextHistory,
-                            currentImage: nextCurrent,
-                            originalImage: nextOriginal
-                        } 
-                    } 
-                }); 
-                updateUIState({ isTargetCutSelectionModalOpen: false, targetCutSelectionStudioId: null }); 
-            } 
-        },
         handleReplaceBackground: async (newBackgroundPrompt: string, cutNumber: string) => {},
         handleClearStudioSession: (sId: 'a') => dispatch({ type: 'CLEAR_STUDIO_SESSION', payload: { studioId: sId } }),
         handleRevertInStudio: (sId: 'a') => dispatch({ type: 'REVERT_STUDIO_SESSION', payload: { studioId: sId } }),
@@ -1036,11 +1009,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         handleOpenGuestSelection: (cutNumber: string) => dispatch({ type: 'START_GUEST_SELECTION', payload: cutNumber }),
         handleOpenAudioSplitter: () => updateUIState({ isAudioSplitterOpen: true }),
         handleConfirmAudioSplit,
-        handleUploadProjectFile: (file: File) => { 
-            const reader = new FileReader(); 
-            reader.onload = (ev) => { try { const parsed = JSON.parse(ev.target?.result as string); dispatch({ type: 'RESTORE_STATE', payload: parsed }); } catch (e) { addNotification('실패', 'error'); } }; 
-            reader.readAsText(file); 
-        },
+        handleUploadProjectFile: (file: File): Promise<void> => new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try { const parsed = JSON.parse(ev.target?.result as string); dispatch({ type: 'RESTORE_STATE', payload: parsed }); }
+                catch (e) { addNotification('실패', 'error'); }
+                finally { resolve(); }
+            };
+            reader.onerror = () => { addNotification('파일 읽기 실패', 'error'); resolve(); };
+            reader.readAsText(file);
+        }),
         handleThirdCharacterEdit: cutEditActions.handleThirdCharacterEdit,
         triggerConfetti,
         handleEditImageWithNanoWithRetry,

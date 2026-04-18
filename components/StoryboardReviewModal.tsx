@@ -309,7 +309,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
   // ★ Phase 10: 의상 매칭 실패 컷 감지
   const outfitMismatchCuts = new Set<string>();
   for (const cut of allCuts) {
-      const characters = cut.characters || [];
+      const characters = cut.character || [];
       for (const name of characters) {
           const key = getCharKey(name);
           if (!key || !characterDescriptions[key]) continue;
@@ -554,7 +554,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
                           <span className="text-red-300/70 text-[10px]">"{currentCut.location}"에 해당하는 의상이 없습니다.</span>
                         </div>
                         <div className="flex gap-2 mt-2">
-                          <button onClick={() => { const chars = currentCut.characters || []; for (const n of chars) { const k = getCharKey(n); if (k && characterDescriptions[k] && (!characterDescriptions[k].locations?.[currentCut.location] || characterDescriptions[k].locations[currentCut.location].trim().length < 3)) { actions.handleGenerateLocationOutfits(k); break; } } }} className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-orange-600/30 border border-orange-500/40 text-orange-300 hover:bg-orange-600/50 transition-colors">자동 생성</button>
+                          <button onClick={() => { const chars = currentCut.character || []; for (const n of chars) { const k = getCharKey(n); if (k && characterDescriptions[k] && (!characterDescriptions[k].locations?.[currentCut.location] || characterDescriptions[k].locations[currentCut.location].trim().length < 3)) { actions.handleGenerateLocationOutfits(k); break; } } }} className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-orange-600/30 border border-orange-500/40 text-orange-300 hover:bg-orange-600/50 transition-colors">자동 생성</button>
                           <button onClick={() => document.getElementById('location-dropdown')?.focus()} className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-zinc-700/50 border border-zinc-600 text-zinc-300 hover:bg-zinc-600/50 transition-colors">장소 변경</button>
                         </div>
                       </div>

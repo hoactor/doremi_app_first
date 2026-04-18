@@ -56,10 +56,7 @@ const NotificationToast: React.FC<{ notification: Notification, onDismiss: (id: 
 
 /** React 에러 바운더리 — 렌더링 크래시 시 블랙 화면 대신 에러 표시 */
 export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
-    declare state: { hasError: boolean; error: string };
-    declare props: { children: React.ReactNode };
-    declare setState: (s: Partial<{ hasError: boolean; error: string }>) => void;
-    constructor(props: any) { super(props); this.state = { hasError: false, error: '' }; }
+    constructor(props: { children: React.ReactNode }) { super(props); this.state = { hasError: false, error: '' }; }
     static getDerivedStateFromError(error: any) { return { hasError: true, error: String(error?.message || error) }; }
     componentDidCatch(error: any, info: any) { console.error('🔴 React render crash:', error, info?.componentStack); }
     render() {

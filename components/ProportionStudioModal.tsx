@@ -324,7 +324,7 @@ ${artPrompt}`;
                 <div className="flex-1 overflow-y-auto p-6">
                     <div className={`grid gap-6 ${charEntries.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
                         {charEntries.map(([key, char]) => {
-                            const st = charStates[key] || { ratio: defaultRatio, previewUrl: null, isGenerating: false, markedForReplace: false, error: null };
+                            const st: CharState = charStates[key] || { ratio: defaultRatio, previewUrl: null, isGenerating: false, markedForReplace: false, error: null, savedToAsset: false };
                             const refUrl = getCurrentRef(char);
 
                             return (
