@@ -51,8 +51,20 @@ ${loglineHint}
      * 건물·장소 자체가 다름 (집 ≠ 옷가게 ≠ 카페 ≠ 회사)
      * 장시간 체류 이동 수단 (자동차 안, 비행기 안)
    - 표면 통과 공간(복도, 엘리베이터, 계단)은 인접 주요 장소로 흡수. 별도 장소로 만들지 말 것.
-   - 중복 없이, 등장 순서대로. 한국어 문자열 배열.
+   - 중복 없이, 등장 순서대로.
    - 시간 축(오늘/내일/회상)은 아래 sceneLayers에서 처리. locations에는 **순수 공간**만.
+   - **출력 형식: 객체 배열 [{ name, category, description? }]**
+   - **category 값 (이 7종 중 하나만 사용):**
+     * "private_home" — 본인 집/방/본인 공간 (홈웨어·파자마 가능)
+     * "visiting_home" — 친척집/지인집/외가 (방문 중, 외출복 유지 상태)
+     * "public_indoor" — 카페·식당·옷가게·서점·마트 등 상업/공공 실내
+     * "public_outdoor" — 공원·거리·광장·해변·놀이터 등 외부 공간
+     * "transit" — 자동차·지하철·비행기·택시 등 이동 수단
+     * "formal" — 회사·공항·병원·예식장·학교·관공서 등 격식/공식
+     * "other" — 위 어디에도 해당 안 될 때만 (최대한 지양)
+   - description은 선택 (UI 노출용 한 줄 메모, 없어도 됨)
+   - **category 판단 기준:** 캐릭터가 그 장소에서 어떤 의상을 입을지가 카테고리로 결정됨.
+     "파자마 가능" = private_home / "방문자 상태" = visiting_home / "외출복 기본" = public_indoor·public_outdoor·transit·formal.
 9. **sceneLayers**: 대본에서 감지되는 시간/서사 레이어 배열.
    - **"현재" 레이어는 반드시 포함.**
    - 시간 경과 감지: "다음날", "며칠 후", "1주일 뒤", "내일 아침" → 별도 레이어
@@ -86,7 +98,13 @@ ${loglineHint}
   "turningPoints": [N, M],
   "colorMood": "...",
   "pacing": "...",
-  "locations": ["집", "할머니집", ...],
+  "locations": [
+    { "name": "집", "category": "private_home" },
+    { "name": "할머니집", "category": "visiting_home" },
+    { "name": "옷가게", "category": "public_indoor" },
+    { "name": "공항", "category": "formal" },
+    { "name": "자동차 안", "category": "transit" }
+  ],
   "sceneLayers": [
     { "id": "현재", "label": "현재" },
     { "id": "회상_어린시절", "label": "회상 (어린시절)", "timeDelta": "과거 15년", "isFlashback": true }
@@ -197,10 +215,11 @@ export const analyzeCharacterBible = async (
     speakerGender?: 'male' | 'female'
 ): Promise<{ bibles: CharacterBible[]; tokenCount: number }> => {
 
-    // ★ Phase 5-c: 의상 세션(outfitSessions) 기반 의상 생성.
-    // 레거시 프로젝트(outfitSessions 없음)는 Step 1 후처리에서 자동 생성 (각 location × "현재").
+    // ★ Phase 5-c + 7-c: 의상 세션(outfitSessions) 기반 + LocationEntry category 기반 전환 규칙.
     const sessions = scenarioAnalysis.outfitSessions || [];
     const layers = scenarioAnalysis.sceneLayers || [{ id: '현재', label: '현재' }];
+    const locEntries = scenarioAnalysis.locations || [];
+    const locCategoryMap = new Map(locEntries.map(l => [l.name, l.category]));
     const sessionKeys = sessions.map(s => `${s.location}::${s.layerId}`);
     const sessionCount = sessions.length;
     const sessionTable = sessions.map(s => {
@@ -211,11 +230,12 @@ export const analyzeCharacterBible = async (
         if (layer?.isImagined) flags.push('상상');
         if (layer?.timeDelta) flags.push(layer.timeDelta);
         const flagStr = flags.length ? ` [${flags.join(', ')}]` : '';
-        return `- "${s.location}::${s.layerId}" (${s.location} / ${layerLabel}${flagStr}, lines ${s.lineRange[0]}~${s.lineRange[1]})`;
+        const cat = locCategoryMap.get(s.location) || 'other';
+        return `- "${s.location}::${s.layerId}" (${s.location} [${cat}] / ${layerLabel}${flagStr}, lines ${s.lineRange[0]}~${s.lineRange[1]})`;
     }).join('\n');
 
     const outfitSessionBlock = sessionCount > 0
-        ? `\n# [필수] 의상 세션 목록 (Outfit Sessions)\n각 캐릭터의 outfitRecommendations는 아래 ${sessionCount}개 세션 모두에 대해 키를 가져야 한다.\n키 형식은 반드시 "{location}::{layerId}" (예: "집::현재", "할머니집::회상_어린시절").\n\n${sessionTable}\n`
+        ? `\n# [필수] 의상 세션 목록 (Outfit Sessions)\n각 캐릭터의 outfitRecommendations는 아래 ${sessionCount}개 세션 모두에 대해 키를 가져야 한다.\n키 형식은 반드시 "{location}::{layerId}" (예: "집::현재", "할머니집::회상_어린시절").\n각 세션명 뒤의 [카테고리]가 의상 전환의 기본 축이다 (아래 매트릭스 참조).\n\n${sessionTable}\n`
         : `\n# 장소 정보 없음 — outfitRecommendations 키는 대본에 등장하는 장소별 "{장소}::현재" 형식으로 생성하라.\n`;
 
     const prompt = `
@@ -246,13 +266,53 @@ ${outfitSessionBlock}
 # [필수] 의상 일관성 규칙 (Outfit Consistency Laws)
 1. **같은 세션 = 같은 의상.** 한 캐릭터가 같은 outfitSession(즉 같은 location+layerId)에 여러 번 등장해도 의상 동일.
 2. **같은 장소, 다른 레이어는 구분.** "엄마집::현재"와 "엄마집::회상_어린시절"은 다른 세션 → 의상 달라도 됨 (회상은 시대·연령 반영).
-3. **장소 간 이동 중 의상 유지.** 같은 layerId 안에서 "집::현재" → "옷가게::현재"로 이동하면 옷가게에서도 집 의상 그대로 (쇼핑 도중 갈아입는 씬이 대본에 명시되지 않는 한).
-4. **감정 변화로 의상 바꾸지 말 것.** 슬픔·분노·긴장은 소품·표정·자세·조명으로 표현. 의상은 고정.
-5. **의상 변화 허용 신호:** 시간 경과(아침→저녁), 샤워/갈아입는 씬 대본 명시, 이벤트 전환(출근/외출/파티), 계절·상황 변화. 이 신호는 sceneLayers로 이미 분리돼 있으므로 **같은 layerId 안에서는 의상 급변 금지.**
-6. **회상/상상 레이어의 의상:**
+3. **감정 변화로 의상 바꾸지 말 것.** 슬픔·분노·긴장은 소품·표정·자세·조명으로 표현. 의상은 고정.
+4. **회상/상상 레이어의 의상:**
    - isFlashback=true → 해당 시대·연령·맥락의 의상 (10년 전 → 그때 유행, 어린시절 → 교복/아동복).
    - isImagined=true → 캐릭터의 이상적 자기 이미지 반영 가능.
    - 현재 레이어의 의상과 명백히 달라야 함 (톤·스타일·시대감).
+
+# [필수] 장소 카테고리 기반 의상 전환 매트릭스 (Phase 7-c)
+
+## 카테고리별 기본 의상 상태
+- **private_home** (본인 집/방/본인 공간) → 홈웨어·실내복. 시간·상황 따라 파자마 가능.
+  * 아침 기상 직후 = 파자마 / 잠옷
+  * 평상시 실내 = 편한 홈웨어 (티셔츠·추리닝 등)
+  * 저녁 귀가 후 = 홈웨어
+- **visiting_home** (친척집/지인집/외가) → 외출복 유지 (방문 중, 실내복 갈아입지 않음)
+- **public_indoor** (카페·옷가게·식당 등) → 외출복
+- **public_outdoor** (공원·거리·해변 등) → 외출복 + 계절 외투 (코트/자켓/카디건/스카프)
+- **transit** (자동차·지하철·비행기) → 직전 방문 목적지의 외출복 유지
+- **formal** (회사·공항·병원·예식장) → 비즈니스 캐주얼 또는 포멀
+- **other** → public_indoor처럼 취급
+
+## 전환 매트릭스 (FROM category → TO category)
+대본의 cut 순서대로 outfitSession 간 전환이 발생할 때 다음 규칙 적용:
+
+| FROM \\ TO          | private | visiting | indoor | outdoor | transit | formal |
+|---------------------|---------|----------|--------|---------|---------|--------|
+| **private_home**    | 유지    | 완전교체 | 완전교체| 완전교체 | 완전교체 | 완전교체 |
+| **visiting_home**   | 귀가변경| 유지     | 유지   | 외투추가 | 유지    | 완전교체 |
+| **public_indoor**   | 귀가변경| 유지     | 유지   | 외투추가 | 유지    | 완전교체 |
+| **public_outdoor**  | 귀가변경| 유지     | 외투제거| 유지    | 유지    | 완전교체 |
+| **transit**         | 귀가변경| 유지     | 외투제거| 외투착용 | 유지    | 완전교체 |
+| **formal**          | 귀가변경| 유지     | 유지   | 외투추가 | 유지    | 유지   |
+
+## 전환 의미
+- **유지** = 정확히 같은 의상
+- **외투 추가** = 하위 의상 동일, 외투(코트/자켓/니트)만 덧입음
+- **외투 제거** = 실내 진입 시 외투 벗기
+- **완전 교체** = 상의·하의·신발 전부 다른 의상 (카테고리 간 맥락 차이 표현)
+- **귀가 변경** = 외출복 → 홈웨어로 교체 (집 도착 시)
+
+## 특수 룰 (override)
+- **파자마 → 어디든 외출** = 반드시 완전 교체 (파자마로 외출 불가)
+- **대본에 "옷 갈아입는 씬" 명시** = 룰과 무관하게 대본 따름
+- **같은 (location, layerId) 세션 내** = 유지 (전환 발생 안 함)
+- **캐릭터 정체성은 레퍼런스 이미지가 담당** → 의상이 세션마다 완전히 달라져도 OK. hair·face·baseAppearance와만 어긋나지 않으면 됨.
+
+## 모호할 때 기본값
+룰 적용이 애매하면 **"완전 교체"를 기본으로**. 현실성 우선.
 
 # [필수] 완전 커버리지 (Complete Coverage)
 - 각 캐릭터의 outfitRecommendations는 **위 의상 세션 목록의 모든 키 ${sessionCount}개에 대해 항목을 생성**해야 한다.
@@ -403,7 +463,14 @@ ${scenarioAnalysis.locations?.length ? `
 # [중요] 장소 레지스트리 — location 필드 강제
 각 컷의 location 필드는 반드시 다음 목록에서 선택하라.
 새로운 장소명을 만들지 마라 (예: "실내", "집" 등 임의 이름 금지).
-장소 목록: ${scenarioAnalysis.locations.map(l => l.name).join(', ')}
+장소 목록 (이름 [카테고리]):
+${scenarioAnalysis.locations.map(l => `- ${l.name} [${l.category}]`).join('\n')}
+
+카테고리 참고 (컷 설계 시 활용):
+- private_home / visiting_home = 실내, 보통 넉넉한 프레이밍 가능
+- public_indoor / public_outdoor = 외부, establish 샷 고려
+- transit = 좁은 공간, close-up 위주
+- formal = 격식, 정돈된 구도
 ` : ''}
 ${(scenarioAnalysis.sceneLayers?.length ?? 0) > 1 || (scenarioAnalysis.outfitSessions?.length ?? 0) > 0 ? `
 # [중요] 시간/서사 레이어 — sceneLayerId 필드 필수
