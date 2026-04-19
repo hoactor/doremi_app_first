@@ -75,7 +75,7 @@ export function createCutEditActions(h: CutEditActionHelpers) {
         const target = stateRef.current.generatedContent?.scenes.flatMap((s: any) => s.cuts).find((c: Cut) => c.cutNumber === cutNumber);
         const { characterDescriptions } = stateRef.current;
         if (target) {
-            const mechanicalOutfit = buildMechanicalOutfit(names, characterDescriptions, target.location);
+            const mechanicalOutfit = buildMechanicalOutfit(names, characterDescriptions, target.location, { sceneLayerId: target.sceneLayerId });
             const nextCut = { ...target, characters: names, characterOutfit: mechanicalOutfit };
             dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { characters: names, characterOutfit: mechanicalOutfit, imagePrompt: calculateFinalPrompt(nextCut) } } });
         }

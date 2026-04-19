@@ -171,7 +171,7 @@ export const StoryboardReviewModal: React.FC<StoryboardReviewModalProps> = ({ is
             const newCut = { ...cut, ...updates };
             // Automatic profile assignment logic for CAST changes
             if (updates.character) {
-              newCut.characterOutfit = buildMechanicalOutfit(updates.character || [], characterDescriptions, newCut.location, { useKorean: true });
+              newCut.characterOutfit = buildMechanicalOutfit(updates.character || [], characterDescriptions, newCut.location, { useKorean: true, sceneLayerId: newCut.sceneLayerId });
             }
             return newCut;
           }

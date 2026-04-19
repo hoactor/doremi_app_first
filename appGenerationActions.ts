@@ -374,7 +374,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
 
             // characters 변경 시 characterOutfit 재조립
             if (fieldChanges.characters) {
-                merged.characterOutfit = buildMechanicalOutfit(chars, s.characterDescriptions, cut.location);
+                merged.characterOutfit = buildMechanicalOutfit(chars, s.characterDescriptions, cut.location, { sceneLayerId: cut.sceneLayerId });
             }
             const promptCtx: PromptContext = { characterDescriptions: s.characterDescriptions, locationVisualDNA: s.locationVisualDNA || {}, cinematographyPlan: s.cinematographyPlan || null, imageRatio: s.imageRatio || '1:1', artStyle: s.artStyle };
             const newPrompt = sanitizeChildSafety(buildFinalPrompt(merged, promptCtx));

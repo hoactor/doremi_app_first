@@ -29,7 +29,7 @@ export function createCharacterActions(h: CharacterActionHelpers) {
             const updatedScenes = generatedContent.scenes.map((scene: any) => ({
                 ...scene,
                 cuts: scene.cuts.map((cut: any) => {
-                    const newOutfit = buildMechanicalOutfit(cut.characters || [], characterDescriptions, cut.location) || cut.characterOutfit;
+                    const newOutfit = buildMechanicalOutfit(cut.characters || [], characterDescriptions, cut.location, { sceneLayerId: cut.sceneLayerId }) || cut.characterOutfit;
                     const updatedCut = { ...cut, characterOutfit: newOutfit };
                     updatedCut.imagePrompt = calculateFinalPrompt(updatedCut);
                     return updatedCut;

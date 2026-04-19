@@ -60,7 +60,7 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
                     const isModified = modifiedCutIds.has(cut.id);
 
                     // --- [정규화 1단계] 기계적 의상/헤어 동기화 ---
-                    const mechanicalOutfit = buildMechanicalOutfit(cut.character || [], characterDescriptions, cut.location, { fallbackUnknown: true });
+                    const mechanicalOutfit = buildMechanicalOutfit(cut.character || [], characterDescriptions, cut.location, { fallbackUnknown: true, sceneLayerId: cut.sceneLayerId });
 
                     // --- [정규화 2단계] 장소 설명 자동 완성 ---
                     let finalLocationDescription = cut.locationDescription;
@@ -228,7 +228,7 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
             const syncedDraft = editableStoryboard.map((scene: any) => ({
                 ...scene,
                 cuts: scene.cuts.map((cut: any) => {
-                    return { ...cut, characterOutfit: buildMechanicalOutfit(cut.character || [], characterDescriptions, cut.location) };
+                    return { ...cut, characterOutfit: buildMechanicalOutfit(cut.character || [], characterDescriptions, cut.location, { sceneLayerId: cut.sceneLayerId }) };
                 })
             }));
             dispatch({ type: 'SET_EDITABLE_STORYBOARD', payload: syncedDraft });

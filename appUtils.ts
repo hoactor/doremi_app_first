@@ -42,6 +42,8 @@ export interface OutfitBuildOptions {
     fallbackUnknown?: boolean;
     /** 한국어 의상 사용 (StoryboardReviewModal용): true → koreanLocations/koreanBaseAppearance */
     useKorean?: boolean;
+    /** Phase 5-d: 시간/서사 레이어. 없으면 "현재" 가정. 복합 키 "loc::layerId" 우선 조회. */
+    sceneLayerId?: string;
 }
 
 export function buildMechanicalOutfit(
@@ -50,7 +52,8 @@ export function buildMechanicalOutfit(
     location: string,
     options: OutfitBuildOptions = {},
 ): string {
-    const { fallbackUnknown = false, useKorean = false } = options;
+    const { fallbackUnknown = false, useKorean = false, sceneLayerId } = options;
+    const layerId = sceneLayerId || '현재';
     const parts: string[] = [];
 
     names.forEach(name => {
@@ -61,11 +64,20 @@ export function buildMechanicalOutfit(
         if (key && characterDescriptions[key]) {
             const desc = characterDescriptions[key];
 
+            // Phase 5-d: 복합 키 → "loc::현재" → 레거시 평문 → baseAppearance 순서 폴백
             let outfitText: string;
             if (useKorean) {
-                outfitText = desc.koreanLocations?.[location] || desc.koreanBaseAppearance || '기본 의상';
+                outfitText = desc.koreanLocations?.[`${location}::${layerId}`]
+                          || desc.koreanLocations?.[`${location}::현재`]
+                          || desc.koreanLocations?.[location]
+                          || desc.koreanBaseAppearance
+                          || '기본 의상';
             } else {
-                outfitText = desc.locations?.[location] || desc.locations?.['기본 의상'] || desc.baseAppearance || 'standard outfit';
+                outfitText = desc.locations?.[`${location}::${layerId}`]
+                          || desc.locations?.[`${location}::현재`]
+                          || desc.locations?.[location]
+                          || desc.baseAppearance
+                          || 'standard outfit';
             }
             parts.push(`[${name}: ${outfitText}]`);
         } else if (fallbackUnknown) {
