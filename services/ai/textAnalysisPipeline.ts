@@ -195,9 +195,26 @@ export const analyzeCharacterBible = async (
     speakerGender?: 'male' | 'female'
 ): Promise<{ bibles: CharacterBible[]; tokenCount: number }> => {
 
-    const locationList = (scenarioAnalysis.locations && scenarioAnalysis.locations.length > 0)
-        ? `\n# [중요] 장소 레지스트리 (Location Registry)\n아래 목록은 시나리오 분석에서 확정된 정규 장소명이다.\noutfitRecommendations의 키는 반드시 이 목록의 장소명을 그대로 사용하라.\n새로운 장소명을 만들지 마라. 목록에 없는 장소에 대한 의상은 생성하지 마라.\n장소 목록: ${scenarioAnalysis.locations.join(', ')}\n`
-        : '';
+    // ★ Phase 5-c: 의상 세션(outfitSessions) 기반 의상 생성.
+    // 레거시 프로젝트(outfitSessions 없음)는 Step 1 후처리에서 자동 생성 (각 location × "현재").
+    const sessions = scenarioAnalysis.outfitSessions || [];
+    const layers = scenarioAnalysis.sceneLayers || [{ id: '현재', label: '현재' }];
+    const sessionKeys = sessions.map(s => `${s.location}::${s.layerId}`);
+    const sessionCount = sessions.length;
+    const sessionTable = sessions.map(s => {
+        const layer = layers.find(l => l.id === s.layerId);
+        const layerLabel = layer?.label || s.layerId;
+        const flags: string[] = [];
+        if (layer?.isFlashback) flags.push('회상');
+        if (layer?.isImagined) flags.push('상상');
+        if (layer?.timeDelta) flags.push(layer.timeDelta);
+        const flagStr = flags.length ? ` [${flags.join(', ')}]` : '';
+        return `- "${s.location}::${s.layerId}" (${s.location} / ${layerLabel}${flagStr}, lines ${s.lineRange[0]}~${s.lineRange[1]})`;
+    }).join('\n');
+
+    const outfitSessionBlock = sessionCount > 0
+        ? `\n# [필수] 의상 세션 목록 (Outfit Sessions)\n각 캐릭터의 outfitRecommendations는 아래 ${sessionCount}개 세션 모두에 대해 키를 가져야 한다.\n키 형식은 반드시 "{location}::{layerId}" (예: "집::현재", "할머니집::회상_어린시절").\n\n${sessionTable}\n`
+        : `\n# 장소 정보 없음 — outfitRecommendations 키는 대본에 등장하는 장소별 "{장소}::현재" 형식으로 생성하라.\n`;
 
     const prompt = `
 # Role: 캐릭터 디자이너 / 캐스팅 디렉터
@@ -206,7 +223,7 @@ export const analyzeCharacterBible = async (
 # 시나리오 분석 결과 (참고):
 - 장르/톤: ${scenarioAnalysis.genre} / ${scenarioAnalysis.tone}
 - 컬러 무드: ${scenarioAnalysis.colorMood}
-${locationList}
+${outfitSessionBlock}
 # 각 캐릭터별 필수 항목:
 1. **koreanName**: 한국어 이름
 2. **canonicalName**: 영어 정규 이름 (예: "Juli", "Minho"). 대본의 한국어 이름을 로마자 변환하라. 이 이름이 이후 모든 이미지 프롬프트에서 캐릭터를 식별하는 유일한 키가 된다.
@@ -220,18 +237,54 @@ ${locationList}
    - relationships: { "상대 canonicalName": "관계 설명" } — 대본에 나오는 인물 간 역학. 키는 반드시 상대의 canonicalName(영어)을 사용.
    - physicalMannerisms: 걸음걸이, 자세, 습관 등
    - voiceCharacter: 목소리 특징
-7. **outfitRecommendations**: 장소별 의상 추천
-   - { "장소명": { "description": "영어 의상 묘사 (색상 hex 포함)", "reasoning": "이유(한국어)" } }
-   - CRITICAL: description에는 순수 의상(옷, 신발, 악세서리)만 기술하라. 헤어스타일, 얼굴, 체형 묘사를 절대 포함하지 마라. (별도 필드에서 처리됨)
+7. **outfitRecommendations**: **의상 세션별** 의상 추천
+   - 형식: { "{location}::{layerId}": { "description": "영어 의상 묘사 (색상 hex 포함)", "reasoning": "이유(한국어)" } }
+   - CRITICAL: description에는 순수 의상(옷, 신발, 악세서리)만. 헤어스타일·얼굴·체형 묘사 절대 금지.
+
+# [필수] 의상 일관성 규칙 (Outfit Consistency Laws)
+1. **같은 세션 = 같은 의상.** 한 캐릭터가 같은 outfitSession(즉 같은 location+layerId)에 여러 번 등장해도 의상 동일.
+2. **같은 장소, 다른 레이어는 구분.** "엄마집::현재"와 "엄마집::회상_어린시절"은 다른 세션 → 의상 달라도 됨 (회상은 시대·연령 반영).
+3. **장소 간 이동 중 의상 유지.** 같은 layerId 안에서 "집::현재" → "옷가게::현재"로 이동하면 옷가게에서도 집 의상 그대로 (쇼핑 도중 갈아입는 씬이 대본에 명시되지 않는 한).
+4. **감정 변화로 의상 바꾸지 말 것.** 슬픔·분노·긴장은 소품·표정·자세·조명으로 표현. 의상은 고정.
+5. **의상 변화 허용 신호:** 시간 경과(아침→저녁), 샤워/갈아입는 씬 대본 명시, 이벤트 전환(출근/외출/파티), 계절·상황 변화. 이 신호는 sceneLayers로 이미 분리돼 있으므로 **같은 layerId 안에서는 의상 급변 금지.**
+6. **회상/상상 레이어의 의상:**
+   - isFlashback=true → 해당 시대·연령·맥락의 의상 (10년 전 → 그때 유행, 어린시절 → 교복/아동복).
+   - isImagined=true → 캐릭터의 이상적 자기 이미지 반영 가능.
+   - 현재 레이어의 의상과 명백히 달라야 함 (톤·스타일·시대감).
+
+# [필수] 완전 커버리지 (Complete Coverage)
+- 각 캐릭터의 outfitRecommendations는 **위 의상 세션 목록의 모든 키 ${sessionCount}개에 대해 항목을 생성**해야 한다.
+- 대본에 그 캐릭터가 해당 세션에 등장하지 않더라도 "만약 등장한다면" 기준으로 맥락 추정 생성.
+- reasoning에 "대본 비등장, {성격·관계·상황 근거}" 명시.
+- **스킵 절대 금지.** 출력 직전 self-check: 각 캐릭터의 outfitRecommendations 키 개수 = ${sessionCount}개인가?
+
+# [필수] 캐릭터 간 색상 충돌 방지
+- 같은 세션에서 여러 캐릭터가 모일 때 의상 색상 hex가 서로 명확히 구분되도록 할 것.
+- 주요 색 영역이 겹치면 (둘 다 회색 상의 등) 강세 색·패턴·액세서리로 차별화.
 
 # 규칙:
 - behaviorPatterns의 값은 반드시 "눈에 보이는 신체 반응"으로. 추상적 서술 금지.
 - outfitRecommendations의 description은 반드시 영어. reasoning은 한국어.
-- 장소 레지스트리가 주어졌으면 그 장소명만 키로 사용할 것. 없으면 대본에 명시된 장소마다 의상 1개씩.
+- outfitRecommendations의 키 형식은 반드시 "{location}::{layerId}". 단일 "{location}" 형태 금지.
+${sessionCount > 0 ? `- 위 목록에 없는 조합 키를 새로 만들지 말 것. 정확히 위 ${sessionCount}개 키만 사용.` : ''}
 ${speakerGender ? `\n# [필수] 화자(나레이터) 성별 지정: ${speakerGender}\n- 이 대본의 1인칭 화자("나", "내")는 반드시 ${speakerGender === 'male' ? '남성(male)' : '여성(female)'}이다.\n- 화자 캐릭터의 gender 필드는 반드시 "${speakerGender}"로 설정하라.\n- 대본 내용이 모호하더라도 이 설정을 절대 변경하지 마라.` : ''}
 
 # 출력 형식 (JSON만):
-{ "bibles": [ { "koreanName": "줄리", "canonicalName": "Juli", "aliases": ["줄리", "딸", "아이"], "gender": "female", "baseAppearance": "...", ... } ] }
+{
+  "bibles": [
+    {
+      "koreanName": "줄리",
+      "canonicalName": "Juli",
+      "aliases": ["줄리", "딸", "아이"],
+      "gender": "female",
+      "baseAppearance": "...",
+      "personalityProfile": { ... },
+      "outfitRecommendations": {
+${sessionKeys.length > 0 ? sessionKeys.map(k => `        "${k}": { "description": "...", "reasoning": "..." }`).join(',\n') : '        "{장소}::현재": { "description": "...", "reasoning": "..." }'}
+      }
+    }
+  ]
+}
 
 # 대본:
 \`\`\`
@@ -246,6 +299,32 @@ ${script}
     );
 
     const parsed = parseJsonResponse<{ bibles: CharacterBible[] }>(result.text, 'analyzeCharacterBible');
+
+    // ── Phase 5-c: 의상 세션 커버리지 검증 + 레거시 키 호환 ──
+    // AI가 레거시 형식(그냥 "집") 또는 신규 형식("집::현재") 중 섞어서 낼 수 있음.
+    // 레거시 키가 있으면 기본 "현재" 레이어에 해당한다고 가정하고 "loc::현재"로 업그레이드.
+    for (const bible of parsed.bibles) {
+        if (!bible.outfitRecommendations) bible.outfitRecommendations = {};
+        const rec = bible.outfitRecommendations;
+
+        // 레거시 키 업그레이드: "집" → "집::현재" (신규 키 없을 때만)
+        for (const key of Object.keys(rec)) {
+            if (!key.includes('::')) {
+                const upgraded = `${key}::현재`;
+                if (!rec[upgraded]) rec[upgraded] = rec[key];
+                // 원본 레거시 키는 삭제하지 않음 — 구 resolver 호환용
+            }
+        }
+
+        // 완전 커버리지 검증: sessionKeys 중 누락된 것 경고 (Step 5-e에서 validatePresetData가 최종 검증)
+        if (sessionCount > 0) {
+            const missing = sessionKeys.filter(k => !rec[k]);
+            if (missing.length > 0) {
+                console.warn(`[Step2] ${bible.koreanName} outfitRecommendations 누락 ${missing.length}/${sessionCount}:`, missing);
+            }
+        }
+    }
+
     return { bibles: parsed.bibles, tokenCount: result.tokenCount };
 };
 
