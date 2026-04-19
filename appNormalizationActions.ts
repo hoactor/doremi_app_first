@@ -91,7 +91,13 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
                         }
                     } else {
                         const existingOutfit = String(cut.characterOutfit || "").trim();
-                        reconstructedCuts.push({ ...cut, characterOutfit: existingOutfit.length > 5 ? existingOutfit : mechanicalOutfit, locationDescription: finalLocationDescription });
+                        // ★ DNA 오염 감지: 기존 customOutfit에 외모 키워드가 섞여 있으면 mechanical로 강제 복구.
+                        // Phase 5 이전 저장된 프로젝트에서 baseAppearance 폴백으로 인해 외모 서술이
+                        // customOutfit에 박힌 케이스를 자동 치유.
+                        const DNA_POLLUTION = /\b(hair|face|skin|eyes|jawline|forehead|wavy texture|cheekbone|eyebrow|eyelid|complexion|freckle|dimple|nose bridge|lip shape)\b/i;
+                        const polluted = DNA_POLLUTION.test(existingOutfit);
+                        const finalExisting = polluted ? mechanicalOutfit : existingOutfit;
+                        reconstructedCuts.push({ ...cut, characterOutfit: finalExisting.length > 5 ? finalExisting : mechanicalOutfit, locationDescription: finalLocationDescription });
                     }
                 }
                 reconstructedScenes.push({ ...scene, cuts: reconstructedCuts });
@@ -157,9 +163,11 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
                 dispatch({ type: 'SET_LOADING_DETAIL', payload: `[정규화 4단계] 나레이션 자동 최적화 중... (0/${cutsToFormat.length})` });
                 try {
                     const textsToFormat = cutsToFormat.map(c => c.cut.narration);
+                    // 타임아웃: Opus + 많은 컷 + 서버 혼잡 시 15초 부족. 30초로 여유 확보.
+                    // 그래도 폴백은 원본 텍스트 유지라 동작엔 지장 없음.
                     const { formattedTexts, tokenCount } = await withTimeout(
                         formatMultipleTextsWithSemanticBreaks(textsToFormat),
-                        15000, { formattedTexts: textsToFormat, tokenCount: 0 }
+                        30000, { formattedTexts: textsToFormat, tokenCount: 0 }
                     );
                     handleAddUsage(tokenCount, 'claude');
                     cutsToFormat.forEach((item, i) => {
