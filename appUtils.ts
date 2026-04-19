@@ -252,6 +252,19 @@ export interface OutfitBuildOptions {
     sceneLayerId?: string;
 }
 
+// Phase 7 수정: DNA 오염 감지 + 안전한 의상 폴백
+const DNA_POLLUTION_PATTERN = /\b(hair|face|skin|eyes|jawline|forehead|wavy texture|cheekbone|eyebrow|eyelid|complexion|freckle|dimple|nose bridge|lip shape)\b/i;
+
+/** baseAppearance 같은 외모 서술이 의상 필드로 흘러들지 못하도록 방어. */
+function safeOutfitFallback(candidate: string | undefined, gender: 'male' | 'female' | string | undefined, useKorean: boolean): string {
+    if (candidate && !DNA_POLLUTION_PATTERN.test(candidate)) return candidate;
+    // 오염 감지됨 → 중립 의상 폴백 (외모 서술 제거 목적)
+    if (useKorean) {
+        return gender === 'female' ? '편안한 일상복' : '편안한 일상복';
+    }
+    return gender === 'female' ? 'neutral casual outfit in warm palette' : 'neutral casual outfit in warm palette';
+}
+
 export function buildMechanicalOutfit(
     names: string[],
     characterDescriptions: { [key: string]: CharacterDescription },
@@ -270,20 +283,20 @@ export function buildMechanicalOutfit(
         if (key && characterDescriptions[key]) {
             const desc = characterDescriptions[key];
 
-            // Phase 5-d: 복합 키 → "loc::현재" → 레거시 평문 → baseAppearance 순서 폴백
-            let outfitText: string;
+            // Phase 5-d: 복합 키 → "loc::현재" → 레거시 평문 순서 폴백
+            // Phase 7 수정: baseAppearance 폴백을 명시적 "중립 의상"으로 대체 (외모 오염 방지)
+            let outfitText: string | undefined;
             if (useKorean) {
                 outfitText = desc.koreanLocations?.[`${location}::${layerId}`]
                           || desc.koreanLocations?.[`${location}::현재`]
-                          || desc.koreanLocations?.[location]
-                          || desc.koreanBaseAppearance
-                          || '기본 의상';
+                          || desc.koreanLocations?.[location];
+                // outfitText가 없거나 DNA 오염됐으면 중립 폴백
+                outfitText = safeOutfitFallback(outfitText, desc.gender, true);
             } else {
                 outfitText = desc.locations?.[`${location}::${layerId}`]
                           || desc.locations?.[`${location}::현재`]
-                          || desc.locations?.[location]
-                          || desc.baseAppearance
-                          || 'standard outfit';
+                          || desc.locations?.[location];
+                outfitText = safeOutfitFallback(outfitText, desc.gender, false);
             }
             parts.push(`[${name}: ${outfitText}]`);
         } else if (fallbackUnknown) {
