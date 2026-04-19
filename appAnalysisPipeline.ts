@@ -333,10 +333,13 @@ export async function runAnalysisPipeline(
         updateUIState({ analysisProgress: 45 });
 
         // ★ 프리셋 데이터 검증 — Step 1~3 결과의 논리적 일관성 점검
+        // 검증 기준 대본은 Step 1이 실제로 본 `scriptForAnalysis` (상세대본: cleanScript,
+        // 일반: normalizedScript)여야 함. `normalizedScript`로 비교하면 preprocess에서
+        // 빈 줄로 바뀐 메타-only 줄 수만큼 emotionalArc 길이가 "안 맞는다"는 false positive 발생.
         {
             const s = stateRef.current;
             if (s.scenarioAnalysis && s.characterBibles) {
-                const validation = validatePresetData(normalizedScript, s.scenarioAnalysis, s.characterBibles, enrichedBeats);
+                const validation = validatePresetData(scriptForAnalysis, s.scenarioAnalysis, s.characterBibles, enrichedBeats);
                 if (validation.errors.length > 0) {
                     console.error('[PresetValidation] errors:', validation.errors);
                     addNotification(`프리셋 검증 오류 ${validation.errors.length}건: ${validation.errors.slice(0, 2).join(' / ')}${validation.errors.length > 2 ? ' ...' : ''}`, 'error');
