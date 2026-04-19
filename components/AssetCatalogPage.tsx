@@ -181,7 +181,8 @@ export const AssetCatalogPage: React.FC = () => {
         try {
             const assetId = await saveAsset(type, `${name}.png`, currentPending.dataUrl, {
                 name,
-                tags: { character: type === 'character' ? name : null, artStyle: finalArtStyle, location: null, description: '', extraTypes: extraTypes?.join(',') || null },
+                // artStyle 태그 제거 (2026-04-19)
+                tags: { character: type === 'character' ? name : null, artStyle: null, location: null, description: '', extraTypes: extraTypes?.join(',') || null },
             });
 
             const updates: any = { tags: { character: type === 'character' ? name : null, artStyle: finalArtStyle, location: null, description: '', extraTypes: extraTypes?.join(',') || null } };

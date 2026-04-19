@@ -173,7 +173,7 @@ export const DalleGeneratorModal: React.FC<DalleGeneratorModalProps> = ({
                 name: safeName,
                 tags: {
                     character: null,
-                    artStyle: 'dalle-chibi',
+                    artStyle: null, // 화풍 태그 제거 (2026-04-19)
                     location: null,
                     description: result.revisedPrompt,
                 },

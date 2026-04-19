@@ -260,7 +260,7 @@ ${artPrompt}`;
             await saveAsset('character', filename, base64, {
                 tags: {
                     character: char.koreanName || key,
-                    artStyle: artStyle,
+                    artStyle: null, // 화풍 태그 제거 (2026-04-19)
                     location: null,
                     description: `${st.ratio}등신 비율 조정`,
                 },

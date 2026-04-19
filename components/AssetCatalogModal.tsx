@@ -182,7 +182,7 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
     const [pendingImports, setPendingImports] = useState<{ dataUrl: string; fileName: string }[]>([]);
     const [editingAsset, setEditingAsset] = useState<AssetCatalogEntry | null>(null);
     const [viewerImage, setViewerImage] = useState<{ url: string; name: string } | null>(null);
-    const [pendingSelectAsset, setPendingSelectAsset] = useState<AssetCatalogEntry | null>(null);
+    // pendingSelectAsset 상태 제거 (2026-04-19) — 화풍 불일치 체크 삭제에 따라 불필요
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const loadCatalog = useCallback(async () => {
@@ -244,12 +244,9 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
     }, [mode, onSelectCharacter, onSelectBackground, onClose]);
 
     const handleSelect = useCallback((asset: AssetCatalogEntry) => {
-        if (asset.tags?.artStyle && asset.tags.artStyle !== currentArtStyle) {
-            setPendingSelectAsset(asset);
-            return;
-        }
+        // 화풍 불일치 체크 제거 (2026-04-19) — 바로 선택 적용
         executeSelect(asset);
-    }, [currentArtStyle, executeSelect]);
+    }, [executeSelect]);
 
     // 외부 이미지 파일 선택 (복수)
     const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -299,7 +296,8 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
             // 1. 먼저 저장
             const assetId = await saveAsset(type, `${name}.png`, currentPending.dataUrl, {
                 name,
-                tags: { character: type === 'character' ? name : null, artStyle: finalArtStyle, location: null, description: '', extraTypes: extraTypes?.join(',') || null },
+                // artStyle 태그 제거 (2026-04-19) — 화풍 매칭 기능 삭제에 따라 null로 저장
+            tags: { character: type === 'character' ? name : null, artStyle: null, location: null, description: '', extraTypes: extraTypes?.join(',') || null },
                 prompt: 'External import',
             } as any);
 
@@ -395,7 +393,6 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
                     ) : (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                             {filteredAssets.map((asset) => {
-                                const styleMismatch = asset.tags?.artStyle && asset.tags.artStyle !== currentArtStyle;
                                 return (
                                     <div key={asset.id} className="group relative rounded-lg overflow-hidden bg-zinc-900 border border-zinc-700 hover:border-orange-500/50 transition-all cursor-pointer" onClick={() => handleSelect(asset)}>
                                         <div className="aspect-square bg-zinc-950" onClick={async (e) => { e.stopPropagation(); try { const origUrl = await resolveImageUrl(asset.imagePath); setViewerImage({ url: origUrl, name: asset.name }); } catch { if (imageUrls[asset.id]) setViewerImage({ url: imageUrls[asset.id], name: asset.name }); } }}>
@@ -416,7 +413,7 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
                                                 {asset.tags?.artStyle && <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-zinc-700 text-zinc-400">{STYLE_NAMES[asset.tags.artStyle] || asset.tags.artStyle}</span>}
                                             </div>
                                         </div>
-                                        {styleMismatch && <div className="absolute top-1 left-1 p-1 bg-amber-600/90 text-white rounded-md" title="화풍 불일치"><ExclamationTriangleIcon className="w-3.5 h-3.5" /></div>}
+                                        {/* 화풍 불일치 배지 제거 (2026-04-19) */}
                                         <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-zinc-900/90 rounded-lg p-1 backdrop-blur-sm border border-zinc-700/50">
                                             <TagEditButton onEdit={() => setEditingAsset(asset)} />
                                             <button onClick={(e) => handleDownloadAsset(e, asset)} className="p-1.5 text-zinc-300 hover:text-white hover:bg-zinc-700 rounded transition-colors" title="다운로드"><DownloadIcon className="w-3.5 h-3.5" /></button>
@@ -480,26 +477,7 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
             {/* 이미지 확대 뷰어 */}
             <ImageViewerModal isOpen={!!viewerImage} onClose={() => setViewerImage(null)} imageUrl={viewerImage?.url || null} altText={viewerImage?.name} />
 
-            {/* 화풍 불일치 확인 모달 */}
-            {pendingSelectAsset && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[250] animate-fade-in" onClick={() => setPendingSelectAsset(null)}>
-                    <div className="bg-zinc-800 rounded-xl border border-zinc-600 p-5 w-80 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                            <ExclamationTriangleIcon className="w-4 h-4 text-yellow-400" />
-                            화풍 불일치
-                        </h3>
-                        <p className="text-xs text-zinc-300 leading-relaxed mb-4">
-                            이 에셋은 <span className="font-semibold text-yellow-300">"{STYLE_NAMES[pendingSelectAsset.tags?.artStyle!] || pendingSelectAsset.tags?.artStyle || '알 수 없음'}"</span>으로 생성되었습니다.<br />
-                            현재 화풍은 <span className="font-semibold text-orange-300">"{STYLE_NAMES[currentArtStyle] || currentArtStyle}"</span>입니다.<br />
-                            그래도 사용하시겠습니까?
-                        </p>
-                        <div className="flex gap-2">
-                            <button onClick={() => setPendingSelectAsset(null)} className="flex-1 py-2 text-sm font-medium bg-zinc-700 hover:bg-zinc-600 rounded-lg text-zinc-300 transition-colors">취소</button>
-                            <button onClick={() => { const asset = pendingSelectAsset; setPendingSelectAsset(null); executeSelect(asset); }} className="flex-1 py-2 text-sm font-bold bg-orange-600 hover:bg-orange-500 rounded-lg text-white transition-colors">사용하기</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* 화풍 불일치 확인 모달 제거 (2026-04-19) */}
         </div>
     );
 };

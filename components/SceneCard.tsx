@@ -743,7 +743,8 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                     try {
                         await saveAsset(type, `${name}.png`, selectedImage.imageUrl, {
                             name,
-                            tags: { character: type === 'character' ? name : null, artStyle: state.artStyle, location: cut.location || null, description: cut.locationDescription || '', extraTypes: extraTypes?.join(',') || null },
+                            // artStyle 태그 제거 (2026-04-19)
+                            tags: { character: type === 'character' ? name : null, artStyle: null, location: cut.location || null, description: cut.locationDescription || '', extraTypes: extraTypes?.join(',') || null },
                             prompt: cut.imagePrompt || '',
                         } as any);
                         const typeLabel = [type, ...(extraTypes || [])].map(t => t === 'character' ? '인물' : t === 'outfit' ? '의상' : '배경').join('+');

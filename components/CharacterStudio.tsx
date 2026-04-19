@@ -70,8 +70,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
     const [pendingAssetImport, setPendingAssetImport] = useState<{ dataUrl: string; fileName: string } | null>(null);
     const [isAnalyzingAsset, setIsAnalyzingAsset] = useState(false);
 
-    // ── 화풍 불일치 확인 모달 ──
-    const [styleMismatchAsset, setStyleMismatchAsset] = useState<{ asset: AssetCatalogEntry; target: 'reference' | 'outfit'; location?: string } | null>(null);
+    // 화풍 불일치 확인 모달 상태 제거 (2026-04-19)
     const [editingAsset, setEditingAsset] = useState<AssetCatalogEntry | null>(null);
     // ── 의상 슬롯 이미지 (에셋 드롭 시 저장) ──
     const [outfitSlotImages, setOutfitSlotImages] = useState<Record<string, Record<string, string>>>({});  // { charKey: { location: imageUrl } }
@@ -204,10 +203,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
     };
 
     const handleAssetAction = (asset: AssetCatalogEntry, target: 'reference' | 'outfit', location?: string) => {
-        if (asset.tags?.artStyle && asset.tags.artStyle !== artStyle) {
-            setStyleMismatchAsset({ asset, target, location });
-            return;
-        }
+        // 화풍 불일치 체크 제거 (2026-04-19) — 태그 기준 경고는 실용성 낮아 사용자 요청으로 삭제
         if (target === 'reference') applyAssetToReference(asset);
         else if (target === 'outfit' && location) applyAssetToOutfit(asset, location);
     };
@@ -306,7 +302,8 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
         try {
             const assetId = await saveAsset(type, `${name.replace(/\s+/g, '_')}.png`, pendingAssetImport.dataUrl, {
                 name,
-                tags: { character: type === 'character' ? name : null, artStyle, location: null, description: '', extraTypes: extraTypes?.join(',') || null },
+                // artStyle 태그 제거 (2026-04-19)
+                tags: { character: type === 'character' ? name : null, artStyle: null, location: null, description: '', extraTypes: extraTypes?.join(',') || null },
             } as any);
 
             // 자동 분석
@@ -676,7 +673,6 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                             ) : (
                                 <div className="grid grid-cols-2 gap-2">
                                     {filteredAssets.map(asset => {
-                                        const mismatch = asset.tags?.artStyle && asset.tags.artStyle !== artStyle;
                                         return (
                                             <div key={asset.id} draggable onDragStart={(e) => handleDragStart(e, asset)}
                                                 className="group relative rounded-lg overflow-hidden bg-zinc-900 border border-zinc-700/50 hover:border-orange-500/40 cursor-grab active:cursor-grabbing transition-all"
@@ -698,7 +694,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                                                         })()}
                                                     </div>
                                                 </div>
-                                                {mismatch && <div className="absolute top-0.5 left-0.5 p-0.5 bg-amber-600/90 text-white rounded" title="화풍 불일치"><ExclamationTriangleIcon className="w-2.5 h-2.5" /></div>}
+                                                {/* 화풍 불일치 배지 제거 (2026-04-19) */}
                                                 {/* ★ 호버 메뉴: 다운로드 + 삭제 */}
                                                 <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-zinc-900/90 rounded-md p-0.5 backdrop-blur-sm border border-zinc-700/50">
                                                     <button onClick={(e) => { e.stopPropagation(); setEditingAsset(asset); }} className="p-1 text-zinc-300 hover:text-orange-300 hover:bg-zinc-700 rounded transition-colors" title="태그 편집"><PencilIcon className="w-3 h-3" /></button>
@@ -723,30 +719,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                 </div>
             </div>
 
-            {/* ── 화풍 불일치 확인 모달 ── */}
-            {styleMismatchAsset && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[250] animate-fade-in" onClick={() => setStyleMismatchAsset(null)}>
-                    <div className="bg-zinc-800 rounded-xl border border-zinc-600 p-5 w-80 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-                            <ExclamationTriangleIcon className="w-4 h-4 text-yellow-400" /> 화풍 불일치
-                        </h3>
-                        <p className="text-xs text-zinc-300 leading-relaxed mb-4">
-                            이 에셋은 <span className="font-semibold text-yellow-300">"{STYLE_NAMES[styleMismatchAsset.asset.tags?.artStyle!] || styleMismatchAsset.asset.tags?.artStyle || '알 수 없음'}"</span>으로 생성되었습니다.<br />
-                            현재 화풍은 <span className="font-semibold text-orange-300">"{STYLE_NAMES[artStyle] || artStyle}"</span>입니다.<br />
-                            그래도 사용하시겠습니까?
-                        </p>
-                        <div className="flex gap-2">
-                            <button onClick={() => setStyleMismatchAsset(null)} className="flex-1 py-2 text-sm font-medium bg-zinc-700 hover:bg-zinc-600 rounded-lg text-zinc-300 transition-colors">취소</button>
-                            <button onClick={() => {
-                                const { asset, target, location } = styleMismatchAsset;
-                                setStyleMismatchAsset(null);
-                                if (target === 'reference') applyAssetToReference(asset);
-                                else if (target === 'outfit' && location) applyAssetToOutfit(asset, location);
-                            }} className="flex-1 py-2 text-sm font-bold bg-orange-600 hover:bg-orange-500 rounded-lg text-white transition-colors">사용하기</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* 화풍 불일치 확인 모달 제거 (2026-04-19) */}
 
             {/* ── 에셋 태그 편집 팝업 ── */}
             {editingAsset && (
@@ -812,7 +785,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                                 name,
                                 tags: {
                                     character: type === 'character' ? name : null,
-                                    artStyle: finalArtStyle,
+                                    artStyle: null, // 화풍 태그 제거 (2026-04-19)
                                     location: outfitAssetPopup.location,
                                     description: '',
                                     extraTypes: extraTypes?.join(',') || null,

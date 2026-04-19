@@ -140,7 +140,8 @@ export function createAssetActions(h: ProjectActionHelpers) {
             try {
                 await saveAsset('character', `${char.koreanName || characterKey}.png`, imageUrl, {
                     name: char.koreanName || characterKey,
-                    tags: { character: char.koreanName || characterKey, artStyle: stateRef.current.artStyle, location: null, description: char.hairStyleDescription || char.baseAppearance || '' },
+                    // artStyle 태그 제거 (2026-04-19)
+                    tags: { character: char.koreanName || characterKey, artStyle: null, location: null, description: char.hairStyleDescription || char.baseAppearance || '' },
                     visualDNA: { hair: char.hairStyleDescription || '', colorPalette: {}, distinctiveMarks: '' },
                     prompt: char.revisedPrompt || char.firstScenePrompt || '',
                 } as any);
@@ -159,7 +160,8 @@ export function createAssetActions(h: ProjectActionHelpers) {
             try {
                 await saveAsset('outfit', `${char.koreanName}_${location}.png`, imageUrl, {
                     name: `${char.koreanName} ${location}`,
-                    tags: { character: char.koreanName || characterKey, artStyle: stateRef.current.artStyle, location, description: outfitDesc },
+                    // artStyle 태그 제거 (2026-04-19)
+                    tags: { character: char.koreanName || characterKey, artStyle: null, location, description: outfitDesc },
                     outfitData: { englishDescription: outfitDesc, locations: [location] },
                     prompt: '',
                 } as any);
@@ -177,7 +179,8 @@ export function createAssetActions(h: ProjectActionHelpers) {
             try {
                 await saveAsset('background', `bg_${cutNumber}.png`, imageUrl, {
                     name: `${cut.location || cutNumber} 배경`,
-                    tags: { character: null, artStyle: cut.artStyleOverride || stateRef.current.artStyle, location: cut.location || '', description: cut.locationDescription || '' },
+                    // artStyle 태그 제거 (2026-04-19)
+                    tags: { character: null, artStyle: null, location: cut.location || '', description: cut.locationDescription || '' },
                     spatialDNA: stateRef.current.locationVisualDNA[cut.location] || null,
                     prompt: cut.imagePrompt || '',
                 } as any);
