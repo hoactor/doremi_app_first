@@ -44,6 +44,18 @@ export interface LocationEntry {
 }
 
 /**
+ * 심화 1: 의상 전환 타입 — outfitSession 간 이동 시 의상이 어떻게 변하는지.
+ * Step 1 후처리에서 TRANSITION_MATRIX로 사전 계산하여 OutfitSession에 저장.
+ * Step 2가 이 값을 보고 의상을 결정론적으로 생성.
+ */
+export type TransitionType =
+    | 'maintain'            // 유지 (정확히 같은 의상)
+    | 'add_outerwear'       // 외투 추가 (하위 의상 유지)
+    | 'remove_outerwear'    // 외투 제거
+    | 'full_change'         // 완전 교체 (상의·하의·신발 다름)
+    | 'home_return';        // 귀가 변경 (외출복 → 홈웨어)
+
+/**
  * 시간/서사 레이어 — 같은 공간(location)이어도 시점이나 내러티브 레이어가 다르면
  * 별개의 "의상 세션"을 형성한다.
  * 예: 엄마집 현재 / 엄마집 회상_어린시절 / 엄마집 내일아침
@@ -65,6 +77,12 @@ export interface OutfitSession {
     location: string;
     layerId: string;            // SceneLayer.id
     lineRange: [number, number]; // 대본 줄 범위 (1-based, 포함)
+    /**
+     * 심화 1: 이전 세션(시간 순서상 직전)에서 이 세션으로 전환 시 의상이 어떻게 변하는지.
+     * Step 1 후처리에서 TRANSITION_MATRIX로 사전 계산.
+     * 첫 세션은 undefined. Step 2 프롬프트 + 런타임 resolver에서 활용.
+     */
+    transitionFromPrev?: TransitionType;
 }
 
 export interface ScenarioAnalysis {

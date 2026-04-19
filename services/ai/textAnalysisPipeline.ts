@@ -3,7 +3,7 @@
 
 import { ScenarioAnalysis, CharacterBible, ContiCut, CinematographyCut, CinematographyPlan, EditableScene, EditableCut, CharacterDescription, Cut, EnrichedBeat } from '../../types';
 import { callTextModel, parseJsonResponse } from './aiCore';
-import { normalizeLocationEntries } from '../../appUtils';
+import { normalizeLocationEntries, annotateOutfitSessionsWithTransitions, transitionLabel } from '../../appUtils';
 
 // ============================================================
 // Phase 4: Preproduction Pipeline Functions
@@ -179,6 +179,10 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
         console.warn('[Step1] outfitSessions 빈 배열 → 모든 location을 "현재" 레이어로 폴백 생성');
     }
 
+    // 심화 1: 각 세션에 transitionFromPrev 사전 계산 (카테고리 매트릭스 적용).
+    // Step 2 프롬프트가 이 값을 보고 "완전교체/외투추가/귀가변경" 결정.
+    annotateOutfitSessionsWithTransitions(parsed.outfitSessions, parsed.locations);
+
     // locationVisualDNA: 키 형식 정규화. 레거시 "loc" 키를 "loc::현재"로 보존 + 업그레이드
     if (!parsed.locationVisualDNA || typeof parsed.locationVisualDNA !== 'object') {
         parsed.locationVisualDNA = {};
@@ -231,11 +235,13 @@ export const analyzeCharacterBible = async (
         if (layer?.timeDelta) flags.push(layer.timeDelta);
         const flagStr = flags.length ? ` [${flags.join(', ')}]` : '';
         const cat = locCategoryMap.get(s.location) || 'other';
-        return `- "${s.location}::${s.layerId}" (${s.location} [${cat}] / ${layerLabel}${flagStr}, lines ${s.lineRange[0]}~${s.lineRange[1]})`;
+        // 심화 1: 사전 계산된 transition 표시 (← 이전 세션에서 이 세션으로의 전환)
+        const transStr = s.transitionFromPrev ? ` ← 직전 전환: ${transitionLabel(s.transitionFromPrev)}` : ' ← 첫 세션';
+        return `- "${s.location}::${s.layerId}" (${s.location} [${cat}] / ${layerLabel}${flagStr}, lines ${s.lineRange[0]}~${s.lineRange[1]})${transStr}`;
     }).join('\n');
 
     const outfitSessionBlock = sessionCount > 0
-        ? `\n# [필수] 의상 세션 목록 (Outfit Sessions)\n각 캐릭터의 outfitRecommendations는 아래 ${sessionCount}개 세션 모두에 대해 키를 가져야 한다.\n키 형식은 반드시 "{location}::{layerId}" (예: "집::현재", "할머니집::회상_어린시절").\n각 세션명 뒤의 [카테고리]가 의상 전환의 기본 축이다 (아래 매트릭스 참조).\n\n${sessionTable}\n`
+        ? `\n# [필수] 의상 세션 목록 (Outfit Sessions) + 전환 타입 사전 계산\n각 캐릭터의 outfitRecommendations는 아래 ${sessionCount}개 세션 모두에 대해 키를 가져야 한다.\n키 형식은 반드시 "{location}::{layerId}" (예: "집::현재", "할머니집::회상_어린시절").\n\n**각 세션의 "직전 전환"이 이미 카테고리 매트릭스로 계산되어 있다. 이 값을 반드시 따라라.**\n- 유지 = 직전 세션과 정확히 같은 의상\n- 외투 추가 = 직전 세션 의상 + 코트/자켓 덧입음\n- 외투 제거 = 직전 세션 의상에서 외투만 벗음\n- 완전 교체 = 직전 세션과 전혀 다른 의상 (상의·하의·신발 전부)\n- 귀가 변경 = 외출복 → 홈웨어/파자마\n\n${sessionTable}\n`
         : `\n# 장소 정보 없음 — outfitRecommendations 키는 대본에 등장하는 장소별 "{장소}::현재" 형식으로 생성하라.\n`;
 
     const prompt = `

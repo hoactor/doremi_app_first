@@ -37,7 +37,137 @@ export function createGeneratedImage(params: {
 
 // ── Phase 7: LocationEntry 헬퍼 (string[] ↔ LocationEntry[] 변환) ──
 
-import type { LocationEntry, LocationCategory } from './types/pipeline';
+import type { LocationEntry, LocationCategory, TransitionType, OutfitSession } from './types/pipeline';
+
+/**
+ * 심화 1: 카테고리 전환 매트릭스. FROM × TO → TransitionType.
+ * Step 1 후처리에서 outfitSessions를 순회하며 각 세션의 transitionFromPrev 계산.
+ * 같은 카테고리끼리는 유지, 실내↔외부는 외투 추가/제거, home_return은 외출→집.
+ */
+const TRANSITION_MATRIX: Record<LocationCategory, Record<LocationCategory, TransitionType>> = {
+    private_home: {
+        private_home: 'maintain',
+        visiting_home: 'full_change',
+        public_indoor: 'full_change',
+        public_outdoor: 'full_change',
+        transit: 'full_change',
+        formal: 'full_change',
+        other: 'full_change',
+    },
+    visiting_home: {
+        private_home: 'home_return',
+        visiting_home: 'maintain',
+        public_indoor: 'maintain',
+        public_outdoor: 'add_outerwear',
+        transit: 'maintain',
+        formal: 'full_change',
+        other: 'maintain',
+    },
+    public_indoor: {
+        private_home: 'home_return',
+        visiting_home: 'maintain',
+        public_indoor: 'maintain',
+        public_outdoor: 'add_outerwear',
+        transit: 'maintain',
+        formal: 'full_change',
+        other: 'maintain',
+    },
+    public_outdoor: {
+        private_home: 'home_return',
+        visiting_home: 'maintain',
+        public_indoor: 'remove_outerwear',
+        public_outdoor: 'maintain',
+        transit: 'maintain',
+        formal: 'full_change',
+        other: 'remove_outerwear',
+    },
+    transit: {
+        private_home: 'home_return',
+        visiting_home: 'maintain',
+        public_indoor: 'remove_outerwear',
+        public_outdoor: 'add_outerwear',
+        transit: 'maintain',
+        formal: 'full_change',
+        other: 'maintain',
+    },
+    formal: {
+        private_home: 'home_return',
+        visiting_home: 'maintain',
+        public_indoor: 'maintain',
+        public_outdoor: 'add_outerwear',
+        transit: 'maintain',
+        formal: 'maintain',
+        other: 'maintain',
+    },
+    other: {
+        private_home: 'home_return',
+        visiting_home: 'maintain',
+        public_indoor: 'maintain',
+        public_outdoor: 'add_outerwear',
+        transit: 'maintain',
+        formal: 'full_change',
+        other: 'maintain',
+    },
+};
+
+/**
+ * 두 세션 간 전환 타입 계산.
+ * - 다른 sceneLayer(회상 등) = full_change 무조건
+ * - 같은 location+layer = maintain
+ * - 카테고리 매트릭스 조회
+ */
+export function computeOutfitTransition(
+    fromLocation: string,
+    fromLayerId: string,
+    fromCategory: LocationCategory,
+    toLocation: string,
+    toLayerId: string,
+    toCategory: LocationCategory,
+): TransitionType {
+    if (fromLayerId !== toLayerId) return 'full_change';
+    if (fromLocation === toLocation) return 'maintain';
+    return TRANSITION_MATRIX[fromCategory]?.[toCategory] || 'full_change';
+}
+
+/**
+ * outfitSessions 배열에 transitionFromPrev 필드를 채움 (in-place).
+ * lineRange[0] 오름차순 정렬 후 각 세션의 직전 세션과 비교해 transition 계산.
+ */
+export function annotateOutfitSessionsWithTransitions(
+    sessions: OutfitSession[],
+    locations: LocationEntry[],
+): void {
+    if (sessions.length === 0) return;
+    const categoryByName = new Map(locations.map(l => [l.name, l.category]));
+    // 시간 순 정렬 (lineRange[0] 오름차순)
+    sessions.sort((a, b) => a.lineRange[0] - b.lineRange[0]);
+    for (let i = 0; i < sessions.length; i++) {
+        if (i === 0) {
+            sessions[i].transitionFromPrev = undefined; // 첫 세션
+            continue;
+        }
+        const prev = sessions[i - 1];
+        const curr = sessions[i];
+        const prevCat = categoryByName.get(prev.location) || 'other';
+        const currCat = categoryByName.get(curr.location) || 'other';
+        curr.transitionFromPrev = computeOutfitTransition(
+            prev.location, prev.layerId, prevCat,
+            curr.location, curr.layerId, currCat,
+        );
+    }
+}
+
+/** TransitionType → 한국어 라벨 (프롬프트/UI 표시용). */
+export function transitionLabel(t: TransitionType | undefined): string {
+    if (!t) return '첫 세션';
+    switch (t) {
+        case 'maintain': return '유지';
+        case 'add_outerwear': return '외투 추가';
+        case 'remove_outerwear': return '외투 제거';
+        case 'full_change': return '완전 교체';
+        case 'home_return': return '귀가 변경';
+    }
+}
 
 /** 레거시 string[] 또는 신규 LocationEntry[]를 name 배열로 정규화. */
 export function getLocationNames(locations: unknown): string[] {
