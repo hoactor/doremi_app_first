@@ -58,6 +58,21 @@ Phase 7 + 심화 시스템을 실제 이미지 생성 몇 차례 돌려본 후, 
 - 3축 의상 시스템이 과한지 (복잡도 vs 효과)
 - TransitionType 사전 계산을 AI 판단으로 돌려도 될 만큼 프롬프트가 명확해졌는지
 
+#### 발견된 한계 케이스 (Phase 8 입력 데이터)
+
+**2026-04-19 이미지 테스트 1회차 관찰:**
+
+1. **활동 컨텍스트 (activity context) 미감지** ⚠️
+   - 사례: CUT C021 "신발 신고 따라나섰어"
+   - 물리적으로는 집(private_home) 현관 안인데 맥락적으로 외출복 상태여야 자연스러움
+   - 현재: `집::현재` outfitSession이 라인 전체를 포괄 → 홈웨어로 판정
+   - **제안 설계 옵션 3가지:**
+     - **A. Step 1 프롬프트 강화**: "외출 준비 키워드(신발 신기, 따라나섰다, 가방 챙기기) 감지 시 별도 sceneLayer로 분리 (`현재_외출준비`)". 구조 유지하지만 sceneLayer가 시간축 + 활동축 혼용되는 의미 오염.
+     - **B. `activityContext` 신규 필드**: OutfitSession에 `departing|arriving|sleeping|cooking|null` 옵셔널. Step 1이 활동 감지 → Step 2가 outfitState 조정. 의미 깨끗하지만 4축 시스템 돼서 복잡도 ↑.
+     - **C. 룰 기반 상태 전환**: private_home + 외출 직전 N줄 = outfitState='casual'로 강제 override. 코드 레벨 후처리. 가장 단순.
+
+2. (추후 테스트로 발견될 케이스 여기 누적)
+
 결정 사항이 있으면 Phase 8로 넘어가서 리팩토링.
 
 ---
