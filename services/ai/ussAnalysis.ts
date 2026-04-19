@@ -92,7 +92,9 @@ export async function analyzeUSSStructure(
 
     const result = await callClaude(STRUCTURE_SYSTEM_PROMPT, userMessage, {
         temperature: 0.3,
-        maxTokens: 4000,
+        // ★ 캐릭터·장소 많은 대본에서 응답 중간 잘림 방지 (구조 분석은 output 크기 상당).
+        // 4000 → 16000 (narration Step 1의 32768과 일치시키지는 않되, 충분한 마진).
+        maxTokens: 16000,
     });
 
     let parsed: any;
