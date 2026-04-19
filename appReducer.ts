@@ -48,6 +48,16 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
     if (!('locationRegistry' in sanitized) || !Array.isArray(sanitized.locationRegistry)) {
         sanitized.locationRegistry = [];
     }
+    // ★ Phase 5: 시간 레이어 / 의상 세션 마이그레이션
+    if (sanitized.scenarioAnalysis) {
+        const sa = sanitized.scenarioAnalysis;
+        if (!Array.isArray(sa.sceneLayers) || sa.sceneLayers.length === 0) {
+            sa.sceneLayers = [{ id: '현재', label: '현재' }];
+        }
+        if (!Array.isArray(sa.outfitSessions)) {
+            sa.outfitSessions = [];
+        }
+    }
     if (!('logline' in sanitized) || sanitized.logline === undefined) {
         sanitized.logline = '';
     }

@@ -698,6 +698,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 title: s.title,
                 cuts: s.cuts.map(c => ({
                     id: c.cutNumber,
+                    cutNumber: c.cutNumber,
                     narrationText: c.narration,
                     character: c.characters,
                     location: c.location,

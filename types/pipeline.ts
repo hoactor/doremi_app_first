@@ -14,6 +14,30 @@ export interface EnrichedBeat {
     direction: string;
 }
 
+/**
+ * 시간/서사 레이어 — 같은 공간(location)이어도 시점이나 내러티브 레이어가 다르면
+ * 별개의 "의상 세션"을 형성한다.
+ * 예: 엄마집 현재 / 엄마집 회상_어린시절 / 엄마집 내일아침
+ */
+export interface SceneLayer {
+    id: string;                 // "현재" | "회상_어린시절" | "다음날_아침" 등
+    label: string;              // UI 표시용 (한국어 라벨)
+    timeDelta?: string;         // "과거 10년" / "내일" / "1주일 후" 등
+    isFlashback?: boolean;      // 회상·플래시백
+    isImagined?: boolean;       // 상상·꿈
+}
+
+/**
+ * 의상 세션 — (장소 × 시간 레이어)의 실제 대본 등장 조합.
+ * Cartesian 전체가 아니라 실제 쓰이는 것만 나열.
+ * Step 2 analyzeCharacterBible은 이 세션 단위로 캐릭터별 의상 생성.
+ */
+export interface OutfitSession {
+    location: string;
+    layerId: string;            // SceneLayer.id
+    lineRange: [number, number]; // 대본 줄 범위 (1-based, 포함)
+}
+
 export interface ScenarioAnalysis {
     genre: string;
     tone: string;
@@ -27,7 +51,15 @@ export interface ScenarioAnalysis {
     colorMood: string;
     pacing: string;
     locations: string[];
-    locationVisualDNA?: { [loc: string]: string };
+    /**
+     * 키 형식: "{location}" (레거시) 또는 "{location}::{layerId}" (신규, Phase 5).
+     * buildFinalPrompt resolver가 신규 키 우선 → 레거시 폴백 순으로 조회.
+     */
+    locationVisualDNA?: { [compositeKey: string]: string };
+    /** Phase 5: 시간/내러티브 레이어 배열. 없으면 [{id:'현재',label:'현재'}] 폴백. */
+    sceneLayers?: SceneLayer[];
+    /** Phase 5: 의상 세션 목록. 없으면 [] (레거시 = location만으로 의상 키 구성). */
+    outfitSessions?: OutfitSession[];
 }
 
 export interface BehaviorPatterns {
@@ -81,6 +113,11 @@ export interface ContiCut {
     emotionBeatIntense?: string;
     visualDescriptionIntense?: string;
     characterPoseIntense?: string;
+    /**
+     * Phase 5: 이 컷이 속한 시간/서사 레이어.
+     * 없으면 "현재" 가정 (buildFinalPrompt resolver가 폴백 처리).
+     */
+    sceneLayerId?: string;
 }
 
 export interface CinematographyCut {
