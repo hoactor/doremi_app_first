@@ -364,10 +364,12 @@ function extractCamera(cut: Cut | EditableCut, ctx: FluxPromptContext): string {
     return angle || '';
 }
 
-/** 장소 묘사 */
+/** 장소 묘사 — Phase 5-d: (location, sceneLayerId) 복합 키 resolver */
 function extractLocation(cut: Cut | EditableCut, ctx: FluxPromptContext): string {
     const location = cut.location || '';
-    const locDNA = ctx.locationVisualDNA[location] || '';
+    const layerId = ('sceneLayerId' in cut && cut.sceneLayerId) ? cut.sceneLayerId : '현재';
+    const dna = ctx.locationVisualDNA;
+    const locDNA = dna[`${location}::${layerId}`] || dna[`${location}::현재`] || dna[location] || '';
     const locDesc = 'locationDescription' in cut ? cut.locationDescription : '';
 
     if (locDesc) return locDesc;
@@ -572,9 +574,14 @@ function extractCharacterOutfit(
         // 단일 캐릭터: 전체가 의상
         if (!customOutfit.includes('[')) return customOutfit.trim();
     }
-    // 폴백: 장소별 의상 → 기본 외모
+    // 폴백: 장소별 의상 → 기본 외모. Phase 5-d: 복합 키 우선 조회.
     const location = ('location' in cut ? (cut as any).location : '') || '';
-    return char?.locations?.[location] || char?.baseAppearance || '';
+    const layerId = ('sceneLayerId' in cut && (cut as any).sceneLayerId) ? (cut as any).sceneLayerId : '현재';
+    return char?.locations?.[`${location}::${layerId}`]
+        || char?.locations?.[`${location}::현재`]
+        || char?.locations?.[location]
+        || char?.baseAppearance
+        || '';
 }
 
 /** Cut 필드에서 구조화 데이터 직접 추출 (geminiPrompt 무관) */

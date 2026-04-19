@@ -265,9 +265,16 @@ export function buildFinalPrompt(cut: Cut | EditableCut, ctx: PromptContext): st
         return 'sceneDescription' in cut ? cut.sceneDescription : (cut as EditableCut).sceneDescription;
     })();
     
+    // ★ Phase 5-d: sceneLayerId 기반 복합 키 resolver
+    // 해상 순서: "loc::layer" → "loc::현재" → "loc" (레거시)
+    const layerId = ('sceneLayerId' in cut && cut.sceneLayerId) ? cut.sceneLayerId : '현재';
+    const resolveLocDNA = (loc: string): string => {
+        return locDNA[`${loc}::${layerId}`] || locDNA[`${loc}::현재`] || locDNA[loc] || '';
+    };
+
     // --- [인서트 컷 처리 로직] ---
     if (characters.length === 0) {
-        const spatialDNA = locDNA[location] || 'Consistent visual background.';
+        const spatialDNA = resolveLocDNA(location) || 'Consistent visual background.';
         const lightingNote = cineCut?.lightingNote || '';
         return `
 # [SCENE INSERT / BACKGROUND ONLY]
@@ -300,7 +307,12 @@ ${compositionGuide}
         });
         if (key && charDescriptions[key]) {
             const char = charDescriptions[key];
-            let profileOutfit = char.locations?.[location] || char.baseAppearance || 'standard casual outfit';
+            // Phase 5-d: 복합 키 → "loc::현재" → plain location 순서로 해상
+            let profileOutfit = char.locations?.[`${location}::${layerId}`]
+                             || char.locations?.[`${location}::현재`]
+                             || char.locations?.[location]
+                             || char.baseAppearance
+                             || 'standard casual outfit';
             
             if (customOutfit && customOutfit.trim().length > 2) {
                 const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -326,7 +338,11 @@ ${compositionGuide}
             }
 
             if (!profileOutfit || profileOutfit.length < 3 || profileOutfit.toLowerCase() === 'none' || profileOutfit.toLowerCase() === 'n/a') {
-                 profileOutfit = char.locations?.[location] || char.baseAppearance || 'standard casual outfit';
+                 profileOutfit = char.locations?.[`${location}::${layerId}`]
+                              || char.locations?.[`${location}::현재`]
+                              || char.locations?.[location]
+                              || char.baseAppearance
+                              || 'standard casual outfit';
             }
 
             const hair = char.hairStyleDescription || 'Standard hairstyle';
@@ -352,7 +368,7 @@ ${compositionGuide}
     const isPolluted = cameraKeywords.some(k => location.toLowerCase().includes(k));
     const finalLocationString = isPolluted ? `the consistent physical environment described as: ${locDesc}` : location;
     
-    const spatialDNA = locDNA[location] || 'consistent visual style';
+    const spatialDNA = resolveLocDNA(location) || 'consistent visual style';
 
     const fxMap: { [key: string]: string } = {
         "Vertical Gloom Lines": "Dramatic vertical gloom hatching lines, melancholic shadow gradients, heavy emotional burden, classic manga gloom effect.",

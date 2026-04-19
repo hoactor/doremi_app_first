@@ -148,6 +148,8 @@ export interface Cut {
     characterEmotionAndExpressionIntense?: string;
     sceneDescriptionIntense?: string;
     characterPoseIntense?: string;
+    /** Phase 5-d: 시간/서사 레이어 id. 없으면 "현재" 가정. buildFinalPrompt resolver 입력. */
+    sceneLayerId?: string;
 }
 
 export interface Scene {
@@ -232,6 +234,8 @@ export interface EditableCut {
     sceneDescriptionIntense?: string;
     characterPoseIntense?: string;
     characterEmotionAndExpressionIntense?: string;
+    /** Phase 5-d: 시간/서사 레이어 id. 없으면 "현재" 가정. */
+    sceneLayerId?: string;
 }
 
 export interface EditableScene {

@@ -403,6 +403,28 @@ ${scenarioAnalysis.locations?.length ? `
 새로운 장소명을 만들지 마라 (예: "실내", "집" 등 임의 이름 금지).
 장소 목록: ${scenarioAnalysis.locations.join(', ')}
 ` : ''}
+${(scenarioAnalysis.sceneLayers?.length ?? 0) > 1 || (scenarioAnalysis.outfitSessions?.length ?? 0) > 0 ? `
+# [중요] 시간/서사 레이어 — sceneLayerId 필드 필수
+각 컷은 반드시 sceneLayerId 필드를 포함해야 한다 (어느 시간/서사 레이어에 속하는지).
+아래 레이어 목록에서 정확한 id를 선택하라. 새 id 생성 금지.
+
+## 레이어 목록:
+${(scenarioAnalysis.sceneLayers || []).map(sl => {
+    const flags: string[] = [];
+    if (sl.isFlashback) flags.push('회상');
+    if (sl.isImagined) flags.push('상상');
+    if (sl.timeDelta) flags.push(sl.timeDelta);
+    return `- "${sl.id}" (${sl.label}${flags.length ? ', ' + flags.join(', ') : ''})`;
+}).join('\n')}
+
+## 의상 세션 (location × sceneLayerId 참고):
+${(scenarioAnalysis.outfitSessions || []).map(os => `- "${os.location}::${os.layerId}" (lines ${os.lineRange[0]}~${os.lineRange[1]})`).join('\n')}
+
+규칙:
+- 컷의 originLines[0]이 어느 outfitSession의 lineRange에 속하는지 보고 해당 layerId 사용.
+- 모호하면 "현재" 사용.
+- 회상/상상 씬은 명백히 그 레이어를 사용해야 함 (의상·배경·톤이 달라야 하므로).
+` : ''}
 # 등장인물: ${characterNames}
 ${hasCanonical ? `
 # [필수] 캐릭터 캐스트 테이블 (Character Cast Table)
@@ -457,6 +479,7 @@ ${enrichedSection}
       "narration": "",
       "characters": [],
       "location": "사무실",
+      "sceneLayerId": "현재",
       "visualDescription": "Wide shot of a modern office...",
       "emotionBeat": "일상",
       "characterPose": "",
@@ -469,6 +492,7 @@ ${enrichedSection}
       "narration": "원본 대사 그대로",
       "characters": ["Yeo"],
       "location": "사무실",
+      "sceneLayerId": "현재",
       "visualDescription": "Bust shot, she speaks while...",
       "emotionBeat": "긴장",
       "characterPose": "standing with arms crossed, chin slightly raised, weight on left leg, looking down at subordinate",
@@ -498,6 +522,37 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
         ...cut,
         id: `C${String(i + 1).padStart(3, '0')}`,
     }));
+
+    // ── Phase 5-d: sceneLayerId 자동 추론/검증 ──
+    const validLayerIds = new Set((scenarioAnalysis.sceneLayers || []).map(sl => sl.id));
+    const sessions = scenarioAnalysis.outfitSessions || [];
+
+    // originLines[0] → layerId 추론 함수
+    // 같은 줄이 여러 outfitSession에 걸쳐있으면 (장소가 다른 경우 등) cut.location과 일치하는 세션 우선
+    const inferLayerId = (cut: ContiCut): string => {
+        const line = cut.originLines?.[0];
+        if (line == null) return '현재';
+        const matchingSessions = sessions.filter(s =>
+            line >= s.lineRange[0] && line <= s.lineRange[1]
+        );
+        if (matchingSessions.length === 0) return '현재';
+        // cut.location과 일치하는 세션 우선
+        const locMatch = matchingSessions.find(s => s.location === cut.location);
+        if (locMatch) return locMatch.layerId;
+        // 아니면 첫 번째 매칭 세션
+        return matchingSessions[0].layerId;
+    };
+
+    for (const cut of parsed.cuts) {
+        // AI가 sceneLayerId를 안 넣었거나 무효한 id면 추론
+        if (!cut.sceneLayerId || !validLayerIds.has(cut.sceneLayerId)) {
+            const inferred = inferLayerId(cut);
+            if (cut.sceneLayerId && cut.sceneLayerId !== inferred) {
+                console.warn(`[Step4] ${cut.id} sceneLayerId 무효("${cut.sceneLayerId}") → "${inferred}"로 교정`);
+            }
+            cut.sceneLayerId = inferred;
+        }
+    }
 
     return { cuts: parsed.cuts, tokenCount: result.tokenCount };
 };
@@ -616,13 +671,18 @@ export const convertContiToEditableStoryboard = (
 
         const currentScene = scenes[scenes.length - 1];
 
-        // 캐릭터별 의상 찾기
+        // 캐릭터별 의상 찾기 — Phase 5-d: (location, sceneLayerId) 복합 키 우선 + 레거시 폴백
         const outfitParts: string[] = [];
         const dnaParts: string[] = [];
-       for (const charName of cut.characters) {
+        const layerId = cut.sceneLayerId || '현재';
+        const compositeKey = `${loc}::${layerId}`;
+        for (const charName of cut.characters) {
             const bible = characterBibles.find(b => (b.canonicalName && b.canonicalName === charName) || b.koreanName === charName);
-            if (bible?.outfitRecommendations?.[loc]) {
-                let desc = bible.outfitRecommendations[loc].description;
+            // 해상 순서: "loc::layer" → "loc::현재" (레이어 폴백) → "loc" (레거시 키)
+            const rec = bible?.outfitRecommendations;
+            const resolved = rec?.[compositeKey] || rec?.[`${loc}::현재`] || rec?.[loc];
+            if (resolved) {
+                let desc = resolved.description;
                 desc = desc.replace(/^\s*\([^)]*hair[^)]*\)\s*/i, '').trim();
                 outfitParts.push(`${charName}: ${desc}`);
             }
@@ -664,6 +724,7 @@ export const convertContiToEditableStoryboard = (
         const editableCut: EditableCut = {
             id: cut.id,
             cutNumber: `${currentScene.sceneNumber}-${currentScene.cuts.length + 1}`,
+            sceneLayerId: cut.sceneLayerId || '현재',
             narrationText: cut.narration,
             // canonicalName → koreanName 변환 (UI는 koreanName 기준)
             character: (cut.characters || []).map(name => {
