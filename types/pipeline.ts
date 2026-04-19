@@ -124,9 +124,34 @@ export interface BehaviorPatterns {
     [key: string]: string | undefined;
 }
 
+/**
+ * 심화 2: 의상 상태 카테고리 — 장면 맥락에 따른 의상 유형.
+ * Step 2가 각 세션 의상에 이 값 부여 → resolver가 외투 add/remove 시 base만 유지.
+ */
+export type OutfitState =
+    | 'pajama'      // 파자마/잠옷 (외출 불가)
+    | 'homewear'    // 홈웨어/실내복 (편한 티셔츠·추리닝·원피스 등)
+    | 'casual'      // 일상 외출복 (외투 없음)
+    | 'outdoor'     // 외출복 + 외투 (코트·자켓·카디건 포함 상태)
+    | 'formal'      // 포멀/비즈니스
+    | 'special';    // 특수 (이벤트·파티·전통복 등)
+
 export interface OutfitRecommendation {
+    /** 전체 의상 설명 (base + outerwear 합쳐진 기존 형태, 하위 호환). */
     description: string;
     reasoning: string;
+    /**
+     * 심화 2: 기본 의상 (외투 없이). outerwear가 있으면 description은 base+outerwear 합본.
+     * resolver가 remove_outerwear 전환 시 base만 사용해 외투 제거 효과 구현.
+     */
+    base?: string;
+    /**
+     * 심화 2: 외투/상의 추가 레이어. 있으면 outdoor 상태.
+     * null = 외투 없음, 문자열 = 외투 묘사.
+     */
+    outerwear?: string | null;
+    /** 심화 2: 의상 상태 (파자마·홈웨어·외출복·포멀·특수). 필수는 아니지만 있으면 resolver가 활용. */
+    state?: OutfitState;
 }
 
 export interface CharacterBible {

@@ -266,8 +266,31 @@ ${outfitSessionBlock}
    - physicalMannerisms: 걸음걸이, 자세, 습관 등
    - voiceCharacter: 목소리 특징
 7. **outfitRecommendations**: **의상 세션별** 의상 추천
-   - 형식: { "{location}::{layerId}": { "description": "영어 의상 묘사 (색상 hex 포함)", "reasoning": "이유(한국어)" } }
-   - CRITICAL: description에는 순수 의상(옷, 신발, 악세서리)만. 헤어스타일·얼굴·체형 묘사 절대 금지.
+   - 형식: {
+       "{location}::{layerId}": {
+         "description": "전체 의상 (base + outerwear 합본, 영어, hex 색 포함)",
+         "reasoning": "이유(한국어)",
+         "base": "외투 없는 기본 의상 (영어)",
+         "outerwear": "외투/코트/자켓 (영어, 없으면 null)",
+         "state": "pajama|homewear|casual|outdoor|formal|special 중 하나"
+       }
+     }
+   - CRITICAL: 모든 의상 필드(description/base/outerwear)는 순수 의상만 (옷·신발·악세서리).
+     헤어스타일·얼굴·체형 묘사 절대 금지.
+   - **base와 outerwear 분리 의의:**
+     * "외투 추가" 전환 = 직전 세션의 base 유지 + 새 outerwear
+     * "외투 제거" 전환 = 직전 세션의 base 그대로, outerwear = null
+     * "완전 교체" 전환 = base + outerwear 전부 새로
+     * description은 항상 base + outerwear 합쳐서 읽기 쉽게 (레거시 resolver 호환)
+   - **state 결정 기준:**
+     * pajama = 잠옷·파자마 (외출 불가)
+     * homewear = 편한 실내복 (티셔츠+반바지 등, 외출 가능하지만 부적합)
+     * casual = 일상 외출복, 외투 없음 (실내)
+     * outdoor = 외출복 + 외투 (실외 상태)
+     * formal = 정장·비즈니스
+     * special = 이벤트·파티·전통복
+   - outerwear가 null이면 state는 pajama/homewear/casual/formal 중 하나.
+   - outerwear가 있으면 state는 outdoor (원칙). 단 formal 코트는 formal 유지.
 
 # [필수] 의상 일관성 규칙 (Outfit Consistency Laws)
 1. **같은 세션 = 같은 의상.** 한 캐릭터가 같은 outfitSession(즉 같은 location+layerId)에 여러 번 등장해도 의상 동일.
@@ -747,6 +770,7 @@ export const convertContiToEditableStoryboard = (
         const currentScene = scenes[scenes.length - 1];
 
         // 캐릭터별 의상 찾기 — Phase 5-d: (location, sceneLayerId) 복합 키 우선 + 레거시 폴백
+        // 심화 2: base + outerwear 분리 필드가 있으면 description보다 우선 사용 (더 정확한 표현).
         const outfitParts: string[] = [];
         const dnaParts: string[] = [];
         const layerId = cut.sceneLayerId || '현재';
@@ -757,7 +781,13 @@ export const convertContiToEditableStoryboard = (
             const rec = bible?.outfitRecommendations;
             const resolved = rec?.[compositeKey] || rec?.[`${loc}::현재`] || rec?.[loc];
             if (resolved) {
-                let desc = resolved.description;
+                // 심화 2: base + outerwear가 있으면 조합. 없으면 description 사용 (레거시 호환).
+                let desc: string;
+                if (resolved.base) {
+                    desc = resolved.outerwear ? `${resolved.base}, with ${resolved.outerwear}` : resolved.base;
+                } else {
+                    desc = resolved.description;
+                }
                 desc = desc.replace(/^\s*\([^)]*hair[^)]*\)\s*/i, '').trim();
                 outfitParts.push(`${charName}: ${desc}`);
             }
