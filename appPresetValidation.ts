@@ -49,12 +49,46 @@ export function validatePresetData(
         }
     }
 
-    // locationVisualDNA ↔ locations 키 일치
+    // ── Phase 5-e: sceneLayers / outfitSessions 검증 ──
+    const sceneLayers = scenarioAnalysis.sceneLayers || [];
+    const outfitSessions = scenarioAnalysis.outfitSessions || [];
+    const hasSessionModel = outfitSessions.length > 0;
+
+    if (sceneLayers.length === 0) {
+        warnings.push('sceneLayers가 비어있습니다. "현재" 레이어로 자동 폴백됩니다.');
+    } else if (!sceneLayers.some(sl => sl.id === '현재')) {
+        warnings.push('sceneLayers에 "현재" 레이어가 없습니다. 기본 레이어로 자동 삽입됩니다.');
+    }
+    const validLayerIds = new Set(sceneLayers.map(sl => sl.id));
+    const validLocations = new Set(scenarioAnalysis.locations || []);
+
+    for (let i = 0; i < outfitSessions.length; i++) {
+        const os = outfitSessions[i];
+        if (!validLocations.has(os.location)) {
+            errors.push(`outfitSessions[${i}].location="${os.location}"이 locations 배열에 없습니다`);
+        }
+        if (!validLayerIds.has(os.layerId)) {
+            errors.push(`outfitSessions[${i}].layerId="${os.layerId}"이 sceneLayers에 없습니다`);
+        }
+    }
+
+    // locationVisualDNA 검증 — 신규 "loc::layer" 키 기준
     if (Array.isArray(scenarioAnalysis.locations) && scenarioAnalysis.locationVisualDNA) {
         const dnaKeys = Object.keys(scenarioAnalysis.locationVisualDNA);
-        for (const loc of scenarioAnalysis.locations) {
-            if (!dnaKeys.includes(loc)) {
-                warnings.push(`locationVisualDNA에 "${loc}" 키 누락`);
+        const dnaKeySet = new Set(dnaKeys);
+        if (hasSessionModel) {
+            for (const os of outfitSessions) {
+                const composite = `${os.location}::${os.layerId}`;
+                if (!dnaKeySet.has(composite) && !dnaKeySet.has(os.location)) {
+                    warnings.push(`locationVisualDNA에 "${composite}" 키 누락 (레거시 "${os.location}"도 없음)`);
+                }
+            }
+        } else {
+            // 레거시 프로젝트: location 기준으로 검사
+            for (const loc of scenarioAnalysis.locations) {
+                if (!dnaKeySet.has(loc) && !dnaKeySet.has(`${loc}::현재`)) {
+                    warnings.push(`locationVisualDNA에 "${loc}" 키 누락`);
+                }
             }
         }
     } else if (Array.isArray(scenarioAnalysis.locations) && scenarioAnalysis.locations.length > 0 && !scenarioAnalysis.locationVisualDNA) {
@@ -65,6 +99,9 @@ export function validatePresetData(
     if (!Array.isArray(characterBibles) || characterBibles.length === 0) {
         errors.push('characterBibles가 비어있습니다.');
     } else {
+        const expectedSessionKeys = hasSessionModel
+            ? outfitSessions.map(os => `${os.location}::${os.layerId}`)
+            : (scenarioAnalysis.locations || []).map(loc => loc);
         for (let i = 0; i < characterBibles.length; i++) {
             const b = characterBibles[i];
             const prefix = `characterBibles[${i}]`;
@@ -74,12 +111,13 @@ export function validatePresetData(
             if (!b.personalityProfile?.core) warnings.push(`${prefix}.personalityProfile.core 누락`);
             if (!b.personalityProfile?.behaviorPatterns) warnings.push(`${prefix}.personalityProfile.behaviorPatterns 누락`);
 
-            // outfitRecommendations ↔ locations 키 일치
-            if (Array.isArray(scenarioAnalysis.locations) && b.outfitRecommendations) {
-                const outfitKeys = Object.keys(b.outfitRecommendations);
-                for (const loc of scenarioAnalysis.locations) {
-                    if (!outfitKeys.includes(loc)) {
-                        warnings.push(`${prefix}(${b.koreanName})의 outfitRecommendations에 "${loc}" 의상 누락`);
+            // outfitRecommendations 커버리지 — 신규: outfitSessions 기준 / 레거시: locations 기준
+            if (expectedSessionKeys.length > 0 && b.outfitRecommendations) {
+                const outfitKeys = new Set(Object.keys(b.outfitRecommendations));
+                for (const expected of expectedSessionKeys) {
+                    const legacyFallback = expected.includes('::') ? expected.split('::')[0] : expected;
+                    if (!outfitKeys.has(expected) && !outfitKeys.has(legacyFallback)) {
+                        warnings.push(`${prefix}(${b.koreanName})의 outfitRecommendations에 "${expected}" 의상 누락`);
                     }
                 }
             }
