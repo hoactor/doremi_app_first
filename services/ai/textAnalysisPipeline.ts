@@ -35,14 +35,42 @@ ${loglineHint}
    - setup: 설정부 (시작줄~끝줄, 설명)
    - confrontation: 대립부 (시작줄~끝줄, 설명)
    - resolution: 해소부 (시작줄~끝줄, 설명)
-4. **emotionalArc**: 각 대사줄의 감정 키워드 배열 (정확히 ${totalLines}개)
+4. **emotionalArc**: 각 대사줄의 감정 키워드 배열
+   - **반드시 정확히 ${totalLines}개 원소.**
+   - 출력 직전 self-check: 배열 길이가 ${totalLines}인가? 부족하면 중립("neutral") 채우고 초과하면 앞에서부터 ${totalLines}개만 사용.
 5. **turningPoints**: 핵심 전환점 줄 번호 배열 (반전, 클라이맥스 등)
 6. **colorMood**: 전체 컬러 톤 가이드 (예: "전반부 차가운 형광등 → 후반부 따뜻한 석양")
 7. **pacing**: 전체 템포 (빠름/보통/느림/변칙)
-8. **locations**: 대본에 등장하는 모든 물리적 장소를 한국어 문자열 배열로 추출하라.
-   - 직접 언급된 장소 + 맥락상 암시된 장소 모두 포함
-   - 가능한 구체적으로 (예: "집" → "집 거실", "회사" → "사무실")
-   - 중복 없이, 등장 순서대로
+8. **locations**: 대본의 **"의상 세션(outfit session)" 공간 단위**로 장소를 추출하라.
+   - 의상 세션 = 캐릭터가 같은 옷차림을 유지하는 연속된 공간 범위
+   - **같은 건물의 여러 방(부엌/거실/침실/현관 등)은 반드시 하나로 묶어라:**
+     * "집 부엌", "집 거실", "집 현관" → "집" 하나
+     * "할머니집 부엌", "할머니집 방" → "할머니집" 하나
+   - **다음 경우에만 분리:**
+     * 건물·장소 자체가 다름 (집 ≠ 옷가게 ≠ 카페 ≠ 회사)
+     * 장시간 체류 이동 수단 (자동차 안, 비행기 안)
+   - 표면 통과 공간(복도, 엘리베이터, 계단)은 인접 주요 장소로 흡수. 별도 장소로 만들지 말 것.
+   - 중복 없이, 등장 순서대로. 한국어 문자열 배열.
+   - 시간 축(오늘/내일/회상)은 아래 sceneLayers에서 처리. locations에는 **순수 공간**만.
+9. **sceneLayers**: 대본에서 감지되는 시간/서사 레이어 배열.
+   - **"현재" 레이어는 반드시 포함.**
+   - 시간 경과 감지: "다음날", "며칠 후", "1주일 뒤", "내일 아침" → 별도 레이어
+   - 회상/플래시백: "10년 전", "어렸을 때", "그때는", "과거엔" → { isFlashback: true, timeDelta: "과거 10년" }
+   - 상상/꿈: "꿈 속", "만약 ~라면", "상상으로는" → { isImagined: true }
+   - 캐릭터 연령·시대가 크게 달라지는 회상은 별도 레이어로 (어린시절 vs 성인 과거).
+   - id는 한국어 slug (예: "현재", "회상_어린시절", "다음날_아침", "상상_미래").
+   - label은 UI에 표시할 한국어.
+10. **outfitSessions**: (locations × sceneLayers) 중 **대본에 실제 등장하는 조합만**.
+    - 전체 cartesian 아님. 대본에서 해당 캐릭터가 그 장소·레이어로 등장하는 경우만.
+    - 각 항목: { location, layerId, lineRange: [startLine, endLine] }.
+    - lineRange는 그 조합이 등장하는 줄 범위 (불연속이면 첫 등장~마지막 등장).
+    - 같은 (location, layerId)가 대본 여러 군데 등장해도 하나의 outfitSession.
+    - **이 배열이 Step 2 의상 생성의 단위가 된다.**
+11. **locationVisualDNA**: 시각 DNA (배경 묘사용).
+    - 키 형식: "{location}::{layerId}" (예: "집::현재", "할머니집::회상_어린시절").
+    - 값: 그 (장소, 레이어)의 시각 묘사 (영어, 건축·조명·색감·분위기·시대감·구체적 오브젝트 포함).
+    - **반드시 outfitSessions의 모든 항목에 대응하는 키가 있어야 한다.**
+    - 회상/상상 레이어는 시각 톤 반영 (세피아, 데사추레이션, 소프트 포커스, 90년대 가구 등).
 
 # 출력 형식 (JSON만, 설명 없이):
 {
@@ -57,7 +85,19 @@ ${loglineHint}
   "turningPoints": [N, M],
   "colorMood": "...",
   "pacing": "...",
-  "locations": ["장소1", "장소2", ...]
+  "locations": ["집", "할머니집", ...],
+  "sceneLayers": [
+    { "id": "현재", "label": "현재" },
+    { "id": "회상_어린시절", "label": "회상 (어린시절)", "timeDelta": "과거 15년", "isFlashback": true }
+  ],
+  "outfitSessions": [
+    { "location": "집", "layerId": "현재", "lineRange": [1, 20] },
+    { "location": "할머니집", "layerId": "회상_어린시절", "lineRange": [21, 45] }
+  ],
+  "locationVisualDNA": {
+    "집::현재": "modern Korean apartment interior, warm wooden floor, beige walls, natural daylight",
+    "할머니집::회상_어린시절": "traditional Korean house, 2010s-era furniture, warm sepia tint, soft-focus childhood nostalgia"
+  }
 }
 
 # 대본:
@@ -85,6 +125,58 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
     // locations 보정 — 없으면 빈 배열
     if (!Array.isArray(parsed.locations)) {
         parsed.locations = [];
+    }
+
+    // ── Phase 5-b: sceneLayers / outfitSessions / locationVisualDNA 보정 ──
+
+    // sceneLayers: 없거나 비어있으면 "현재" 하나로 폴백
+    if (!Array.isArray(parsed.sceneLayers) || parsed.sceneLayers.length === 0) {
+        parsed.sceneLayers = [{ id: '현재', label: '현재' }];
+    }
+    // "현재" 레이어가 없으면 맨 앞에 강제 삽입
+    if (!parsed.sceneLayers.some(sl => sl.id === '현재')) {
+        parsed.sceneLayers.unshift({ id: '현재', label: '현재' });
+    }
+    const validLayerIds = new Set(parsed.sceneLayers.map(sl => sl.id));
+    const validLocations = new Set(parsed.locations);
+
+    // outfitSessions: 없으면 빈 배열 / 유효성 검사 (locations·sceneLayers에 존재하는 조합만 유지)
+    if (!Array.isArray(parsed.outfitSessions)) {
+        parsed.outfitSessions = [];
+    }
+    parsed.outfitSessions = parsed.outfitSessions.filter(os => {
+        const ok = os && validLocations.has(os.location) && validLayerIds.has(os.layerId);
+        if (!ok) console.warn(`[Step1] outfitSession 무효 제거:`, os);
+        return ok;
+    });
+    // 레거시 폴백: outfitSessions 비어있고 locations는 있으면 각 location을 "현재" 레이어에 매핑
+    if (parsed.outfitSessions.length === 0 && parsed.locations.length > 0) {
+        parsed.outfitSessions = parsed.locations.map(loc => ({
+            location: loc,
+            layerId: '현재',
+            lineRange: [1, totalLines] as [number, number],
+        }));
+        console.warn('[Step1] outfitSessions 빈 배열 → 모든 location을 "현재" 레이어로 폴백 생성');
+    }
+
+    // locationVisualDNA: 키 형식 정규화. 레거시 "loc" 키를 "loc::현재"로 보존 + 업그레이드
+    if (!parsed.locationVisualDNA || typeof parsed.locationVisualDNA !== 'object') {
+        parsed.locationVisualDNA = {};
+    }
+    const dna = parsed.locationVisualDNA;
+    for (const key of Object.keys(dna)) {
+        if (!key.includes('::')) {
+            // 레거시 키 → "loc::현재"로 업그레이드 (원본 키도 폴백용으로 유지)
+            const upgraded = `${key}::현재`;
+            if (!dna[upgraded]) dna[upgraded] = dna[key];
+        }
+    }
+    // outfitSessions에 있는데 DNA 누락 조합 로깅 (Step 2가 보완하도록 경고만)
+    for (const os of parsed.outfitSessions) {
+        const k = `${os.location}::${os.layerId}`;
+        if (!dna[k] && !dna[os.location]) {
+            console.warn(`[Step1] locationVisualDNA 누락: ${k}`);
+        }
     }
 
     return { analysis: parsed, tokenCount: result.tokenCount };
