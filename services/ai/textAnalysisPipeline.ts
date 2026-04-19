@@ -3,6 +3,7 @@
 
 import { ScenarioAnalysis, CharacterBible, ContiCut, CinematographyCut, CinematographyPlan, EditableScene, EditableCut, CharacterDescription, Cut, EnrichedBeat } from '../../types';
 import { callTextModel, parseJsonResponse } from './aiCore';
+import { normalizeLocationEntries } from '../../appUtils';
 
 // ============================================================
 // Phase 4: Preproduction Pipeline Functions
@@ -122,10 +123,9 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
         parsed.emotionalArc = parsed.emotionalArc.slice(0, totalLines);
     }
 
-    // locations 보정 — 없으면 빈 배열
-    if (!Array.isArray(parsed.locations)) {
-        parsed.locations = [];
-    }
+    // locations 보정 — Phase 7: AI가 string[] 또는 LocationEntry[]로 낼 수 있으므로
+    // 어느 쪽이든 LocationEntry[]로 정규화. 카테고리 누락 시 휴리스틱으로 유추.
+    parsed.locations = normalizeLocationEntries(parsed.locations as unknown);
 
     // ── Phase 5-b: sceneLayers / outfitSessions / locationVisualDNA 보정 ──
 
@@ -138,7 +138,9 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
         parsed.sceneLayers.unshift({ id: '현재', label: '현재' });
     }
     const validLayerIds = new Set(parsed.sceneLayers.map(sl => sl.id));
-    const validLocations = new Set(parsed.locations);
+    // Phase 7: parsed.locations는 LocationEntry[]. name만 Set에 담아 outfitSession 검증.
+    const locationNames = parsed.locations.map(l => l.name);
+    const validLocations = new Set(locationNames);
 
     // outfitSessions: 없으면 빈 배열 / 유효성 검사 (locations·sceneLayers에 존재하는 조합만 유지)
     if (!Array.isArray(parsed.outfitSessions)) {
@@ -150,8 +152,8 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
         return ok;
     });
     // 레거시 폴백: outfitSessions 비어있고 locations는 있으면 각 location을 "현재" 레이어에 매핑
-    if (parsed.outfitSessions.length === 0 && parsed.locations.length > 0) {
-        parsed.outfitSessions = parsed.locations.map(loc => ({
+    if (parsed.outfitSessions.length === 0 && locationNames.length > 0) {
+        parsed.outfitSessions = locationNames.map(loc => ({
             location: loc,
             layerId: '현재',
             lineRange: [1, totalLines] as [number, number],
@@ -401,7 +403,7 @@ ${scenarioAnalysis.locations?.length ? `
 # [중요] 장소 레지스트리 — location 필드 강제
 각 컷의 location 필드는 반드시 다음 목록에서 선택하라.
 새로운 장소명을 만들지 마라 (예: "실내", "집" 등 임의 이름 금지).
-장소 목록: ${scenarioAnalysis.locations.join(', ')}
+장소 목록: ${scenarioAnalysis.locations.map(l => l.name).join(', ')}
 ` : ''}
 ${(scenarioAnalysis.sceneLayers?.length ?? 0) > 1 || (scenarioAnalysis.outfitSessions?.length ?? 0) > 0 ? `
 # [중요] 시간/서사 레이어 — sceneLayerId 필드 필수
@@ -830,7 +832,7 @@ export const regenerateForNewLocations = async (
 # 시나리오 컨텍스트:
 - 장르/톤: ${scenarioAnalysis.genre} / ${scenarioAnalysis.tone}
 - 컬러 무드: ${scenarioAnalysis.colorMood}
-- 기존 장소: ${scenarioAnalysis.locations?.join(', ') || '없음'}
+- 기존 장소: ${scenarioAnalysis.locations?.map(l => l.name).join(', ') || '없음'}
 
 # 등장인물:
 ${characterSummary}

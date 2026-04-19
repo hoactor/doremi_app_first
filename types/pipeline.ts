@@ -15,6 +15,35 @@ export interface EnrichedBeat {
 }
 
 /**
+ * Phase 7: 장소 카테고리 — 의상 전환 매트릭스의 기본 축.
+ * - private_home: 본인 집·방·본인 공간 → 홈웨어/파자마 가능
+ * - visiting_home: 친척집·지인집 (방문 중) → 외출복 유지
+ * - public_indoor: 카페·옷가게·서점·식당 → 외출복
+ * - public_outdoor: 공원·거리·광장·관광지 → 외출복 + 외투
+ * - transit: 자동차·지하철·비행기·택시 → 직전 외출복 유지
+ * - formal: 회사·공항·병원·행사장 → 포멀/비즈니스
+ * - other: 분류 모호 (기본 public_indoor처럼 취급)
+ */
+export type LocationCategory =
+    | 'private_home'
+    | 'visiting_home'
+    | 'public_indoor'
+    | 'public_outdoor'
+    | 'transit'
+    | 'formal'
+    | 'other';
+
+/**
+ * Phase 7: 장소 엔트리 — 이름 + 카테고리 + (선택) 설명.
+ * 레거시 호환: 문자열 배열로 저장된 기존 프로젝트는 sanitizeState에서 자동 변환.
+ */
+export interface LocationEntry {
+    name: string;
+    category: LocationCategory;
+    description?: string;
+}
+
+/**
  * 시간/서사 레이어 — 같은 공간(location)이어도 시점이나 내러티브 레이어가 다르면
  * 별개의 "의상 세션"을 형성한다.
  * 예: 엄마집 현재 / 엄마집 회상_어린시절 / 엄마집 내일아침
@@ -50,7 +79,12 @@ export interface ScenarioAnalysis {
     turningPoints: number[];
     colorMood: string;
     pacing: string;
-    locations: string[];
+    /**
+     * Phase 7: LocationEntry[]로 변경. 카테고리(private_home/public_indoor/...)가
+     * 의상 전환 매트릭스의 기본 축이 됨.
+     * 레거시 프로젝트: sanitizeState가 string[] → LocationEntry[]로 자동 마이그레이션.
+     */
+    locations: LocationEntry[];
     /**
      * 키 형식: "{location}" (레거시) 또는 "{location}::{layerId}" (신규, Phase 5).
      * buildFinalPrompt resolver가 신규 키 우선 → 레거시 폴백 순으로 조회.

@@ -35,6 +35,82 @@ export function createGeneratedImage(params: {
     };
 }
 
+// ── Phase 7: LocationEntry 헬퍼 (string[] ↔ LocationEntry[] 변환) ──
+
+import type { LocationEntry, LocationCategory } from './types/pipeline';
+
+/** 레거시 string[] 또는 신규 LocationEntry[]를 name 배열로 정규화. */
+export function getLocationNames(locations: unknown): string[] {
+    if (!Array.isArray(locations)) return [];
+    return locations.map((l: any) =>
+        typeof l === 'string' ? l : (l?.name ?? '')
+    ).filter(Boolean);
+}
+
+/** name으로 LocationEntry 찾기. 배열이 string[]이면 category='other'로 자동 생성. */
+export function findLocationEntry(
+    locations: unknown,
+    name: string,
+): LocationEntry | undefined {
+    if (!Array.isArray(locations) || !name) return undefined;
+    for (const l of locations) {
+        if (typeof l === 'string') {
+            if (l === name) return { name: l, category: 'other' };
+        } else if (l?.name === name) {
+            return l as LocationEntry;
+        }
+    }
+    return undefined;
+}
+
+/** 이름에서 category 유추 (프롬프트 폴백 / 레거시 마이그레이션용 휴리스틱). */
+export function inferLocationCategory(name: string): LocationCategory {
+    const n = name.toLowerCase();
+    // 사적 공간
+    if (/(집|아파트|방|침실|본인|내 |우리 집)/.test(name) && !/(할머니|이모|친구|지인|외가|친가)/.test(name)) {
+        return 'private_home';
+    }
+    // 방문지
+    if (/(할머니|할아버지|이모|삼촌|고모|친구 집|지인|외가|친가|처가|시가)/.test(name)) {
+        return 'visiting_home';
+    }
+    // 이동 수단
+    if (/(자동차|차 안|지하철|버스|택시|비행기|기차|열차|전철|기내)/.test(name)) {
+        return 'transit';
+    }
+    // 공공 실외
+    if (/(공원|거리|광장|놀이터|바다|산|강|해변|골목|광화문|주차장)/.test(name)) {
+        return 'public_outdoor';
+    }
+    // 포멀
+    if (/(회사|사무실|병원|공항|예식장|법원|행사장|학교|경찰서)/.test(name)) {
+        return 'formal';
+    }
+    // 공공 실내 (기본)
+    if (/(카페|식당|옷가게|서점|마트|편의점|레스토랑|백화점|상점|가게|미용실|극장|영화관|피시방)/.test(name)) {
+        return 'public_indoor';
+    }
+    return 'other';
+}
+
+/** string 또는 LocationEntry 혼재 배열을 LocationEntry[]로 정규화. 마이그레이션 전용. */
+export function normalizeLocationEntries(locations: unknown): LocationEntry[] {
+    if (!Array.isArray(locations)) return [];
+    return locations.map((l: any): LocationEntry => {
+        if (typeof l === 'string') {
+            return { name: l, category: inferLocationCategory(l) };
+        }
+        if (l && typeof l === 'object' && typeof l.name === 'string') {
+            return {
+                name: l.name,
+                category: (l.category as LocationCategory) || inferLocationCategory(l.name),
+                ...(l.description ? { description: l.description } : {}),
+            };
+        }
+        return { name: '', category: 'other' };
+    }).filter(l => l.name);
+}
+
 // ── 3. 의상 조립 (6곳 중복 제거) ──
 
 export interface OutfitBuildOptions {

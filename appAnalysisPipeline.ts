@@ -48,6 +48,7 @@ import {
     regenerateForNewLocations,
 } from './services/geminiService';
 import { IS_TAURI, createProject as createProjectLocal } from './services/tauriAdapter';
+import { inferLocationCategory } from './appUtils';
 import { setClaudeModel } from './services/claudeService';
 import { validatePresetData } from './appPresetValidation';
 
@@ -261,7 +262,9 @@ export async function runAnalysisPipeline(
         checkPipelineAlive(pid, 'Step1-scenario');
         handleAddUsage(scenarioToken, 'claude');
         dispatch({ type: 'SET_SCENARIO_ANALYSIS', payload: scenario });
-        const locationRegistry = scenario.locations || [];
+        // Phase 7: locationRegistry는 name-only string[] 유지 (UI 호환). LocationEntry[]에서 이름만 추출.
+        const locationEntries = scenario.locations || [];
+        const locationRegistry = locationEntries.map(l => l.name);
         dispatch({ type: 'SET_LOCATION_REGISTRY', payload: locationRegistry });
         updateUIState({ analysisProgress: 10 });
 
@@ -600,7 +603,8 @@ export async function runMSFPipeline(
 
         // scenarioAnalysis 저장
         dispatch({ type: 'SET_SCENARIO_ANALYSIS', payload: msfResult.scenarioAnalysis });
-        const locationRegistry = msfResult.scenarioAnalysis.locations || [];
+        // Phase 7: locationRegistry는 name-only string[]
+        const locationRegistry = (msfResult.scenarioAnalysis.locations || []).map(l => l.name);
         dispatch({ type: 'SET_LOCATION_REGISTRY', payload: locationRegistry });
         // ★ locationVisualDNA 저장
         if (msfResult.scenarioAnalysis.locationVisualDNA) {
@@ -817,7 +821,8 @@ export async function runUSSPipeline(
 
         // state 저장
         dispatch({ type: 'SET_SCENARIO_ANALYSIS', payload: scenarioAnalysis });
-        dispatch({ type: 'SET_LOCATION_REGISTRY', payload: scenarioAnalysis.locations });
+        // Phase 7: locationRegistry는 name-only string[]
+        dispatch({ type: 'SET_LOCATION_REGISTRY', payload: scenarioAnalysis.locations.map(l => l.name) });
         dispatch({ type: 'SET_LOCATION_VISUAL_DNA', payload: locationVisualDNA });
         dispatch({ type: 'SET_CHARACTER_BIBLES', payload: characterBibles });
         dispatch({ type: 'SET_CHARACTER_DESCRIPTIONS', payload: legacyCharacters });
@@ -926,14 +931,18 @@ export async function handleRefreshLocations(
 
         handleAddUsage(result.tokenCount, 'claude');
 
-        // ① locationRegistry 업데이트
+        // ① locationRegistry 업데이트 (name-only string[])
         const updatedRegistry = [...(locationRegistry || []), ...newLocations];
         dispatch({ type: 'SET_LOCATION_REGISTRY', payload: updatedRegistry });
 
-        // ② scenarioAnalysis.locations도 동기화
+        // ② scenarioAnalysis.locations도 동기화 (LocationEntry[]). 새 장소는 inferLocationCategory로 카테고리 유추.
+        const existingEntries = scenarioAnalysis.locations || [];
+        const newEntries = newLocations
+            .filter(n => !existingEntries.some(e => e.name === n))
+            .map(n => ({ name: n, category: inferLocationCategory(n) }));
         const updatedScenario = {
             ...scenarioAnalysis,
-            locations: updatedRegistry,
+            locations: [...existingEntries, ...newEntries],
         };
         dispatch({ type: 'SET_SCENARIO_ANALYSIS', payload: updatedScenario });
 

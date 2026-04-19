@@ -7,7 +7,7 @@ import {
     StudioSession, CharacterDescription, Scene, GeneratedScript, ArtStyle, ContentFormat, AIModelTier,
     ImageEngine, FluxModel
 } from './types';
-import { getEngineFromModel, createGeneratedImage } from './appUtils';
+import { getEngineFromModel, createGeneratedImage, normalizeLocationEntries } from './appUtils';
 
 export const createInitialStudioSession = (): StudioSession => ({
     originalImage: null,
@@ -49,6 +49,7 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
         sanitized.locationRegistry = [];
     }
     // ★ Phase 5: 시간 레이어 / 의상 세션 마이그레이션
+    // ★ Phase 7: locations를 string[] → LocationEntry[]로 마이그레이션 (카테고리 유추)
     if (sanitized.scenarioAnalysis) {
         const sa = sanitized.scenarioAnalysis;
         if (!Array.isArray(sa.sceneLayers) || sa.sceneLayers.length === 0) {
@@ -56,6 +57,13 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
         }
         if (!Array.isArray(sa.outfitSessions)) {
             sa.outfitSessions = [];
+        }
+        // Phase 7: 레거시 string[] 감지 → LocationEntry[]로 변환
+        if (Array.isArray(sa.locations) && sa.locations.length > 0) {
+            const firstItem = sa.locations[0];
+            if (typeof firstItem === 'string') {
+                sa.locations = normalizeLocationEntries(sa.locations);
+            }
         }
     }
     if (!('logline' in sanitized) || sanitized.logline === undefined) {

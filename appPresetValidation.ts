@@ -60,7 +60,9 @@ export function validatePresetData(
         warnings.push('sceneLayers에 "현재" 레이어가 없습니다. 기본 레이어로 자동 삽입됩니다.');
     }
     const validLayerIds = new Set(sceneLayers.map(sl => sl.id));
-    const validLocations = new Set(scenarioAnalysis.locations || []);
+    // Phase 7: scenarioAnalysis.locations는 LocationEntry[]. name만 추출해 Set 구성.
+    const locationNames = (scenarioAnalysis.locations || []).map(l => l.name);
+    const validLocations = new Set(locationNames);
 
     for (let i = 0; i < outfitSessions.length; i++) {
         const os = outfitSessions[i];
@@ -85,7 +87,7 @@ export function validatePresetData(
             }
         } else {
             // 레거시 프로젝트: location 기준으로 검사
-            for (const loc of scenarioAnalysis.locations) {
+            for (const loc of locationNames) {
                 if (!dnaKeySet.has(loc) && !dnaKeySet.has(`${loc}::현재`)) {
                     warnings.push(`locationVisualDNA에 "${loc}" 키 누락`);
                 }
@@ -101,7 +103,7 @@ export function validatePresetData(
     } else {
         const expectedSessionKeys = hasSessionModel
             ? outfitSessions.map(os => `${os.location}::${os.layerId}`)
-            : (scenarioAnalysis.locations || []).map(loc => loc);
+            : locationNames;
         for (let i = 0; i < characterBibles.length; i++) {
             const b = characterBibles[i];
             const prefix = `characterBibles[${i}]`;

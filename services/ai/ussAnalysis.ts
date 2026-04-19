@@ -4,6 +4,7 @@
 // ussToAppData: USS → 기존 앱 데이터 구조 매핑 (AI 불필요)
 
 import { callClaude } from '../claudeService';
+import { inferLocationCategory } from '../../appUtils';
 import type {
     UniversalScriptSchema, USSCharacter, USSLocation, USSCut,
     ContiCut, CharacterBible, ScenarioAnalysis, CharacterDescription,
@@ -424,7 +425,8 @@ export function ussToAppData(
         turningPoints: [setupEndCut, confrontationEndCut],
         colorMood: meta.colorMood,
         pacing: meta.pacing,
-        locations: locations.map(l => l.name),
+        // Phase 7: LocationEntry[]. USS 파이프라인은 이름에서 카테고리 자동 유추 (휴리스틱).
+        locations: locations.map(l => ({ name: l.name, category: inferLocationCategory(l.name) })),
         locationVisualDNA,
     };
 

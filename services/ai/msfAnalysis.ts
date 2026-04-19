@@ -4,6 +4,7 @@
 import { ContiCut, CharacterBible, ScenarioAnalysis } from '../../types';
 import { callTextModel, parseJsonResponse, SFW_SYSTEM_INSTRUCTION } from './aiCore';
 import { callClaude } from '../claudeService';
+import { normalizeLocationEntries } from '../../appUtils';
 
 export interface MSFParseResult {
     scenarioAnalysis: ScenarioAnalysis;
@@ -179,7 +180,8 @@ ${msfScript}
         turningPoints: parsed.scenarioAnalysis?.turningPoints || [],
         colorMood: parsed.scenarioAnalysis?.colorMood || '',
         pacing: parsed.scenarioAnalysis?.pacing || 'normal',
-        locations: parsed.scenarioAnalysis?.locations || [],
+        // Phase 7: AI가 string[] 또는 LocationEntry[]로 낼 수 있음 → LocationEntry[]로 정규화
+        locations: normalizeLocationEntries(parsed.scenarioAnalysis?.locations),
         locationVisualDNA: parsed.scenarioAnalysis?.locationVisualDNA || {},  // ★ NEW
     };
 
@@ -207,7 +209,7 @@ ${msfScript}
         originLines: c.originLines || [i + 1],
         narration: c.narration || '',
         characters: c.characters || [],
-        location: c.location || scenarioAnalysis.locations[0] || '',
+        location: c.location || scenarioAnalysis.locations[0]?.name || '',
         visualDescription: c.visualDescription || '',
         emotionBeat: c.emotionBeat || '',
         characterPose: c.characterPose || '',
