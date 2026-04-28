@@ -118,8 +118,23 @@ fn migrate_legacy_keys() {
     }
 }
 
-/// 통합 JSON에서 특정 키 꺼내기 (proxy 함수용) — 캐시 사용
+/// 통합 JSON에서 특정 키 꺼내기 (proxy 함수용) — 캐시 사용 + 환경변수 fallback
+/// dev 빌드에서 매번 macOS Keychain 권한 다이얼로그가 뜨는 문제 회피용 fallback.
+/// 환경변수가 있으면 keychain보다 우선 사용 → 권한 다이얼로그 안 뜸.
 fn get_api_key(field: &str) -> Result<String, String> {
+    // 1순위: 환경변수 (dev 편의)
+    let env_var = match field {
+        "claude" => "CLAUDE_API_KEY",
+        "gemini" => "GEMINI_API_KEY",
+        "supertone" => "SUPERTONE_API_KEY",
+        "fal" => "FAL_API_KEY",
+        "openai" => "OPENAI_API_KEY",
+        _ => return Err(format!("Unknown key field: {field}")),
+    };
+    if let Ok(v) = std::env::var(env_var) {
+        if !v.is_empty() { return Ok(v); }
+    }
+    // 2순위: keychain 통합 JSON 캐시
     let keys = cached_keys();
     match field {
         "claude" => keys.claude.filter(|s| !s.is_empty()).ok_or_else(|| "CLAUDE_API_KEY not found".to_string()),
@@ -395,6 +410,165 @@ async fn proxy_fetch(request: GenericFetchRequest) -> Result<serde_json::Value, 
         Ok(json) => Ok(serde_json::json!({"status": status, "data": json})),
         Err(_) => Ok(serde_json::json!({"status": status, "data": text})),
     }
+}
+
+// ─── Phase B: OpenAI gpt-image-2 ───────────────────────────────────
+
+#[derive(Deserialize)]
+struct OpenAiImageGenRequest {
+    prompt: String,
+    size: String,
+    quality: String,
+    n: Option<u8>,
+    output_format: Option<String>,
+    moderation: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiImageEditRequest {
+    prompt: String,
+    size: String,
+    quality: String,
+    images_base64: Vec<String>,
+    mask_base64: Option<String>,
+    n: Option<u8>,
+    input_fidelity: Option<String>,
+}
+
+#[derive(Serialize)]
+struct OpenAiImageResponse {
+    images_base64: Vec<String>,
+    output_tokens: u64,
+    input_tokens: u64,
+}
+
+fn map_openai_error(status: u16, body: &serde_json::Value) -> String {
+    let body_str = body.to_string();
+    if body_str.contains("content_policy") || body_str.contains("moderation") {
+        return format!("OpenAI moderation blocked: {}", body_str);
+    }
+    if status == 401 {
+        return format!("OpenAI 401: API key invalid or expired");
+    }
+    if status == 403 {
+        return format!("OpenAI 403: organization not verified — 콘솔에서 verify 필요. {}", body_str);
+    }
+    if status == 429 {
+        let retry = body["retry_after"].as_u64().unwrap_or(30);
+        return format!("OpenAI rate limited (retry after {}s): {}", retry, body_str);
+    }
+    format!("OpenAI API error ({}): {}", status, body_str)
+}
+
+#[tauri::command]
+async fn proxy_openai_image_generate(
+    request: OpenAiImageGenRequest,
+) -> Result<OpenAiImageResponse, String> {
+    let api_key = get_api_key("openai")?;
+    let body = serde_json::json!({
+        "model": "gpt-image-2",
+        "prompt": request.prompt,
+        "size": request.size,
+        "quality": request.quality,
+        "n": request.n.unwrap_or(1),
+        "output_format": request.output_format.unwrap_or_else(|| "png".to_string()),
+        "moderation": request.moderation.unwrap_or_else(|| "auto".to_string()),
+    });
+    let resp = client()
+        .post("https://api.openai.com/v1/images/generations")
+        .bearer_auth(&api_key)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("OpenAI request failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let resp_body: serde_json::Value = resp.json().await
+        .map_err(|e| format!("OpenAI parse error: {e}"))?;
+    if status != 200 {
+        return Err(map_openai_error(status, &resp_body));
+    }
+    let images: Vec<String> = resp_body["data"].as_array()
+        .ok_or_else(|| "OpenAI: no data array".to_string())?
+        .iter()
+        .filter_map(|d| d["b64_json"].as_str().map(String::from))
+        .collect();
+    let usage = &resp_body["usage"];
+    Ok(OpenAiImageResponse {
+        images_base64: images,
+        output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
+        input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
+    })
+}
+
+#[tauri::command]
+async fn proxy_openai_image_edit(
+    request: OpenAiImageEditRequest,
+) -> Result<OpenAiImageResponse, String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    let api_key = get_api_key("openai")?;
+
+    let mut form = reqwest::multipart::Form::new()
+        .text("model", "gpt-image-2")
+        .text("prompt", request.prompt.clone())
+        .text("size", request.size.clone())
+        .text("quality", request.quality.clone())
+        .text("n", request.n.unwrap_or(1).to_string());
+
+    if let Some(fid) = request.input_fidelity {
+        form = form.text("input_fidelity", fid);
+    }
+
+    for (idx, b64) in request.images_base64.iter().enumerate() {
+        let bytes = B64.decode(b64.as_bytes())
+            .map_err(|e| format!("Image {} base64 decode failed: {}", idx, e))?;
+        form = form.part(
+            "image[]",
+            reqwest::multipart::Part::bytes(bytes)
+                .file_name(format!("ref{}.png", idx))
+                .mime_str("image/png")
+                .map_err(|e| format!("MIME error: {}", e))?,
+        );
+    }
+
+    if let Some(mask_b64) = request.mask_base64 {
+        let bytes = B64.decode(mask_b64.as_bytes())
+            .map_err(|e| format!("Mask base64 decode failed: {}", e))?;
+        form = form.part(
+            "mask",
+            reqwest::multipart::Part::bytes(bytes)
+                .file_name("mask.png")
+                .mime_str("image/png")
+                .map_err(|e| format!("MIME error: {}", e))?,
+        );
+    }
+
+    let resp = client()
+        .post("https://api.openai.com/v1/images/edits")
+        .bearer_auth(&api_key)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("OpenAI edit request failed: {e}"))?;
+
+    let status = resp.status().as_u16();
+    let resp_body: serde_json::Value = resp.json().await
+        .map_err(|e| format!("OpenAI edit parse error: {e}"))?;
+    if status != 200 {
+        return Err(map_openai_error(status, &resp_body));
+    }
+
+    let images: Vec<String> = resp_body["data"].as_array()
+        .ok_or_else(|| "OpenAI: no data array".to_string())?
+        .iter()
+        .filter_map(|d| d["b64_json"].as_str().map(String::from))
+        .collect();
+    let usage = &resp_body["usage"];
+    Ok(OpenAiImageResponse {
+        images_base64: images,
+        output_tokens: usage["output_tokens"].as_u64().unwrap_or(0),
+        input_tokens: usage["input_tokens"].as_u64().unwrap_or(0),
+    })
 }
 
 // ─── 로컬 스토리지: 공용 유틸 ──────────────────────────────────────
@@ -1129,6 +1303,9 @@ fn main() {
             proxy_gemini,
             proxy_supertone,
             proxy_fetch,
+            // Phase B: OpenAI gpt-image-2
+            proxy_openai_image_generate,
+            proxy_openai_image_edit,
             // 로컬 스토리지: 파일시스템
             ensure_directories,
             save_image_file,

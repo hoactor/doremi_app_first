@@ -4,6 +4,10 @@ import type { AppAction, Cut, GeneratedImage, ArtStyle } from './types';
 import { buildFinalPrompt, PromptContext } from './appStyleEngine';
 import { regenerateCutFieldsForIntentChange } from './services/geminiService';
 import { getEngineFromModel, createGeneratedImage, buildMechanicalOutfit } from './appUtils';
+// ★ Phase B: OpenAI Edit 분기
+import { editWithGptImage2 } from './services/openaiImageService';
+import { buildGptImage2EditPrompt } from './appOpenaiPromptEngine';
+import { resolveImageUrl } from './services/tauriAdapter';
 
 export interface CutEditActionHelpers {
     dispatch: (action: AppAction) => void;
@@ -23,9 +27,96 @@ export function createCutEditActions(h: CutEditActionHelpers) {
 
     const handleEditForCut = async (cutNumber: string, img: GeneratedImage, p: string, refs: string[], mask?: string) => {
         const finalSourceCut = cutNumber || img.sourceCutNumber;
+        const s = stateRef.current;
         dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: finalSourceCut, data: { imageLoading: true } } });
+
+        // ── ★ Phase B: OpenAI 엔진 분기 ──
+        if (s.selectedImageEngine === 'openai') {
+            try {
+                // 편집 대상 이미지 + 추가 참조 이미지를 base64로 변환
+                const allImageUrls = [img.imageUrl, ...refs];
+                const base64Images: string[] = [];
+                for (const url of allImageUrls) {
+                    try {
+                        const resolved = await resolveImageUrl(url);
+                        if (resolved.startsWith('data:')) {
+                            base64Images.push(resolved.split(',')[1] ?? '');
+                        } else {
+                            const resp = await fetch(resolved);
+                            const blob = await resp.blob();
+                            const b64 = await new Promise<string>((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '');
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+                            base64Images.push(b64);
+                        }
+                    } catch (err) {
+                        console.warn('[OpenAI Edit] image base64 변환 실패:', err);
+                    }
+                }
+                if (base64Images.length === 0) {
+                    addNotification('편집할 이미지 변환 실패', 'error');
+                    return;
+                }
+
+                // mask 처리 (선택)
+                let maskBase64: string | undefined;
+                if (mask) {
+                    try {
+                        const resolved = await resolveImageUrl(mask);
+                        maskBase64 = resolved.startsWith('data:') ? resolved.split(',')[1] : undefined;
+                    } catch {}
+                }
+
+                // 자연어 편집 프롬프트 (사용자 입력을 자연어 프레임에 래핑)
+                const cut = s.generatedContent?.scenes.flatMap((sc: any) => sc.cuts).find((c: Cut) => c.cutNumber === finalSourceCut);
+                const baseDescription = cut ? `Cut #${cut.cutNumber}, ${cut.location || ''}, characters: ${(cut.characters || []).join(', ')}` : '';
+                const editPrompt = buildGptImage2EditPrompt(baseDescription, p);
+
+                const size = s.imageRatio === '9:16' ? '1024x1536'
+                           : s.imageRatio === '16:9' ? '1536x1024'
+                           : '1024x1024';
+
+                const result = await editWithGptImage2({
+                    prompt: editPrompt,
+                    referenceImagesBase64: base64Images,
+                    maskBase64,
+                    quality: s.openaiImageQuality || 'medium',
+                    sourceCutNumber: finalSourceCut,
+                    size,
+                });
+
+                dispatch({
+                    type: 'ADD_OPENAI_USAGE',
+                    payload: {
+                        images: result.images.length,
+                        costUsd: result.estimatedCostUsd,
+                        quality: s.openaiImageQuality || 'medium',
+                    },
+                });
+
+                for (const newImg of result.images) {
+                    const localPath = await persistImageToDisk(newImg.imageUrl, finalSourceCut, newImg.id);
+                    const persisted: GeneratedImage = { ...newImg, localPath };
+                    dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: persisted, cutNumber: finalSourceCut } });
+                }
+            } catch (err: any) {
+                const msg = String(err?.message ?? err ?? 'Unknown OpenAI edit error');
+                if (msg.includes('moderation')) addNotification('OpenAI 정책 거부 — 프롬프트 수정 필요', 'error');
+                else if (msg.includes('not verified') || msg.includes('403')) addNotification('OpenAI 조직 인증 필요', 'error');
+                else if (msg.includes('rate limited') || msg.includes('429')) addNotification('OpenAI Rate limit — 잠시 후 재시도', 'warning');
+                else addNotification(`OpenAI 편집 실패: ${msg.slice(0, 80)}`, 'error', { label: '재시도', callback: () => handleEditForCut(cutNumber, img, p, refs, mask) });
+            } finally {
+                dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: finalSourceCut, data: { imageLoading: false } } });
+            }
+            return;
+        }
+
+        // ── 기존 Gemini 경로 ──
         try {
-            const cut = stateRef.current.generatedContent?.scenes.flatMap((s: any) => s.cuts).find((c: Cut) => c.cutNumber === finalSourceCut);
+            const cut = stateRef.current.generatedContent?.scenes.flatMap((sc: any) => sc.cuts).find((c: Cut) => c.cutNumber === finalSourceCut);
             const styleToUse = cut?.artStyleOverride || stateRef.current.artStyle;
             const artStylePrompt = getArtStylePrompt(styleToUse);
 

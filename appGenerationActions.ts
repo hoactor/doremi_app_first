@@ -7,6 +7,9 @@ import { generateImageForCut, CutGenerationContext } from './appImageEngine';
 import { refinePromptWithAI, refineAllPromptsWithAI } from './services/geminiService';
 import { buildFluxPromptSmart, FluxPromptContext, translateImageScriptToFlux } from './appFluxPromptEngine';
 import { sanitizeChildSafety } from './appSafetySanitize';
+// ★ Phase B: gpt-image-2 직접 호출 + 자연어 프롬프트
+import { buildGptImage2Prompt } from './appOpenaiPromptEngine';
+import { generateWithGptImage2, editWithGptImage2, collectCharacterReferences, pickBestCharacterReferenceUrl } from './services/openaiImageService';
 
 export interface GenerationActionHelpers {
     dispatch: (action: AppAction) => void;
@@ -212,6 +215,83 @@ export function createGenerationActions(h: GenerationActionHelpers) {
         // ★ 스피너 즉시 표시 (프롬프트 빌드 전)
         dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { imageLoading: true } } });
 
+        // ── ★ Phase B: OpenAI gpt-image-2 분기 (Gemini/Flux와 평등) ──
+        if (s.selectedImageEngine === 'openai') {
+            try {
+                // ★ Phase B 패치: 멀티 캐릭터 reference 매핑 함께 받기
+                const { base64Images, mapping } = await collectCharacterReferences(
+                    s.characterDescriptions || {},
+                    cut.characters || [],
+                    (cut as any).sceneLayerId,
+                );
+                const hasReference = base64Images.length > 0;
+                const openaiPrompt = buildGptImage2Prompt({
+                    cut: cut as any,
+                    characterDescriptions: s.characterDescriptions || {},
+                    scenarioAnalysis: s.scenarioAnalysis,
+                    cinematographyPlan: s.cinematographyPlan,
+                    artStyle: s.artStyle || 'normal',
+                    customArtStyle: s.customArtStyle || '',
+                    imageRatio: s.imageRatio || '1:1',
+                    hasReference,
+                    referenceImageMapping: mapping,  // ★ Image N 라벨링 활성화
+                });
+                const sanitized = sanitizeChildSafety(openaiPrompt);
+                const size = s.imageRatio === '9:16' ? '1024x1536'
+                           : s.imageRatio === '16:9' ? '1536x1024'
+                           : '1024x1024';
+                const styleNames: Record<string, string> = { 'normal':'정통 썰툰','vibrant':'도파민','kyoto':'시네마 감성','moe':'극강 귀요미','dalle-chibi':'프리미엄','custom':'커스텀' };
+                const artStyleLabel = styleNames[s.artStyle] || s.artStyle;
+
+                const result = hasReference
+                    ? await editWithGptImage2({
+                        prompt: sanitized,
+                        referenceImagesBase64: base64Images,
+                        quality: s.openaiImageQuality || 'medium',
+                        sourceCutNumber: cutNumber,
+                        size,
+                        // input_fidelity는 gpt-image-2에서 미지원 (invalid_input_fidelity_model 400).
+                        artStyleLabel,
+                    })
+                    : await generateWithGptImage2({
+                        prompt: sanitized,
+                        quality: s.openaiImageQuality || 'medium',
+                        sourceCutNumber: cutNumber,
+                        size,
+                        artStyleLabel,
+                    });
+
+                dispatch({
+                    type: 'ADD_OPENAI_USAGE',
+                    payload: {
+                        images: result.images.length,
+                        costUsd: result.estimatedCostUsd,
+                        quality: s.openaiImageQuality || 'medium',
+                    },
+                });
+
+                for (const img of result.images) {
+                    const localPath = await persistImageToDisk(img.imageUrl, cutNumber, img.id);
+                    const persisted: GeneratedImage = { ...img, localPath };
+                    dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: persisted, cutNumber } });
+                }
+            } catch (err: any) {
+                const msg = String(err?.message ?? err ?? 'Unknown OpenAI error');
+                if (msg.includes('moderation')) {
+                    addNotification('OpenAI 정책 거부 — 프롬프트 수정 필요', 'error');
+                } else if (msg.includes('not verified') || msg.includes('403')) {
+                    addNotification('OpenAI 조직 인증 필요 — 콘솔 확인', 'error');
+                } else if (msg.includes('rate limited') || msg.includes('429')) {
+                    addNotification('OpenAI Rate limit — 잠시 후 재시도', 'warning');
+                } else {
+                    addNotification(`OpenAI 생성 실패: ${msg.slice(0, 80)}`, 'error', { label: '재시도', callback: () => handleGenerateForCut(cutNumber, mode) });
+                }
+            } finally {
+                dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { imageLoading: false } } });
+            }
+            return;
+        }
+
         try {
         const geminiPrompt = sanitizeChildSafety(cut.imagePrompt || calculateFinalPrompt(cut as any));
 
@@ -377,7 +457,22 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 merged.characterOutfit = buildMechanicalOutfit(chars, s.characterDescriptions, cut.location, { sceneLayerId: cut.sceneLayerId });
             }
             const promptCtx: PromptContext = { characterDescriptions: s.characterDescriptions, locationVisualDNA: s.locationVisualDNA || {}, cinematographyPlan: s.cinematographyPlan || null, imageRatio: s.imageRatio || '1:1', artStyle: s.artStyle };
-            const newPrompt = sanitizeChildSafety(buildFinalPrompt(merged, promptCtx));
+            // ★ Phase B: OpenAI 엔진이면 자연어 프롬프트로 빌드, 그 외는 Gemini SD 프롬프트
+            const newPrompt = s.selectedImageEngine === 'openai'
+                ? sanitizeChildSafety(buildGptImage2Prompt({
+                    cut: merged,
+                    characterDescriptions: s.characterDescriptions,
+                    scenarioAnalysis: s.scenarioAnalysis,
+                    cinematographyPlan: s.cinematographyPlan,
+                    artStyle: s.artStyle || 'normal',
+                    customArtStyle: s.customArtStyle || '',
+                    imageRatio: s.imageRatio || '1:1',
+                    hasReference: (merged.characters || []).some((k: string) => {
+                        const c = s.characterDescriptions[k];
+                        return c && !!pickBestCharacterReferenceUrl(c, merged.sceneLayerId);
+                    }),
+                }))
+                : sanitizeChildSafety(buildFinalPrompt(merged, promptCtx));
             const upd: Partial<Cut> = { ...fieldChanges, imagePrompt: newPrompt };
             if (fieldChanges.characters) upd.characterOutfit = merged.characterOutfit;
             delete (upd as any).characters;
