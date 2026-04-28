@@ -433,10 +433,12 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                     <div className="mt-1 w-full aspect-square bg-zinc-950 rounded-lg flex items-center justify-center relative group border border-zinc-800 overflow-hidden" onDragEnter={handleImageDragEnter} onDragLeave={handleImageDragLeave} onDragOver={handleImageDragOver} onDrop={handleImageDrop}>
                        {selectedImage?.imageUrl ? (
                             <>
-                                <img 
+                                <img
                                     src={selectedImage.imageUrl || undefined}
                                     alt={`Selected for ${cut.cutNumber}`}
-                                    className="w-full h-full object-cover cursor-grab" 
+                                    loading="lazy"
+                                    decoding="async"
+                                    className="w-full h-full object-cover cursor-grab"
                                     onClick={() => actions.handleOpenImageViewer(selectedImage.imageUrl, `Selected image for ${cut.cutNumber}`)}
                                     onDoubleClick={(e) => { e.stopPropagation(); actions.setUIState({ enlargedCutNumber: cut.cutNumber }); }}
                                     draggable={true}
@@ -483,7 +485,7 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                             if (refUrl) {
                                 return (
                                     <div key={idx} className="relative aspect-square rounded-md overflow-hidden border border-zinc-600 group">
-                                        <img src={refUrl} alt={`참조${idx + 1}`} className="w-full h-full object-cover" onClick={() => actions.handleOpenImageViewer(refUrl, `참조 ${idx + 1}`)} />
+                                        <img src={refUrl} alt={`참조${idx + 1}`} loading="lazy" decoding="async" className="w-full h-full object-cover" onClick={() => actions.handleOpenImageViewer(refUrl, `참조 ${idx + 1}`)} />
                                         <button onClick={() => setReferenceImageUrls(prev => prev.filter((_, i) => i !== idx))} className="absolute top-0.5 right-0.5 p-0.5 bg-red-600 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"><XIcon className="w-2.5 h-2.5" /></button>
                                     </div>
                                 );
@@ -574,7 +576,7 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                                     draggable={true}
                                     onDragStart={(e) => handleDragStart(e, image)}
                                 >
-                                    {image.imageUrl ? <img src={image.imageUrl} alt={`Version for ${cut.cutNumber}`} className="w-full h-full object-cover"/> : <div className="w-full h-full bg-zinc-800" />}
+                                    {image.imageUrl ? <img src={image.imageUrl} alt={`Version for ${cut.cutNumber}`} loading="lazy" decoding="async" className="w-full h-full object-cover"/> : <div className="w-full h-full bg-zinc-800" />}
                                 </button>
                                 <span className={`absolute -bottom-1.5 left-1/2 -translate-x-1/2 text-[5px] font-bold px-1 rounded whitespace-nowrap ${badgeCls}`}>{badgeText}</span>
                             </div>

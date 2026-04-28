@@ -102,6 +102,8 @@ export const App: React.FC = () => {
     const [isBgMusicDragging, setIsBgMusicDragging] = useState(false);
     const [batchInput, setBatchInput] = useState('');
     const [collapsedScenes, setCollapsedScenes] = useState<Set<number>>(new Set());
+    // ★ 로딩 성능: 첫 마운트 시 모든 씬 collapsed (첫 씬만 펼침). 사용자가 펼친 씬만 카드 마운트.
+    const collapseInitDoneRef = useRef(false);
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     
@@ -156,6 +158,19 @@ export const App: React.FC = () => {
     const allCuts = useMemo(() => generatedContent?.scenes.flatMap(s => s.cuts) || [], [generatedContent]);
     const intenseCount = useMemo(() => allCuts.filter(c => c.useIntenseEmotion).length, [allCuts]);
     const toggleScene = useCallback((n: number) => setCollapsedScenes(prev => { const s = new Set(prev); s.has(n) ? s.delete(n) : s.add(n); return s; }), []);
+
+    // ★ 로딩 성능: generatedContent 첫 로드 시 첫 씬 외 모두 collapsed
+    //   사용자가 펼친 씬만 SceneCard 마운트 → 40~60컷 동시 렌더 회피.
+    //   사용자가 직접 펼침/접음 후에는 자동 collapse 다시 적용 안 함.
+    useEffect(() => {
+        if (!generatedContent || collapseInitDoneRef.current) return;
+        const scenes = generatedContent.scenes;
+        if (scenes.length === 0) return;
+        // 첫 씬은 펼치고 나머지는 collapsed
+        const initial = new Set<number>(scenes.slice(1).map(s => s.sceneNumber));
+        setCollapsedScenes(initial);
+        collapseInitDoneRef.current = true;
+    }, [generatedContent]);
 
 
     // ★ Save 버튼 상태 표시: idle → saving → saved → idle

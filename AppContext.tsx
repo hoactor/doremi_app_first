@@ -431,27 +431,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadSavedState();
     }, []);
 
-    // Auto-Save on appState change
+    // ★ 자동 저장 제거 (2026-04-28) — 깜빡임/딜레이 원인.
+    //   사용자는 Save 버튼(또는 ⌘S)으로 명시적으로 저장.
+    //   브라우저 환경에서만 IndexedDB 폴백 자동 저장 유지 (Tauri 외에서는 다른 저장 수단 없음).
     useEffect(() => {
         if (!isInitializedRef.current) return;
-        
-        // Debounce saving to avoid performance issues on rapid state changes
+        if (IS_TAURI) return; // Tauri는 사용자 명시 저장만
         const timeoutId = setTimeout(() => {
-            if (IS_TAURI && appState.currentProjectId) {
-                // Tauri: project.json 기반 자동저장
-                autoSaveProject().then(() => {
-                    setUIState(prev => ({ ...prev, lastAutoSaved: Date.now() }));
-                });
-            } else {
-                // 브라우저 or 프로젝트 미생성: IndexedDB 폴백
-                set('wvs_auto_save_state', appState).catch(err => {
-                    console.error("Failed to auto-save state to IndexedDB:", err);
-                });
-            }
-        }, 2000); // 2초 디바운스 (이미지 저장 완료 대기)
-
+            set('wvs_auto_save_state', appState).catch(err => {
+                console.error("Failed to auto-save state to IndexedDB:", err);
+            });
+        }, 2000);
         return () => clearTimeout(timeoutId);
-    }, [appState, autoSaveProject]);
+    }, [appState]);
 
     useEffect(() => {
         const apiKey = loadOpenAiApiKey();
