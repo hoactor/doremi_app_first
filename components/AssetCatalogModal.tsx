@@ -163,12 +163,20 @@ interface AssetCatalogModalProps {
     mode?: 'all' | 'character' | 'background';
     /** DALL-E 원본 생성 모달을 부모에게 열어달라고 요청. 현재 필터 타입을 힌트로 전달. */
     onRequestDalleGenerator?: (initialType?: 'character' | 'background' | 'outfit' | 'prop') => void;
+    /** ★ true면 선택 후 모달 자동 안 닫음 — 여러 에셋 연속 첨부 (References 슬롯 등) */
+    keepOpenOnSelect?: boolean;
+    /**
+     * ★ 범용 첨부 콜백 — 타입 무관하게 모든 클릭을 받음.
+     * onSelectCharacter/onSelectBackground보다 우선 호출.
+     * References 슬롯처럼 "타입 구분 없이 그냥 reference로 쓰는" 용도.
+     */
+    onAttachReference?: (asset: AssetCatalogEntry) => void;
 }
 
 // ─── 메인 모달 ────────────────────────────────────────────────────
 export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
     isOpen, onClose, currentArtStyle, onSelectCharacter, onSelectBackground, mode = 'all',
-    onRequestDalleGenerator,
+    onRequestDalleGenerator, keepOpenOnSelect = false, onAttachReference,
 }) => {
     const { actions: ctxActions } = useAppContext();
     const [assets, setAssets] = useState<AssetCatalogEntry[]>([]);
@@ -233,15 +241,23 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
     // 실제 선택 실행 (화풍 확인 완료 후)
     const executeSelect = useCallback((asset: AssetCatalogEntry) => {
         const extras = asset.tags?.extraTypes ? String(asset.tags.extraTypes).split(',').filter(Boolean) : [];
-        if (mode === 'character' && onSelectCharacter) { onSelectCharacter(asset); onClose(); }
+        // ★ keepOpenOnSelect: true면 onClose 호출 안 함 (여러 에셋 연속 첨부 가능)
+        const closeIfNeeded = () => { if (!keepOpenOnSelect) onClose(); };
+        // ★ 범용 첨부 콜백 우선 — 타입 무관하게 모든 에셋 첨부 (References 슬롯 등)
+        if (onAttachReference) {
+            onAttachReference(asset);
+            closeIfNeeded();
+            return;
+        }
+        if (mode === 'character' && onSelectCharacter) { onSelectCharacter(asset); closeIfNeeded(); }
         else if (mode === 'background' && onSelectBackground) {
-            onSelectBackground(asset, 'reference'); onClose();
+            onSelectBackground(asset, 'reference'); closeIfNeeded();
         }
-        else if (onSelectCharacter && (asset.type === 'character' || extras.includes('character'))) { onSelectCharacter(asset); onClose(); }
+        else if (onSelectCharacter && (asset.type === 'character' || extras.includes('character'))) { onSelectCharacter(asset); closeIfNeeded(); }
         else if (onSelectBackground && (asset.type === 'background' || extras.includes('background'))) {
-            onSelectBackground(asset, 'reference'); onClose();
+            onSelectBackground(asset, 'reference'); closeIfNeeded();
         }
-    }, [mode, onSelectCharacter, onSelectBackground, onClose]);
+    }, [mode, onSelectCharacter, onSelectBackground, onClose, keepOpenOnSelect, onAttachReference]);
 
     const handleSelect = useCallback((asset: AssetCatalogEntry) => {
         // 화풍 불일치 체크 제거 (2026-04-19) — 바로 선택 적용

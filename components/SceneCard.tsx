@@ -246,7 +246,7 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
         if (!selectedImage || !refineInput.trim()) return;
         try {
             await actions.handleEditForCut(cut.cutNumber, selectedImage, refineInput, referenceImageUrls);
-            setRefineInput('');
+            // ★ 텍스트 보존 — 사용자가 같은 프롬프트로 반복 수정 또는 미세 조정할 수 있도록
         } catch (err) { console.error('Edit failed:', err); }
     };
 
@@ -260,12 +260,43 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
         }
     };
 
-    const handleRefDrop = (e: React.DragEvent) => {
+    const handleRefDrop = async (e: React.DragEvent) => {
         e.preventDefault();
         setIsRefDragging(false);
-        const data = e.dataTransfer.getData('application/x-studio-image-source');
-        if (data && referenceImageUrls.length < 5) {
-            try { const { image } = JSON.parse(data); if (image?.imageUrl) setReferenceImageUrls(prev => [...prev, image.imageUrl]); } catch {}
+        if (referenceImageUrls.length >= 5) return;
+
+        // 1. Studio 이미지 (기존)
+        const studioData = e.dataTransfer.getData('application/x-studio-image-source');
+        if (studioData) {
+            try {
+                const { image } = JSON.parse(studioData);
+                if (image?.imageUrl) {
+                    setReferenceImageUrls(prev => [...prev, image.imageUrl]);
+                    return;
+                }
+            } catch {}
+        }
+
+        // 2. AssetCatalogEntry (캐릭터/배경/의상/소품 에셋 — application/json MIME)
+        const assetData = e.dataTransfer.getData('application/json');
+        if (assetData) {
+            try {
+                const asset = JSON.parse(assetData);
+                const path = asset?.imagePath || asset?.imageUrl || asset?.url;
+                if (path) {
+                    const resolved = await resolveImageUrl(path);
+                    setReferenceImageUrls(prev => [...prev, resolved]);
+                    return;
+                }
+            } catch {}
+        }
+
+        // 3. 외부 파일 드롭 (선택)
+        const file = e.dataTransfer.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = ev => setReferenceImageUrls(prev => [...prev, ev.target?.result as string]);
+            reader.readAsDataURL(file);
         }
     };
 
@@ -513,10 +544,10 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                         onKeyDown={e => {
                             if (e.nativeEvent.isComposing) return;
                             if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && refineInput.trim()) { e.preventDefault(); handleEditImage(); }
-                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && refineInput.trim()) { e.preventDefault(); actions.handleRefinePrompt(cut.cutNumber, refineInput); setRefineInput(''); }
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && refineInput.trim()) { e.preventDefault(); actions.handleRefinePrompt(cut.cutNumber, refineInput); /* ★ 텍스트 보존 */ }
                         }}
                         placeholder="Enter=편집 / ⌘Enter=프롬프트수정" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-[10px] text-white placeholder-zinc-600 focus:border-orange-500 focus:outline-none" />
-                    <button onClick={() => { if (refineInput.trim()) { actions.handleRefinePrompt(cut.cutNumber, refineInput); setRefineInput(''); } }} disabled={!refineInput.trim() || cut.imageLoading}
+                    <button onClick={() => { if (refineInput.trim()) { actions.handleRefinePrompt(cut.cutNumber, refineInput); /* ★ 텍스트 보존 */ } }} disabled={!refineInput.trim() || cut.imageLoading}
                         className="px-2 py-1.5 bg-transparent hover:bg-orange-500/10 disabled:bg-zinc-700 text-orange-400 text-[10px] font-bold rounded-md border border-orange-500/50 flex items-center gap-0.5 transition-colors">Refine</button>
                     <button onClick={handleEditImage} disabled={!refineInput.trim() || !selectedImage || cut.imageLoading}
                         className="px-2 py-1.5 bg-teal-900/30 hover:bg-teal-800/40 disabled:bg-zinc-700 text-teal-400 text-[10px] font-bold rounded-md border border-teal-600/40 flex items-center gap-0.5 transition-colors">Edit</button>
@@ -759,11 +790,18 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                 isOpen={isAssetPickerOpen}
                 onClose={() => setIsAssetPickerOpen(false)}
                 currentArtStyle={state.artStyle}
-                onSelectCharacter={async (asset: AssetCatalogEntry) => {
-                    try { const url = await resolveImageUrl(asset.imagePath); setReferenceImageUrls(prev => [...prev, url]); } catch { actions.addNotification('에셋 이미지를 불러올 수 없습니다.', 'error'); }
-                }}
-                onSelectBackground={async (asset: AssetCatalogEntry) => {
-                    try { const url = await resolveImageUrl(asset.imagePath); setReferenceImageUrls(prev => [...prev, url]); } catch { actions.addNotification('에셋 이미지를 불러올 수 없습니다.', 'error'); }
+                keepOpenOnSelect  // ★ 여러 에셋 연속 첨부 (사용자가 X로 직접 닫음)
+                onAttachReference={async (asset: AssetCatalogEntry) => {
+                    // ★ 타입 무관하게 모든 에셋 첨부 — character/background/outfit/prop 다 OK
+                    if (referenceImageUrls.length >= 5) {
+                        actions.addNotification('References 슬롯이 가득 찼습니다 (최대 5개).', 'warning');
+                        return;
+                    }
+                    try {
+                        const url = await resolveImageUrl(asset.imagePath);
+                        setReferenceImageUrls(prev => [...prev, url]);
+                        actions.addNotification(`"${asset.name}" 첨부됨 (${referenceImageUrls.length + 1}/5)`, 'success');
+                    } catch { actions.addNotification('에셋 이미지를 불러올 수 없습니다.', 'error'); }
                 }}
             />
         )}
