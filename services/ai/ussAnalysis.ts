@@ -8,7 +8,7 @@ import { inferLocationCategory } from '../../appUtils';
 import type {
     UniversalScriptSchema, USSCharacter, USSLocation, USSCut,
     ContiCut, CharacterBible, ScenarioAnalysis, CharacterDescription,
-    BehaviorPatterns, CutType,
+    BehaviorPatterns, CutType, SceneVisualAnalysis,
 } from '../../types';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -227,14 +227,29 @@ If neither happens in a cut, that cut is wasted screen time.
 ## LOCATION CONTEXT:
 {LOCATION_CONTEXT}
 
+# PHASE A.5 — NATURAL-LANGUAGE FIELDS (gpt-image-2 트랙)
+In addition to the SD-style fields above, ALSO populate these natural-language fields
+for each cut. They feed into gpt-image-2 directly. Existing SD fields stay as-is.
+
+★ STRICT LENGTH LIMITS (token budget critical — exceeding these will truncate the JSON):
+- sceneNarrative: ENGLISH, max 25 words (1 sentence). Scene + key subject + setting.
+- cameraNote: ENGLISH, max 15 words. Shot type + angle + lighting hint.
+- moodNote: ENGLISH, max 10 words. Emotional tone only.
+- detailsNarrative: ENGLISH, max 20 words (1 sentence). Action flow, not static pose.
+
+Total natural-language budget per cut: ~70 words. DO NOT exceed.
+
+If a "VISUAL DIRECTOR ANALYSIS" block appears in the user message, use it as
+context (camera diversity hints, key moments, mood arc) — but it is NOT a strict rule.
+
 ## OUTPUT: Valid JSON array only. No explanation, no markdown fences.
-[{"narration":"","characters":[],"location":"","action":"","emotion":"","pose":"","cutType":"","originLine":0}]`;
+[{"narration":"","characters":[],"location":"","action":"","emotion":"","pose":"","cutType":"","originLine":0,"sceneNarrative":"","cameraNote":"","moodNote":"","detailsNarrative":""}]`;
 
 export async function convertNarrationToCutsBatch(
     lines: { lineNum: number; text: string }[],
     characters: USSCharacter[],
     locations: USSLocation[],
-    opts?: { onProgress?: (text: string) => void; storyBrief?: string },
+    opts?: { onProgress?: (text: string) => void; storyBrief?: string; visualAnalysis?: SceneVisualAnalysis[] },
 ): Promise<{ cuts: USSCut[]; tokenCount: number }> {
     const hasCanonical = characters.some(c => c.canonicalName && c.canonicalName !== c.name);
     const charContext = characters.map(c => {
@@ -249,13 +264,21 @@ export async function convertNarrationToCutsBatch(
         .replace('{LOCATION_CONTEXT}', locContext);
 
     const numberedLines = lines.map(l => `[${l.lineNum}] ${l.text}`).join('\n');
-    const userMessage = `${opts?.storyBrief ? `[작품해설서]\n${opts.storyBrief}\n\n` : ''}다음 ${lines.length}줄의 나레이션을 컷으로 분할하세요:\n\n${numberedLines}`;
+
+    // ★ Phase A.5 v2: visualAnalysis는 user message에 임베드 (시스템 프롬프트 cache hit 유지)
+    const visualContext = (opts?.visualAnalysis && opts.visualAnalysis.length > 0)
+        ? `\n\n---\nVISUAL DIRECTOR ANALYSIS (use as context, not strict rule):\n${JSON.stringify(opts.visualAnalysis)}\n---\n\n`
+        : '';
+
+    const userMessage = `${opts?.storyBrief ? `[작품해설서]\n${opts.storyBrief}\n\n` : ''}${visualContext}다음 ${lines.length}줄의 나레이션을 컷으로 분할하세요:\n\n${numberedLines}`;
 
     opts?.onProgress?.(`🎬 컷 변환 중... (${lines[0].lineNum}~${lines[lines.length - 1].lineNum}번 줄)`);
 
     const result = await callClaude(systemPrompt, userMessage, {
         temperature: 0.4,
-        maxTokens: 16000,
+        // ★ Phase A.5 v3: 60줄+ 대본에서 24K도 부족 (자연어 4필드 × 50컷 = 12K+).
+        //    Opus 32K 한도까지 상향 + 시스템 프롬프트에 길이 제한 명시 + truncation 복구.
+        maxTokens: 32000,
     });
 
     let parsed: USSCut[];
@@ -265,20 +288,52 @@ export async function convertNarrationToCutsBatch(
             .trim();
         parsed = JSON.parse(cleaned);
     } catch (e) {
-        throw new Error(`USS 컷 변환 JSON 파싱 실패 (줄 ${lines[0].lineNum}~${lines[lines.length - 1].lineNum}): ${(e as Error).message}`);
+        // ★ Phase A.5 v3: truncation 복구 시도
+        // Claude가 토큰 한도에서 문자열 중간에 잘리면 마지막 완전한 객체까지만 살림.
+        try {
+            const cleaned = result.text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+            const recovered = recoverTruncatedJsonArray(cleaned);
+            if (recovered && recovered.length > 0) {
+                console.warn(`[USS] JSON truncation 복구: ${recovered.length}컷 살림 (원본 잘림)`);
+                parsed = recovered;
+            } else {
+                throw e;
+            }
+        } catch {
+            throw new Error(`USS 컷 변환 JSON 파싱 실패 (줄 ${lines[0].lineNum}~${lines[lines.length - 1].lineNum}): ${(e as Error).message}`);
+        }
     }
 
     if (!Array.isArray(parsed)) {
         throw new Error(`USS 컷 변환 결과가 배열이 아닙니다`);
     }
 
-    // 기본값 채우기
+    // 기본값 채우기 + 타입 강제(Claude가 string 필드를 array로 반환하는 케이스 방어)
+    const toStr = (v: any): string => {
+        if (v == null) return '';
+        if (typeof v === 'string') return v;
+        if (Array.isArray(v)) return v.map(toStr).filter(Boolean).join(' ');
+        return String(v);
+    };
     for (const cut of parsed) {
         if (!cut.cutType) cut.cutType = 'action';
-        if (!cut.characters) cut.characters = [];
-        if (!cut.pose) cut.pose = '';
-        if (!cut.action) cut.action = '';
+        if (!Array.isArray(cut.characters)) {
+            cut.characters = cut.characters ? [toStr(cut.characters)] : [];
+        } else {
+            // ★ 배열 내부 원소가 array/object일 수 있음 → 모두 string으로 강제
+            cut.characters = cut.characters.map(toStr).filter((s: string) => s.length > 0);
+        }
+        cut.narration = toStr(cut.narration);
+        cut.action = toStr(cut.action);
+        cut.emotion = toStr(cut.emotion);
+        cut.pose = toStr(cut.pose);
+        cut.location = toStr(cut.location);
         if (!cut.originLine) cut.originLine = lines[0].lineNum;
+        // ★ Phase A.5: 자연어 4필드도 string 강제 (Claude array 반환 방어)
+        cut.sceneNarrative = toStr((cut as any).sceneNarrative);
+        cut.cameraNote = toStr((cut as any).cameraNote);
+        cut.moodNote = toStr((cut as any).moodNote);
+        cut.detailsNarrative = toStr((cut as any).detailsNarrative);
     }
 
     return { cuts: parsed, tokenCount: result.totalTokens || 0 };
@@ -294,6 +349,7 @@ export async function convertAllNarrationToCuts(
     opts?: {
         batchSize?: number;  // 하위 호환용 (무시됨)
         storyBrief?: string;
+        visualAnalysis?: SceneVisualAnalysis[];  // ★ Phase A.5
         onProgress?: (done: number, total: number, text: string) => void;
     },
 ): Promise<{ cuts: USSCut[]; totalTokens: number }> {
@@ -304,7 +360,11 @@ export async function convertAllNarrationToCuts(
 
     const { cuts, tokenCount } = await convertNarrationToCutsBatch(
         allLines, characters, locations,
-        { onProgress: (text) => opts?.onProgress?.(0, 1, text), storyBrief: opts?.storyBrief },
+        {
+            onProgress: (text) => opts?.onProgress?.(0, 1, text),
+            storyBrief: opts?.storyBrief,
+            visualAnalysis: opts?.visualAnalysis,  // ★ Phase A.5
+        },
     );
 
     opts?.onProgress?.(1, 1, `✅ 컷 변환 완료: ${cuts.length}컷`);
@@ -502,8 +562,183 @@ export function ussToAppData(
             characterPose: cut.pose,
             locationDetail: cut.locationDetail || locations.find(l => l.name === normalizedLoc)?.visual || '',
             sfxNote: cut.sfxNote || '',
+            // ★ Phase A.5: 자연어 4필드 ContiCut으로 전달 (gpt-image-2 트랙)
+            sceneNarrative: cut.sceneNarrative || undefined,
+            cameraNote: cut.cameraNote || undefined,
+            moodNote: cut.moodNote || undefined,
+            detailsNarrative: cut.detailsNarrative || undefined,
         };
     });
 
     return { contiCuts, characterBibles, scenarioAnalysis, legacyCharacters, locationVisualDNA };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase A.5 v3: JSON truncation 복구 헬퍼
+// Claude가 maxTokens 한도에서 string 중간에 잘리면 마지막 완전 객체까지 살림.
+// ═══════════════════════════════════════════════════════════════════
+
+function recoverTruncatedJsonArray(raw: string): any[] | null {
+    if (!raw.startsWith('[')) return null;
+    // 1) 가장 마지막의 완전한 '}' 위치 찾기 (불완전 객체 잘라냄)
+    let lastCompleteEnd = -1;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = 0; i < raw.length; i++) {
+        const ch = raw[i];
+        if (escape) { escape = false; continue; }
+        if (ch === '\\') { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+            depth--;
+            if (depth === 0) lastCompleteEnd = i;
+        }
+    }
+    if (lastCompleteEnd < 0) return null;
+    // 2) 마지막 완전 객체까지 + ']'로 닫기
+    const recovered = raw.slice(0, lastCompleteEnd + 1) + ']';
+    try {
+        const parsed = JSON.parse(recovered);
+        return Array.isArray(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase A.5: analyzeVisualNarrative — 영상 감독 페르소나 시각 분석
+// ═══════════════════════════════════════════════════════════════════
+
+const VISUAL_NARRATIVE_SYSTEM_PROMPT = `You are a Korean webtoon/animation short film director.
+Analyze the given USS script and produce visual narrative analysis scene-by-scene.
+
+Use the structural metadata (characters, locations, act boundaries) provided in the
+user message as context. Identify scene boundaries using actBoundaries + your visual
+judgment (additional cuts for flashback, viewpoint shift, location change).
+
+For each scene, produce a SceneVisualAnalysis object with:
+- sceneId: "scene-1", "scene-2", etc.
+- sceneIndex: 1-indexed
+- lineRange: [startLine, endLine] (1-indexed inclusive — line numbers from the script)
+- sceneNarrative: ENGLISH 2~3 sentences. Where, when, atmosphere. Visualize as if
+  directing a film: lighting, time of day, weather, density of background, mood.
+- subjectDescription: ENGLISH. Which characters appear, their visual state in this
+  scene (clothing continuity, posture baseline, expression baseline).
+- detailsNarrative: ENGLISH. WHAT HAPPENS in this scene as continuous action flow.
+  Action momentum, not static poses. Describe how the scene unfolds.
+- cameraIntent: ENGLISH. Suggest 2~4 shot variations for this scene
+  (e.g., "establishing wide shot of the cafe, then medium shot of Yuna at the
+  window, close-up of her hands holding the mug"). Avoid monotonous front-facing shots.
+- moodArc: ENGLISH. Emotional progression within the scene.
+- suggestedCutBoundaries: optional array of line numbers where you'd cut (max 5).
+- keyMoments: optional array of ENGLISH descriptions of 1-3 visually important moments.
+
+OUTPUT: Valid JSON only. No markdown fences, no explanation.
+
+{
+  "visualAnalysis": [
+    {
+      "sceneId": "scene-1",
+      "sceneIndex": 1,
+      "lineRange": [1, 12],
+      "sceneNarrative": "...",
+      "subjectDescription": "...",
+      "detailsNarrative": "...",
+      "cameraIntent": "...",
+      "moodArc": "...",
+      "suggestedCutBoundaries": [3, 7, 10],
+      "keyMoments": ["..."]
+    }
+  ]
+}`;
+
+/**
+ * Phase A.5: 씬 단위 자연어 시각 분석.
+ * analyzeUSSStructure 결과를 컨텍스트로 받아 영상 감독 페르소나로 씬별 자연어 묘사 생성.
+ *
+ * 실패 안전망: 에러 시 throw, 호출부에서 catch → 빈 배열 + warning notification.
+ */
+export async function analyzeVisualNarrative(
+    script: string,
+    structure: Omit<UniversalScriptSchema, 'cuts'>,
+    speakerGender?: 'male' | 'female',
+): Promise<{ visualAnalysis: SceneVisualAnalysis[]; tokenCount: number }> {
+    const lines = script.split('\n').filter(l => l.trim());
+    const numberedScript = lines.map((l, i) => `[${i + 1}] ${l}`).join('\n');
+
+    // 메타데이터 컨텍스트 빌드
+    const charSummary = structure.characters.map(c => {
+        const id = c.canonicalName || c.name;
+        return `- ${id} (${c.gender}): ${c.appearance}`;
+    }).join('\n');
+    const locSummary = structure.locations.map(l => `- ${l.name}: ${l.visual}`).join('\n');
+    const actBounds = structure.meta.actBoundaries
+        ? `setupEnds @ line ${structure.meta.actBoundaries.setupEndLine}, confrontationEnds @ line ${structure.meta.actBoundaries.confrontationEndLine}, totalLines ${lines.length}`
+        : `totalLines ${lines.length}`;
+
+    const userMessage = `[Title] ${structure.meta.title || '(no title)'}
+[Genre] ${structure.meta.genre || ''} / [Tone] ${structure.meta.tone || ''} / [ColorMood] ${structure.meta.colorMood || ''}
+[ActBoundaries] ${actBounds}
+${speakerGender ? `[SpeakerGender] ${speakerGender}\n` : ''}
+[Characters]
+${charSummary}
+
+[Locations]
+${locSummary}
+
+[Script — 1-indexed lines]
+${numberedScript}`;
+
+    const result = await callClaude(VISUAL_NARRATIVE_SYSTEM_PROMPT, userMessage, {
+        temperature: 0.5,
+        maxTokens: 8000,
+    });
+
+    let parsed: { visualAnalysis: SceneVisualAnalysis[] };
+    try {
+        const cleaned = result.text.trim()
+            .replace(/^```json\s*/i, '').replace(/^```\s*/i, '')
+            .replace(/```\s*$/i, '');
+        parsed = JSON.parse(cleaned);
+    } catch (e) {
+        console.error('[analyzeVisualNarrative] JSON parse error:', e, result.text?.slice(0, 500));
+        return { visualAnalysis: [], tokenCount: result.totalTokens || 0 };
+    }
+
+    if (!parsed || !Array.isArray(parsed.visualAnalysis)) {
+        return { visualAnalysis: [], tokenCount: result.totalTokens || 0 };
+    }
+
+    // 검증/보정 + 자연어 필드 string 강제
+    const toStr = (v: any): string => {
+        if (v == null) return '';
+        if (typeof v === 'string') return v;
+        if (Array.isArray(v)) return v.map(toStr).filter(Boolean).join(' ');
+        return String(v);
+    };
+    const valid = parsed.visualAnalysis.filter((va: any) =>
+        va && va.sceneId && Array.isArray(va.lineRange) && va.lineRange.length === 2
+    ).map((va: any, idx: number) => ({
+        sceneId: String(va.sceneId),
+        sceneIndex: typeof va.sceneIndex === 'number' ? va.sceneIndex : idx + 1,
+        lineRange: [Number(va.lineRange[0]) || 1, Number(va.lineRange[1]) || lines.length] as [number, number],
+        sceneLayerId: va.sceneLayerId ? String(va.sceneLayerId) : undefined,
+        sceneNarrative: toStr(va.sceneNarrative),
+        subjectDescription: toStr(va.subjectDescription),
+        detailsNarrative: toStr(va.detailsNarrative),
+        cameraIntent: toStr(va.cameraIntent),
+        moodArc: toStr(va.moodArc),
+        suggestedCutBoundaries: Array.isArray(va.suggestedCutBoundaries)
+            ? va.suggestedCutBoundaries.map((n: any) => Number(n)).filter((n: number) => !isNaN(n))
+            : undefined,
+        keyMoments: Array.isArray(va.keyMoments)
+            ? va.keyMoments.map(toStr).filter((s: string) => s.length > 0)
+            : undefined,
+    }));
+
+    console.log(`[Phase A.5] Visual analysis: ${valid.length} scenes`);
+    return { visualAnalysis: valid, tokenCount: result.totalTokens || 0 };
 }

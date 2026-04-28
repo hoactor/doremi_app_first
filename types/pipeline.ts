@@ -56,6 +56,29 @@ export type TransitionType =
     | 'home_return';        // 귀가 변경 (외출복 → 홈웨어)
 
 /**
+ * Phase A: 기본 sceneLayer ID 상수 (하드코딩 방지).
+ * appReducer.ts의 폴백 / textAnalysisPipeline.ts의 폴백과 정확히 동기 필수.
+ * 수정 금지 파일(appStyleEngine.ts, appFluxPromptEngine.ts)의 '현재' 리터럴은
+ * 값이 같으므로 동작 영향 없음 — 향후 이 상수 변경 시 수정 금지 파일도 함께 갱신.
+ */
+export const DEFAULT_SCENE_LAYER_ID = '현재';
+
+/**
+ * Phase A: 회상/상상 시각 톤 modifier — sceneLayer 단위로 부여.
+ * 'none'이 현재 시간 기본값. 'custom'은 SceneLayer.customToneText 자유 입력 사용.
+ */
+export type ToneModifier =
+    | 'none'
+    | 'sepia'
+    | 'desaturated'
+    | 'cool-blue'
+    | 'soft-focus'
+    | 'warm-vintage'
+    | 'dream-blur'
+    | 'sketchy'
+    | 'custom';
+
+/**
  * 시간/서사 레이어 — 같은 공간(location)이어도 시점이나 내러티브 레이어가 다르면
  * 별개의 "의상 세션"을 형성한다.
  * 예: 엄마집 현재 / 엄마집 회상_어린시절 / 엄마집 내일아침
@@ -66,6 +89,10 @@ export interface SceneLayer {
     timeDelta?: string;         // "과거 10년" / "내일" / "1주일 후" 등
     isFlashback?: boolean;      // 회상·플래시백
     isImagined?: boolean;       // 상상·꿈
+    /** Phase A: 회상/상상 시각 톤 modifier. 없으면 'none' (현재 시간). */
+    toneModifier?: ToneModifier;
+    /** Phase A: toneModifier === 'custom'일 때만 사용. 자유 입력 톤 묘사. */
+    customToneText?: string;
 }
 
 /**
@@ -83,6 +110,10 @@ export interface OutfitSession {
      * 첫 세션은 undefined. Step 2 프롬프트 + 런타임 resolver에서 활용.
      */
     transitionFromPrev?: TransitionType;
+    /** Phase A: 사용자가 부여한 배치 라벨 (UI 표시용). 없으면 자동 생성: "{location} · {layerLabel}" */
+    userLabel?: string;
+    /** Phase A: 배치 메모 (검수 노트, 의도 기록). */
+    userNote?: string;
 }
 
 export interface ScenarioAnalysis {
@@ -112,6 +143,41 @@ export interface ScenarioAnalysis {
     sceneLayers?: SceneLayer[];
     /** Phase 5: 의상 세션 목록. 없으면 [] (레거시 = location만으로 의상 키 구성). */
     outfitSessions?: OutfitSession[];
+    /**
+     * Phase A.5: 씬 단위 자연어 시각 분석 (analyzeVisualNarrative 결과).
+     * Phase B(gpt-image-2)에서 활용. 없으면 undefined (이전 프로젝트 호환).
+     */
+    visualAnalysis?: SceneVisualAnalysis[];
+}
+
+/**
+ * Phase A.5: 씬 단위 자연어 시각 분석.
+ * analyzeVisualNarrative가 출력. ScenarioAnalysis.visualAnalysis 배열에 저장.
+ * convertAllNarrationToCuts(=Step 4 generateConti)에서 컷 분할 컨텍스트로 활용.
+ */
+export interface SceneVisualAnalysis {
+    /** "scene-1", "scene-2" 등 또는 sceneLayer id */
+    sceneId: string;
+    /** 1-indexed 시간 순서 */
+    sceneIndex: number;
+    /** 이 씬이 다루는 라인 범위 [start, end] inclusive */
+    lineRange: [number, number];
+    /** sceneLayer id (현재/회상 등). 없으면 '현재' */
+    sceneLayerId?: string;
+    /** [Scene] 자연어 — where/when/atmosphere */
+    sceneNarrative: string;
+    /** [Subject] 자연어 — 인물 + 외형/상태 흐름 */
+    subjectDescription: string;
+    /** [Details] 자연어 — 액션/감정/분위기 통합 */
+    detailsNarrative: string;
+    /** [Camera] 자연어 — 권장 카메라 다양성 */
+    cameraIntent: string;
+    /** 감정/분위기 흐름 */
+    moodArc: string;
+    /** 컷 분할 힌트 (강제 X) */
+    suggestedCutBoundaries?: number[];
+    /** 시각적으로 강조할 핵심 모멘트 */
+    keyMoments?: string[];
 }
 
 export interface BehaviorPatterns {
@@ -195,6 +261,14 @@ export interface ContiCut {
      * 없으면 "현재" 가정 (buildFinalPrompt resolver가 폴백 처리).
      */
     sceneLayerId?: string;
+    /**
+     * Phase A.5: 자연어 컷 묘사 (gpt-image-2 트랙 활용).
+     * Gemini buildFinalPrompt는 미참조. 모두 optional.
+     */
+    sceneNarrative?: string;
+    cameraNote?: string;
+    moodNote?: string;
+    detailsNarrative?: string;
 }
 
 export interface CinematographyCut {

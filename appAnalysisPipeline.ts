@@ -44,9 +44,10 @@ import {
     enrichScriptWithDirections,
     generateConti, designCinematography, convertContiToEditableStoryboard,
     parseMSFScript, generateTitleAndSetup, enrichContiCutsBatch,
-    analyzeUSSStructure, convertAllNarrationToCuts, ussToAppData,
+    analyzeUSSStructure, convertAllNarrationToCuts, ussToAppData, analyzeVisualNarrative,
     regenerateForNewLocations,
 } from './services/geminiService';
+import type { SceneVisualAnalysis } from './types';
 import { IS_TAURI, createProject as createProjectLocal } from './services/tauriAdapter';
 import { inferLocationCategory } from './appUtils';
 import { setClaudeModel } from './services/claudeService';
@@ -795,6 +796,26 @@ export async function runUSSPipeline(
 
         addNotification(`구조 분석 완료: ${structure.characters.length}명, ${structure.locations.length}장소`, 'info');
 
+        // ★ Phase A.5: 영상 감독 시각 분석 (graceful degradation)
+        dispatch({ type: 'SET_LOADING_DETAIL', payload: '🎬 영상 감독 시각 분석 중... (씬별 자연어 묘사)' });
+        let visualAnalysis: SceneVisualAnalysis[] = [];
+        try {
+            const visualResult = await analyzeVisualNarrative(userInputScript, structure, speakerGender);
+            checkPipelineAlive(pid, 'USS-visual');
+            handleAddUsage(visualResult.tokenCount, 'claude');
+            visualAnalysis = visualResult.visualAnalysis;
+            if (visualAnalysis.length === 0) {
+                addNotification('시각 분석 결과 비어 있음 — 메타데이터로만 진행', 'warning');
+            } else {
+                addNotification(`시각 분석 완료: ${visualAnalysis.length} 씬`, 'info');
+            }
+        } catch (err) {
+            console.warn('[Phase A.5] analyzeVisualNarrative 실패:', err);
+            addNotification('시각 분석 실패 — 메타데이터만으로 진행 (Gemini 결과 영향 없음)', 'warning');
+            visualAnalysis = [];
+        }
+        updateUIState({ analysisProgress: 30 });
+
         // ② Call 2~N: 나레이션 배치 → 컷 변환
         dispatch({ type: 'SET_LOADING_DETAIL', payload: '🎬 컷 분할 중... (배치 처리)' });
         const { cuts: ussCuts, totalTokens: cutsToken } = await convertAllNarrationToCuts(
@@ -804,8 +825,9 @@ export async function runUSSPipeline(
             {
                 batchSize: 12,
                 storyBrief: stateRef.current.storyBrief || undefined,
+                visualAnalysis,  // ★ Phase A.5: 컷 분할 컨텍스트로 전달
                 onProgress: (done, total, text) => {
-                    const progress = 20 + Math.floor((done / Math.max(total, 1)) * 30);
+                    const progress = 30 + Math.floor((done / Math.max(total, 1)) * 20);
                     updateUIState({ analysisProgress: progress });
                     dispatch({ type: 'SET_LOADING_DETAIL', payload: text });
                 },
@@ -819,8 +841,19 @@ export async function runUSSPipeline(
         dispatch({ type: 'SET_LOADING_DETAIL', payload: '📋 스토리보드 구조 변환 중...' });
         const { contiCuts: rawContiCuts, characterBibles, scenarioAnalysis, legacyCharacters, locationVisualDNA } = ussToAppData(structure, ussCuts);
 
+        // ★ Phase A.5: scenarioAnalysis에 visualAnalysis 주입
+        const scenarioAnalysisWithVisual = visualAnalysis.length > 0
+            ? { ...scenarioAnalysis, visualAnalysis }
+            : scenarioAnalysis;
+
         // state 저장
-        dispatch({ type: 'SET_SCENARIO_ANALYSIS', payload: scenarioAnalysis });
+        dispatch({ type: 'SET_SCENARIO_ANALYSIS', payload: scenarioAnalysisWithVisual });
+
+        // ★ Phase A.5: 자연어 필드 채움 비율 검증 로그
+        if (visualAnalysis.length > 0) {
+            const naturalFieldCount = rawContiCuts.filter((c: any) => c.sceneNarrative).length;
+            console.log(`[Phase A.5] Visual analysis: ${visualAnalysis.length} scenes; ContiCut sceneNarrative coverage: ${naturalFieldCount}/${rawContiCuts.length} (${Math.round(naturalFieldCount / Math.max(rawContiCuts.length, 1) * 100)}%)`);
+        }
         // Phase 7: locationRegistry는 name-only string[]
         dispatch({ type: 'SET_LOCATION_REGISTRY', payload: scenarioAnalysis.locations.map(l => l.name) });
         dispatch({ type: 'SET_LOCATION_VISUAL_DNA', payload: locationVisualDNA });

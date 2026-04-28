@@ -1,6 +1,7 @@
 // appUtils.ts — 프로젝트 공통 유틸리티 (중복 제거)
 
 import type { GeneratedImage, CharacterDescription, NanoModel } from './types';
+import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 
 // ── 1. 엔진 판별 (14곳 중복 제거) ──
 
@@ -14,24 +15,30 @@ export function createGeneratedImage(params: {
     imageUrl: string;
     sourceCutNumber: string;
     prompt: string;
-    model: NanoModel | string;
+    model?: NanoModel | string;
+    /** Phase B: engine 직접 지정 (gpt-image-2 등 model로 추론 불가한 케이스). 미지정 시 model 기반 자동 추론. */
+    engine?: GeneratedImage['engine'];
     tag?: 'rough' | 'normal' | 'hq';
     localPath?: string;
     id?: string;
     artStyleLabel?: string;
+    /** Phase B: gpt-image-2 quality */
+    openaiQuality?: import('./types').OpenAIImageQuality;
 }): GeneratedImage {
-    const { imageUrl, sourceCutNumber, prompt, model, tag = 'hq', localPath, id, artStyleLabel } = params;
+    const { imageUrl, sourceCutNumber, prompt, model, engine, tag = 'hq', localPath, id, artStyleLabel, openaiQuality } = params;
+    const resolvedEngine: GeneratedImage['engine'] = engine ?? (model ? getEngineFromModel(model) : 'nano');
     return {
         id: id || window.crypto.randomUUID(),
         imageUrl,
         localPath,
         sourceCutNumber,
         prompt,
-        engine: getEngineFromModel(model),
+        engine: resolvedEngine,
         tag,
-        model: model as NanoModel,
+        model: (model ?? '') as NanoModel,
         createdAt: new Date().toISOString(),
         ...(artStyleLabel !== undefined ? { artStyleLabel } : {}),
+        ...(openaiQuality !== undefined ? { openaiQuality } : {}),
     };
 }
 
@@ -272,7 +279,7 @@ export function buildMechanicalOutfit(
     options: OutfitBuildOptions = {},
 ): string {
     const { fallbackUnknown = false, useKorean = false, sceneLayerId } = options;
-    const layerId = sceneLayerId || '현재';
+    const layerId = sceneLayerId || DEFAULT_SCENE_LAYER_ID;
     const parts: string[] = [];
 
     names.forEach(name => {

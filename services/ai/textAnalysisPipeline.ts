@@ -2,6 +2,7 @@
 // analyzeScenario → analyzeCharacterBible → generateConti → designCinematography → convertContiToEditableStoryboard
 
 import { ScenarioAnalysis, CharacterBible, ContiCut, CinematographyCut, CinematographyPlan, EditableScene, EditableCut, CharacterDescription, Cut, EnrichedBeat } from '../../types';
+import { DEFAULT_SCENE_LAYER_ID } from '../../types/pipeline';
 import { callTextModel, parseJsonResponse } from './aiCore';
 import { normalizeLocationEntries, annotateOutfitSessionsWithTransitions, transitionLabel } from '../../appUtils';
 
@@ -149,11 +150,11 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
 
     // sceneLayers: 없거나 비어있으면 "현재" 하나로 폴백
     if (!Array.isArray(parsed.sceneLayers) || parsed.sceneLayers.length === 0) {
-        parsed.sceneLayers = [{ id: '현재', label: '현재' }];
+        parsed.sceneLayers = [{ id: DEFAULT_SCENE_LAYER_ID, label: '현재' }];
     }
     // "현재" 레이어가 없으면 맨 앞에 강제 삽입
-    if (!parsed.sceneLayers.some(sl => sl.id === '현재')) {
-        parsed.sceneLayers.unshift({ id: '현재', label: '현재' });
+    if (!parsed.sceneLayers.some(sl => sl.id === DEFAULT_SCENE_LAYER_ID)) {
+        parsed.sceneLayers.unshift({ id: DEFAULT_SCENE_LAYER_ID, label: '현재' });
     }
     const validLayerIds = new Set(parsed.sceneLayers.map(sl => sl.id));
     // Phase 7: parsed.locations는 LocationEntry[]. name만 Set에 담아 outfitSession 검증.
@@ -173,7 +174,7 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
     if (parsed.outfitSessions.length === 0 && locationNames.length > 0) {
         parsed.outfitSessions = locationNames.map(loc => ({
             location: loc,
-            layerId: '현재',
+            layerId: DEFAULT_SCENE_LAYER_ID,
             lineRange: [1, totalLines] as [number, number],
         }));
         console.warn('[Step1] outfitSessions 빈 배열 → 모든 location을 "현재" 레이어로 폴백 생성');
@@ -221,7 +222,7 @@ export const analyzeCharacterBible = async (
 
     // ★ Phase 5-c + 7-c: 의상 세션(outfitSessions) 기반 + LocationEntry category 기반 전환 규칙.
     const sessions = scenarioAnalysis.outfitSessions || [];
-    const layers = scenarioAnalysis.sceneLayers || [{ id: '현재', label: '현재' }];
+    const layers = scenarioAnalysis.sceneLayers || [{ id: DEFAULT_SCENE_LAYER_ID, label: '현재' }];
     const locEntries = scenarioAnalysis.locations || [];
     const locCategoryMap = new Map(locEntries.map(l => [l.name, l.category]));
     const sessionKeys = sessions.map(s => `${s.location}::${s.layerId}`);
@@ -629,11 +630,11 @@ ${lines.map((l, i) => `[${i + 1}] ${l}`).join('\n')}
     // 같은 줄이 여러 outfitSession에 걸쳐있으면 (장소가 다른 경우 등) cut.location과 일치하는 세션 우선
     const inferLayerId = (cut: ContiCut): string => {
         const line = cut.originLines?.[0];
-        if (line == null) return '현재';
+        if (line == null) return DEFAULT_SCENE_LAYER_ID;
         const matchingSessions = sessions.filter(s =>
             line >= s.lineRange[0] && line <= s.lineRange[1]
         );
-        if (matchingSessions.length === 0) return '현재';
+        if (matchingSessions.length === 0) return DEFAULT_SCENE_LAYER_ID;
         // cut.location과 일치하는 세션 우선
         const locMatch = matchingSessions.find(s => s.location === cut.location);
         if (locMatch) return locMatch.layerId;
@@ -773,7 +774,7 @@ export const convertContiToEditableStoryboard = (
         // 심화 2: base + outerwear 분리 필드가 있으면 description보다 우선 사용 (더 정확한 표현).
         const outfitParts: string[] = [];
         const dnaParts: string[] = [];
-        const layerId = cut.sceneLayerId || '현재';
+        const layerId = cut.sceneLayerId || DEFAULT_SCENE_LAYER_ID;
         const compositeKey = `${loc}::${layerId}`;
         for (const charName of cut.characters) {
             const bible = characterBibles.find(b => (b.canonicalName && b.canonicalName === charName) || b.koreanName === charName);
@@ -829,7 +830,7 @@ export const convertContiToEditableStoryboard = (
         const editableCut: EditableCut = {
             id: cut.id,
             cutNumber: `${currentScene.sceneNumber}-${currentScene.cuts.length + 1}`,
-            sceneLayerId: cut.sceneLayerId || '현재',
+            sceneLayerId: cut.sceneLayerId || DEFAULT_SCENE_LAYER_ID,
             narrationText: cut.narration,
             // canonicalName → koreanName 변환 (UI는 koreanName 기준)
             character: (cut.characters || []).map(name => {
@@ -888,6 +889,11 @@ export const convertContiToEditableStoryboard = (
             })(),
             context_analysis: cut.emotionBeat,
             primary_emotion: cut.emotionBeat,
+            // ★ Phase A.5: 자연어 4필드 EditableCut으로 전파 (gpt-image-2 트랙)
+            sceneNarrative: cut.sceneNarrative,
+            cameraNote: cut.cameraNote,
+            moodNote: cut.moodNote,
+            detailsNarrative: cut.detailsNarrative,
         };
 
         currentScene.cuts.push(editableCut);

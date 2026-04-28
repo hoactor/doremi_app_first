@@ -279,6 +279,10 @@ export const App: React.FC = () => {
                 setIsAssetWindowOpen={setIsAssetWindowOpen}
                 setIsProjectListOpen={setIsProjectListOpen}
                 setIsDalleGeneratorOpen={(v) => { setDalleInitialType('character'); setIsDalleGeneratorOpen(v); }}
+                imageEngineMode={state.imageEngineMode || 'legacy'}
+                scenarioAnalysis={state.scenarioAnalysis}
+                characterDescriptions={state.characterDescriptions}
+                openaiImageQuality={state.openaiImageQuality || 'medium'}
             />
 
             <ApiKeySettings isOpen={isApiKeySettingsOpen} onClose={() => setIsApiKeySettingsOpen(false)} />

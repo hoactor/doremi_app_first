@@ -60,4 +60,12 @@ export interface USSCut {
     originLine?: number;
     /** AI가 action 외에 별도 시각 묘사를 넣어줄 때 사용 (location 정규화 컨텍스트). */
     visualDescription?: string;
+    /**
+     * Phase A.5: 자연어 컷 묘사 (gpt-image-2 트랙). Gemini 미참조.
+     * convertNarrationToCutsBatch가 출력 → ussToAppData가 ContiCut으로 전달.
+     */
+    sceneNarrative?: string;
+    cameraNote?: string;
+    moodNote?: string;
+    detailsNarrative?: string;
 }

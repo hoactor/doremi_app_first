@@ -44,7 +44,7 @@ export type { CutFieldChanges } from './ai/textAnalysis';
 export { parseMSFScript, generateTitleAndSetup, enrichContiCutsBatch, enrichContiCutsLegacy, intensifyCut } from './ai/msfAnalysis';
 
 // ─── USS (Universal Script Schema) ────────────────────────────────
-export { analyzeUSSStructure, convertAllNarrationToCuts, ussToAppData } from './ai/ussAnalysis';
+export { analyzeUSSStructure, convertAllNarrationToCuts, ussToAppData, analyzeVisualNarrative } from './ai/ussAnalysis';
 
 // ─── 이미지 생성/편집 + TTS (11개) ──────────────────────────────
 export {

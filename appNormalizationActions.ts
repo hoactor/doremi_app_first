@@ -28,11 +28,45 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 export function createNormalizationActions(h: NormalizationActionHelpers) {
     const { dispatch, stateRef, addNotification, handleAddUsage, updateUIState, calculateFinalPrompt, handleOpenReviewModalForEdit } = h;
 
+    // ── 타입 안전 헬퍼 (Claude/Gemini가 string을 array로 반환하는 케이스 방어) ──
+    const toSafeStr = (v: any): string => {
+        if (v == null) return '';
+        if (typeof v === 'string') return v;
+        if (Array.isArray(v)) return v.map(toSafeStr).filter(Boolean).join(' ');
+        return String(v);
+    };
+    const sanitizeCutStringFields = (cut: any) => {
+        if (!cut) return cut;
+        const stringFields = [
+            'narration', 'narrationText', 'location', 'cameraAngle', 'sceneDescription',
+            'characterEmotionAndExpression', 'characterPose', 'characterOutfit',
+            'characterIdentityDNA', 'locationDescription', 'otherNotes', 'directorialIntent',
+            'sceneDescriptionIntense', 'characterEmotionAndExpressionIntense', 'characterPoseIntense',
+        ];
+        for (const f of stringFields) {
+            if (f in cut && typeof cut[f] !== 'string' && cut[f] != null) {
+                cut[f] = toSafeStr(cut[f]);
+            }
+        }
+        // characters / character 배열도 element 모두 string 강제
+        if (Array.isArray(cut.characters)) {
+            cut.characters = cut.characters.map(toSafeStr).filter((s: string) => s.length > 0);
+        } else if (cut.characters != null && !Array.isArray(cut.characters)) {
+            cut.characters = [toSafeStr(cut.characters)].filter((s: string) => s.length > 0);
+        }
+        if (Array.isArray(cut.character)) {
+            cut.character = cut.character.map(toSafeStr).filter((s: string) => s.length > 0);
+        }
+        return cut;
+    };
+
     const handleRunNormalization = async (updatedScenes: EditableScene[], modifiedCutIds: Set<string>) => {
         dispatch({ type: 'START_LOADING', payload: 'AI 연출 엔진이 변경된 설정을 처리하고 있습니다...' });
 
         try {
             const { characterDescriptions, locationVisualDNA, generatedContent, generatedImageHistory } = stateRef.current;
+            // ★ 입력 단계에서 모든 컷의 string/array 필드 타입 강제 (Claude array 반환 방어)
+            updatedScenes.forEach((s: any) => (s.cuts || []).forEach(sanitizeCutStringFields));
             const originalCutsMap = new Map<string, Cut>();
             if (generatedContent && generatedContent.scenes) {
                 generatedContent.scenes.flatMap((s: any) => s.cuts || []).forEach((c: Cut) => originalCutsMap.set(c.cutNumber, c));
@@ -151,6 +185,12 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
 
             for (let i = 0; i < allCutsForFormatting.length; i++) {
                 const cut = allCutsForFormatting[i];
+                // narration이 array/객체로 들어온 레거시 데이터 방어
+                if (typeof cut.narration !== 'string') {
+                    cut.narration = Array.isArray(cut.narration)
+                        ? (cut.narration as any[]).map(v => String(v ?? '')).filter(Boolean).join(' ')
+                        : (cut.narration == null ? '' : String(cut.narration));
+                }
                 const original = originalCutsMap.get(cut.cutNumber);
                 const hasNarrationChanged = original ? original.narration !== cut.narration : true;
                 if (hasNarrationChanged && cut.narration && cut.narration.trim() && !cut.narration.includes('\n')) {

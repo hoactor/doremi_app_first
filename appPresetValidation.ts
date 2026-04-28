@@ -1,6 +1,7 @@
 // appPresetValidation.ts — 프리셋 데이터 검증 로직
 
 import type { ScenarioAnalysis, CharacterBible, EnrichedBeat } from './types/pipeline';
+import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 
 export interface PresetValidationResult {
     valid: boolean;
@@ -56,7 +57,7 @@ export function validatePresetData(
 
     if (sceneLayers.length === 0) {
         warnings.push('sceneLayers가 비어있습니다. "현재" 레이어로 자동 폴백됩니다.');
-    } else if (!sceneLayers.some(sl => sl.id === '현재')) {
+    } else if (!sceneLayers.some(sl => sl.id === DEFAULT_SCENE_LAYER_ID)) {
         warnings.push('sceneLayers에 "현재" 레이어가 없습니다. 기본 레이어로 자동 삽입됩니다.');
     }
     const validLayerIds = new Set(sceneLayers.map(sl => sl.id));

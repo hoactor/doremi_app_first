@@ -5,8 +5,9 @@
 import {
     AppDataState, AppAction, Cut, GeneratedImage, Notification,
     StudioSession, CharacterDescription, Scene, GeneratedScript, ArtStyle, ContentFormat, AIModelTier,
-    ImageEngine, FluxModel
+    ImageEngine, FluxModel, SceneLayer, OutfitSession, ContiCut, EditableScene
 } from './types';
+import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 import { getEngineFromModel, createGeneratedImage, normalizeLocationEntries } from './appUtils';
 
 export const createInitialStudioSession = (): StudioSession => ({
@@ -53,7 +54,7 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
     if (sanitized.scenarioAnalysis) {
         const sa = sanitized.scenarioAnalysis;
         if (!Array.isArray(sa.sceneLayers) || sa.sceneLayers.length === 0) {
-            sa.sceneLayers = [{ id: '현재', label: '현재' }];
+            sa.sceneLayers = [{ id: DEFAULT_SCENE_LAYER_ID, label: '현재', toneModifier: 'none' }];
         }
         if (!Array.isArray(sa.outfitSessions)) {
             sa.outfitSessions = [];
@@ -65,6 +66,39 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
                 sa.locations = normalizeLocationEntries(sa.locations);
             }
         }
+        // ★ Phase A: sceneLayers의 각 레이어에 toneModifier 기본값 부여 (기존 프로젝트 호환)
+        sa.sceneLayers = sa.sceneLayers.map((layer: SceneLayer) => ({
+            ...layer,
+            toneModifier: layer.toneModifier ?? (layer.isFlashback ? 'warm-vintage' : layer.isImagined ? 'dream-blur' : 'none'),
+        }));
+        // ★ Phase A: outfitSession.userLabel 기본값 자동 생성 (없는 경우만)
+        sa.outfitSessions = sa.outfitSessions.map((os: OutfitSession) => {
+            if (os.userLabel) return os;
+            const layer = sa.sceneLayers!.find((sl: SceneLayer) => sl.id === os.layerId);
+            const layerLabel = layer?.label ?? os.layerId;
+            return { ...os, userLabel: `${os.location} · ${layerLabel}` };
+        });
+        // ★ Phase A.5: visualAnalysis는 optional. 비배열이면 undefined 처리.
+        if ('visualAnalysis' in sa && !Array.isArray(sa.visualAnalysis)) {
+            sa.visualAnalysis = undefined;
+        }
+    }
+    // ★ Phase A: characterDescriptions에 variants 빈 배열 기본값
+    if (sanitized.characterDescriptions) {
+        Object.values(sanitized.characterDescriptions).forEach((char: any) => {
+            if (!Array.isArray(char.variants)) char.variants = [];
+        });
+    }
+    // ★ Phase A: imageEngineMode 기본값
+    if (!('imageEngineMode' in sanitized) || !sanitized.imageEngineMode) {
+        sanitized.imageEngineMode = 'legacy';
+    }
+    // ★ Phase B: openaiImageQuality / openaiUsage 기본값
+    if (!('openaiImageQuality' in sanitized) || !sanitized.openaiImageQuality) {
+        sanitized.openaiImageQuality = 'medium';
+    }
+    if (!('openaiUsage' in sanitized) || !sanitized.openaiUsage) {
+        sanitized.openaiUsage = { totalImages: 0, totalCostUsd: 0, history: [] };
     }
     if (!('logline' in sanitized) || sanitized.logline === undefined) {
         sanitized.logline = '';
@@ -389,6 +423,9 @@ export const initialAppDataState: AppDataState = {
     selectedNanoModel: 'nano-2.5',
     aiModelTier: 'opus' as AIModelTier,
     contentFormat: 'ssul-shorts' as ContentFormat,
+    imageEngineMode: 'legacy', // ★ Phase A
+    openaiImageQuality: 'medium', // ★ Phase B
+    openaiUsage: { totalImages: 0, totalCostUsd: 0, history: [] }, // ★ Phase B
     pipelineCheckpoint: 'idle',
     // Phase 4: Preproduction Pipeline
     scenarioAnalysis: null,
@@ -738,6 +775,236 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                 ...state,
                 generatedImageHistory: resolvedHistory,
                 generatedContent: { ...state.generatedContent, scenes: newScenes },
+            };
+        }
+        // ── Phase A: Block Editor + Engine Mode ─────────────────────
+        case 'SET_IMAGE_ENGINE_MODE': {
+            if (state.appState !== 'initial') {
+                console.warn('[imageEngineMode] 에피소드 진행 중에는 변경 불가. 새 에피소드에서만 변경 가능.');
+                return state;
+            }
+            return { ...state, imageEngineMode: action.payload };
+        }
+        case 'UPDATE_SCENE_LAYER': {
+            if (!state.scenarioAnalysis) return state;
+            const sa = state.scenarioAnalysis;
+            const newLayers = (sa.sceneLayers || []).map(l =>
+                l.id === action.payload.layerId ? { ...l, ...action.payload.data } : l
+            );
+            return { ...state, scenarioAnalysis: { ...sa, sceneLayers: newLayers } };
+        }
+        case 'UPDATE_OUTFIT_SESSION': {
+            if (!state.scenarioAnalysis) return state;
+            const sa = state.scenarioAnalysis;
+            const newSessions = (sa.outfitSessions || []).map((os, i) =>
+                i === action.payload.index ? { ...os, ...action.payload.data } : os
+            );
+            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions } };
+        }
+        case 'SPLIT_OUTFIT_SESSION': {
+            if (!state.scenarioAnalysis) return state;
+            const sa = state.scenarioAnalysis;
+            const target = (sa.outfitSessions || [])[action.payload.index];
+            if (!target) return state;
+            const splitLine = action.payload.splitAtLine;
+            if (splitLine <= target.lineRange[0] || splitLine > target.lineRange[1]) return state;
+            const left: OutfitSession = { ...target, lineRange: [target.lineRange[0], splitLine - 1] };
+            const right: OutfitSession = {
+                ...target,
+                lineRange: [splitLine, target.lineRange[1]],
+                userLabel: undefined,
+                transitionFromPrev: 'maintain',
+            };
+            const sessions = sa.outfitSessions || [];
+            const newSessions = [
+                ...sessions.slice(0, action.payload.index),
+                left,
+                right,
+                ...sessions.slice(action.payload.index + 1),
+            ];
+            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions } };
+        }
+        case 'MERGE_OUTFIT_SESSIONS': {
+            if (!state.scenarioAnalysis) return state;
+            const sa = state.scenarioAnalysis;
+            const sessions = sa.outfitSessions || [];
+            const a = sessions[action.payload.firstIndex];
+            const b = sessions[action.payload.firstIndex + 1];
+            if (!a || !b) return state;
+            if (a.location !== b.location || a.layerId !== b.layerId) return state;
+            if (a.lineRange[1] + 1 !== b.lineRange[0]) {
+                console.warn('[MERGE_OUTFIT_SESSIONS] 인접하지 않은 배치는 병합 불가:', a.lineRange, b.lineRange);
+                return state;
+            }
+            const merged: OutfitSession = {
+                ...a,
+                lineRange: [Math.min(a.lineRange[0], b.lineRange[0]), Math.max(a.lineRange[1], b.lineRange[1])],
+            };
+            const newSessions = [
+                ...sessions.slice(0, action.payload.firstIndex),
+                merged,
+                ...sessions.slice(action.payload.firstIndex + 2),
+            ];
+            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions } };
+        }
+        case 'CONVERT_TO_MEMORY_BATCH': {
+            if (!state.scenarioAnalysis) return state;
+            const sa = state.scenarioAnalysis;
+            const sessions = sa.outfitSessions || [];
+            const target = sessions[action.payload.sessionIndex];
+            if (!target) return state;
+            const oldLayerId = target.layerId;
+            const targetLocation = target.location;
+            const targetLineRange = target.lineRange;
+            const isInRange = (line: number) => line >= targetLineRange[0] && line <= targetLineRange[1];
+
+            const newLayerId = `회상_${Date.now()}`;
+            const newLayer: SceneLayer = {
+                id: newLayerId,
+                label: action.payload.layerLabel,
+                isFlashback: true,
+                toneModifier: action.payload.toneModifier ?? 'warm-vintage',
+            };
+            const updatedSession: OutfitSession = { ...target, layerId: newLayerId, userLabel: undefined };
+            const newLayers = [...(sa.sceneLayers || []), newLayer];
+            const newSessions = sessions.map((os, i) => i === action.payload.sessionIndex ? updatedSession : os);
+
+            // ContiCut: originLines + location 매칭 (가장 정확)
+            const updateContiByLine = (cuts: ContiCut[]): ContiCut[] =>
+                cuts.map(c => {
+                    const line = c.originLines?.[0];
+                    if (line != null && isInRange(line) && c.location === targetLocation) {
+                        return { ...c, sceneLayerId: newLayerId };
+                    }
+                    return c;
+                });
+
+            // EditableCut/Cut: (oldLayerId, location) 복합 매칭 — 같은 layerId의 다른 location 컷 보호
+            const updateByOldLayer = <T extends { sceneLayerId?: string; location: string }>(cuts: T[]): T[] =>
+                cuts.map(c =>
+                    c.sceneLayerId === oldLayerId && c.location === targetLocation
+                        ? { ...c, sceneLayerId: newLayerId }
+                        : c
+                );
+
+            const newStoryboard = state.editableStoryboard?.map(scene => ({
+                ...scene,
+                cuts: updateByOldLayer(scene.cuts),
+            })) ?? null;
+            const newContiCuts = state.contiCuts ? updateContiByLine(state.contiCuts) : null;
+            const newGeneratedContent = state.generatedContent ? {
+                ...state.generatedContent,
+                scenes: state.generatedContent.scenes.map(scene => ({
+                    ...scene,
+                    cuts: updateByOldLayer(scene.cuts),
+                })),
+            } : null;
+
+            return {
+                ...state,
+                scenarioAnalysis: { ...sa, sceneLayers: newLayers, outfitSessions: newSessions },
+                editableStoryboard: newStoryboard,
+                contiCuts: newContiCuts,
+                generatedContent: newGeneratedContent,
+            };
+        }
+        case 'ADD_SCENE_LAYER': {
+            if (!state.scenarioAnalysis) return state;
+            const sa = state.scenarioAnalysis;
+            return { ...state, scenarioAnalysis: { ...sa, sceneLayers: [...(sa.sceneLayers || []), action.payload] } };
+        }
+        case 'DELETE_SCENE_LAYER': {
+            if (!state.scenarioAnalysis) return state;
+            const sa = state.scenarioAnalysis;
+            if (action.payload === DEFAULT_SCENE_LAYER_ID) return state;
+            const newSessions = (sa.outfitSessions || []).map(os =>
+                os.layerId === action.payload ? { ...os, layerId: DEFAULT_SCENE_LAYER_ID, userLabel: undefined } : os
+            );
+            const newLayers = (sa.sceneLayers || []).filter(l => l.id !== action.payload);
+
+            const updateCutLayer = <T extends { sceneLayerId?: string }>(cuts: T[]): T[] =>
+                cuts.map(c => c.sceneLayerId === action.payload ? { ...c, sceneLayerId: DEFAULT_SCENE_LAYER_ID } : c);
+
+            const newStoryboard = state.editableStoryboard?.map(scene => ({
+                ...scene,
+                cuts: updateCutLayer(scene.cuts),
+            })) ?? null;
+            const newContiCuts = state.contiCuts ? updateCutLayer(state.contiCuts) : null;
+            const newGeneratedContent = state.generatedContent ? {
+                ...state.generatedContent,
+                scenes: state.generatedContent.scenes.map(scene => ({
+                    ...scene,
+                    cuts: updateCutLayer(scene.cuts),
+                })),
+            } : null;
+
+            return {
+                ...state,
+                scenarioAnalysis: { ...sa, sceneLayers: newLayers, outfitSessions: newSessions },
+                editableStoryboard: newStoryboard,
+                contiCuts: newContiCuts,
+                generatedContent: newGeneratedContent,
+            };
+        }
+        case 'ADD_CHARACTER_VARIANT': {
+            const char = state.characterDescriptions[action.payload.characterKey];
+            if (!char) return state;
+            const variants = [...(char.variants || []), action.payload.variant];
+            return {
+                ...state,
+                characterDescriptions: {
+                    ...state.characterDescriptions,
+                    [action.payload.characterKey]: { ...char, variants },
+                },
+            };
+        }
+        case 'UPDATE_CHARACTER_VARIANT': {
+            const char = state.characterDescriptions[action.payload.characterKey];
+            if (!char) return state;
+            const variants = (char.variants || []).map(v =>
+                v.variantId === action.payload.variantId ? { ...v, ...action.payload.data } : v
+            );
+            return {
+                ...state,
+                characterDescriptions: {
+                    ...state.characterDescriptions,
+                    [action.payload.characterKey]: { ...char, variants },
+                },
+            };
+        }
+        case 'DELETE_CHARACTER_VARIANT': {
+            const char = state.characterDescriptions[action.payload.characterKey];
+            if (!char) return state;
+            const variants = (char.variants || []).filter(v => v.variantId !== action.payload.variantId);
+            return {
+                ...state,
+                characterDescriptions: {
+                    ...state.characterDescriptions,
+                    [action.payload.characterKey]: { ...char, variants },
+                },
+            };
+        }
+        // ── Phase B: OpenAI gpt-image-2 ─────────────────────────────
+        case 'SET_OPENAI_IMAGE_QUALITY':
+            return { ...state, openaiImageQuality: action.payload };
+        case 'ADD_OPENAI_USAGE': {
+            const { images, costUsd, quality } = action.payload;
+            const today = new Date().toISOString().slice(0, 10);
+            const history = [...state.openaiUsage.history];
+            const todayEntry = history.find(h => h.date === today && h.quality === quality);
+            if (todayEntry) {
+                todayEntry.images += images;
+                todayEntry.costUsd += costUsd;
+            } else {
+                history.push({ date: today, images, costUsd, quality });
+            }
+            return {
+                ...state,
+                openaiUsage: {
+                    totalImages: state.openaiUsage.totalImages + images,
+                    totalCostUsd: state.openaiUsage.totalCostUsd + costUsd,
+                    history,
+                },
             };
         }
         default: return state;

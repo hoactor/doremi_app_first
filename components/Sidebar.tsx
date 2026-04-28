@@ -8,7 +8,8 @@ import {
 } from './icons';
 import { IS_TAURI, openAssetCatalog, resetWindowSize, loadLoraRegistry } from '../services/tauriAdapter';
 import { LoraRegistryModal } from './LoraRegistryModal';
-import type { LoRAEntry } from '../types';
+import { BatchEditorPanel } from './BatchEditorPanel';
+import type { LoRAEntry, ImageEngineMode, ScenarioAnalysis, CharacterDescription, OpenAIImageQuality } from '../types';
 
 const STYLE_NAMES: Record<string, string> = {
     'normal': '정통 썰툰',
@@ -57,6 +58,12 @@ interface SidebarProps {
     setIsAssetWindowOpen: (v: boolean) => void;
     setIsProjectListOpen: (v: boolean) => void;
     setIsDalleGeneratorOpen: (v: boolean) => void;
+    // ── Phase A ──
+    imageEngineMode: ImageEngineMode;
+    scenarioAnalysis: ScenarioAnalysis | null;
+    characterDescriptions: { [key: string]: CharacterDescription };
+    // ── Phase B ──
+    openaiImageQuality: OpenAIImageQuality;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -69,10 +76,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     handleSaveWithStatus, setIsResetConfirmOpen, setIsCutDetailOpen,
     setIsApiKeySettingsOpen, setIsAssetCatalogOpen, setIsAssetWindowOpen, setIsProjectListOpen,
     setIsDalleGeneratorOpen,
+    imageEngineMode, scenarioAnalysis, characterDescriptions,
+    openaiImageQuality,
 }) => {
     // ── LoRA 상태 ──
     const [loraEntries, setLoraEntries] = useState<LoRAEntry[]>([]);
     const [isLoraRegistryOpen, setIsLoraRegistryOpen] = useState(false);
+    // ── Phase A: 배치 구조 패널 접힘/펼침 ──
+    const [isBatchPanelCollapsed, setIsBatchPanelCollapsed] = useState(false);
 
     const refreshLoras = useCallback(() => {
         if (IS_TAURI) loadLoraRegistry().then(setLoraEntries).catch(() => {});
@@ -257,22 +268,73 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* ★ Engine + Model + Energy/LoRA + 화풍 (하단 고정) */}
                 {appState !== 'initial' && (
                 <div className="flex-shrink-0 px-4 py-3 border-t border-b border-zinc-700/40 space-y-2">
-                    {/* Engine 토글 */}
-                    <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-2">Engine</h3>
+                    {/* ★ Phase A: 배치 구조 패널 */}
+                    <BatchEditorPanel
+                        isCollapsed={isBatchPanelCollapsed}
+                        onToggle={() => setIsBatchPanelCollapsed(v => !v)}
+                        scenarioAnalysis={scenarioAnalysis}
+                        characterDescriptions={characterDescriptions}
+                        dispatch={dispatch}
+                    />
+
+                    {/* ★ Phase A: 엔진 모드 (에피소드 단위) — Context는 Phase B에서 활성화 */}
+                    <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-2">Engine Mode</h3>
                     <div className="grid grid-cols-2 gap-1.5 mb-3">
-                        {([['gemini','Gemini'],['flux','Flux']] as const).map(([val,label]) => (
+                        <button
+                            onClick={() => dispatch({ type: 'SET_IMAGE_ENGINE_MODE', payload: 'legacy' })}
+                            disabled={appState !== 'initial'}
+                            title={appState !== 'initial' ? '에피소드 진행 중에는 변경 불가. 새 에피소드에서만 변경 가능.' : ''}
+                            className={`py-2 text-xs font-bold rounded-xl border transition-all text-center ${
+                                imageEngineMode === 'legacy'
+                                    ? 'bg-transparent border-orange-500/60 text-orange-400'
+                                    : 'bg-transparent border-zinc-700/50 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+                            } ${appState !== 'initial' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >Legacy</button>
+                        <button
+                            disabled={true}
+                            title="Phase B (gpt-image-2 도입) 후 활성화"
+                            className="py-2 text-xs font-bold rounded-xl border border-zinc-800/30 text-zinc-700 cursor-not-allowed text-center"
+                        >Context (예정)</button>
+                    </div>
+
+                    {/* Engine 토글 — Phase B: Gemini / Flux / OpenAI 3개 평등 */}
+                    <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-2">Engine</h3>
+                    <div className="grid grid-cols-3 gap-1.5 mb-3">
+                        {([['gemini','Gemini'],['flux','Flux'],['openai','OpenAI']] as const).map(([val,label]) => (
                             <button key={val} onClick={() => dispatch({ type: 'SET_IMAGE_ENGINE', payload: val as any })}
                                 className={`py-2 text-xs font-bold rounded-xl border transition-all text-center ${
                                     selectedImageEngine === val
                                         ? val === 'gemini'
                                             ? 'bg-transparent border-orange-500/60 text-orange-400'
-                                            : 'bg-transparent border-teal-500/60 text-teal-400'
+                                            : val === 'flux'
+                                              ? 'bg-transparent border-teal-500/60 text-teal-400'
+                                              : 'bg-transparent border-violet-500/60 text-violet-400'
                                         : 'bg-transparent border-zinc-700/50 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
                                 }`}
                             >{label}</button>
                         ))}
                     </div>
 
+                    {/* OpenAI 선택 시: Quality 토글 (Gemini의 Model 선택과 평등) */}
+                    {selectedImageEngine === 'openai' && (
+                        <>
+                            <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-2">Quality</h3>
+                            <div className="grid grid-cols-3 gap-1.5">
+                                {([['low','Low'],['medium','Medium'],['high','High']] as const).map(([val,label]) => (
+                                    <button key={val} onClick={() => dispatch({ type: 'SET_OPENAI_IMAGE_QUALITY', payload: val })}
+                                        className={`py-2 text-xs font-bold rounded-xl border transition-all text-center ${
+                                            openaiImageQuality === val
+                                                ? 'bg-transparent border-violet-500/60 text-violet-400'
+                                                : 'bg-transparent border-zinc-700/50 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+                                        }`}
+                                    >{label}</button>
+                                ))}
+                            </div>
+                            <p className="text-[9px] text-zinc-600 text-center mt-1">Low ~$0.005 · Medium ~$0.05 · High ~$0.21 (1K 기준)</p>
+                        </>
+                    )}
+
+                    {selectedImageEngine !== 'openai' && (<>
                     <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-3">Model</h3>
                                 {/* 엔진별 모델 선택 */}
                                 {selectedImageEngine === 'gemini' ? (
@@ -314,6 +376,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         <span className="text-[10px] font-mono text-teal-400 w-7 text-right">{(styleLoraScaleOverride ?? 0.9).toFixed(2)}</span>
                                     </div>
                                 )}
+                    </>)}
 
                                 <div className="grid grid-cols-2 gap-1.5">
                                     <div className="relative">

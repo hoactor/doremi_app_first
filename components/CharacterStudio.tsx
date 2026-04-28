@@ -6,6 +6,7 @@ import { IS_TAURI, resolveImageUrl, loadAssetCatalog, saveAsset, updateAssetMeta
 import { LoraRegistryModal } from './LoraRegistryModal';
 import { analyzeHairStyle } from '../services/geminiService';
 import { AssetTagPopup, analyzeAssetWithVision } from './AssetCatalogModal';
+import { CharacterVariantManager } from './CharacterVariantManager';
 import {
     XIcon, SparklesIcon, UploadIcon, CheckIcon, SpinnerIcon,
     FolderOpenIcon, BookmarkSquareIcon, PencilIcon, TrashIcon,
@@ -54,7 +55,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
     isOpen, onClose, characterDescriptions, onUpdateCharacterDescription,
     onConfirm, onGenerateLocationOutfits, onGenerateOutfitImage,
 }) => {
-    const { state: { artStyle, appState }, actions: ctxActions } = useAppContext();
+    const { state: { artStyle, appState, scenarioAnalysis }, dispatch, actions: ctxActions } = useAppContext();
     const characterKeys = useMemo(() => Object.keys(characterDescriptions), [characterDescriptions]);
     const [selectedKey, setSelectedKey] = useState<string>(characterKeys[0] || '');
     const [editingOutfitLoc, setEditingOutfitLoc] = useState<string | null>(null);
@@ -642,6 +643,14 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                                     <p className="text-xs text-zinc-600 text-center py-4">대본 분석에서 장소 정보가 없습니다.</p>
                                 )}
                             </div>
+
+                            {/* ★ Phase A: 시점별(sceneLayer) 외형 관리 */}
+                            <CharacterVariantManager
+                                characterKey={selectedKey}
+                                character={char}
+                                scenarioAnalysis={scenarioAnalysis}
+                                dispatch={dispatch}
+                            />
                         </div>
                     </div>
 

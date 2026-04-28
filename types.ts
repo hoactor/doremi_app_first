@@ -7,7 +7,9 @@ export type {
     CutType, PipelineCheckpoint, ApiSource, EnrichedBeat,
     ScenarioAnalysis, BehaviorPatterns, OutfitRecommendation,
     CharacterBible, ContiCut, CinematographyCut, CinematographyPlan,
+    SceneLayer, OutfitSession, ToneModifier, SceneVisualAnalysis,
 } from './types/pipeline';
+export { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 
 // ─── 기본 타입 ────────────────────────────────────────────────────
 export type Gender = 'male' | 'female';
@@ -18,8 +20,9 @@ export type NanoModel = 'nano-2.5' | 'nano-3.1' | 'nano-3pro';
 export type ArtStyle = 'normal' | 'moe' | 'dalle-chibi' | 'custom' | 'vibrant' | 'kyoto';
 export type ContentFormat = 'ssul-shorts' | 'webtoon' | 'anime';
 export type AIModelTier = 'sonnet' | 'opus' | 'gemini';
-export type ImageEngine = 'gemini' | 'flux';
+export type ImageEngine = 'gemini' | 'flux' | 'openai';
 export type FluxModel = 'flux-pro' | 'flux-flex' | 'flux-lora';
+export type OpenAIImageQuality = 'low' | 'medium' | 'high';
 export type ScriptInputMode = 'auto' | 'narration' | 'msf' | 'uss';
 
 // ─── Phase 6: LoRA 레지스트리 ────────────────────────────────────
@@ -40,7 +43,9 @@ export interface GeneratedImage {
     localPath?: string;
     sourceCutNumber: string;
     prompt: string;
-    engine: 'dalle3' | 'nano' | 'nano-v3' | 'imagen-rough';
+    engine: 'dalle3' | 'nano' | 'nano-v3' | 'imagen-rough' | 'gpt-image-2';
+    /** Phase B: OpenAI gpt-image-2 quality (engine === 'gpt-image-2'일 때만) */
+    openaiQuality?: OpenAIImageQuality;
     createdAt: string;
     tag?: 'rough' | 'normal' | 'hq';
     model?: string;
@@ -110,7 +115,30 @@ export interface CharacterDescription {
     isAnalyzingHair?: boolean;
     loraId?: string;
     loraScaleOverride?: number;
+    /** Phase A: 시점별 외형 variant. 회상/미래 등 sceneLayer 단위 외형 변형. */
+    variants?: CharacterVariant[];
 }
+
+/**
+ * Phase A: 캐릭터의 시점별(sceneLayer별) 외형 변형.
+ * 어린 시절 회상 / 미래 / 다른 인격 등에 적용. 본 캐릭터는 그대로 두고 별도 슬롯에 보관.
+ */
+export interface CharacterVariant {
+    variantId: string;
+    label: string;
+    appliedToLayerId: string;
+    baseAppearance: string;
+    koreanBaseAppearance: string;
+    characterSheetUrl?: string;
+}
+
+/**
+ * Phase A: 에피소드 단위 엔진 패러다임 선택.
+ * - 'legacy': 현재 시스템 (Gemini + Flux, 컷 단위 독립 생성)
+ * - 'context': Phase B에서 활성화 예정 (gpt-image-2, 배치 단위 첫 컷=anchor)
+ * 에피소드 생성 시 1회 선택. 이후 변경 불가 (새 에피소드에서만 변경).
+ */
+export type ImageEngineMode = 'legacy' | 'context';
 
 export interface Cut {
     id: string;
@@ -150,6 +178,14 @@ export interface Cut {
     characterPoseIntense?: string;
     /** Phase 5-d: 시간/서사 레이어 id. 없으면 "현재" 가정. buildFinalPrompt resolver 입력. */
     sceneLayerId?: string;
+    /**
+     * Phase A.5: 자연어 컷 묘사 (gpt-image-2 트랙 활용).
+     * Gemini buildFinalPrompt는 미참조. 모두 optional.
+     */
+    sceneNarrative?: string;
+    cameraNote?: string;
+    moodNote?: string;
+    detailsNarrative?: string;
 }
 
 export interface Scene {
@@ -236,6 +272,14 @@ export interface EditableCut {
     characterEmotionAndExpressionIntense?: string;
     /** Phase 5-d: 시간/서사 레이어 id. 없으면 "현재" 가정. */
     sceneLayerId?: string;
+    /**
+     * Phase A.5: 자연어 컷 묘사 (gpt-image-2 트랙).
+     * Gemini 미참조. 모두 optional.
+     */
+    sceneNarrative?: string;
+    cameraNote?: string;
+    moodNote?: string;
+    detailsNarrative?: string;
 }
 
 export interface EditableScene {
@@ -269,7 +313,7 @@ export interface ReferenceBackground {
 }
 
 // ─── AppDataState ─────────────────────────────────────────────────
-import type { EnrichedBeat, PipelineCheckpoint, ApiSource, ScenarioAnalysis, CharacterBible, ContiCut, CinematographyPlan } from './types/pipeline';
+import type { EnrichedBeat, PipelineCheckpoint, ApiSource, ScenarioAnalysis, CharacterBible, ContiCut, CinematographyPlan, SceneLayer, OutfitSession, ToneModifier } from './types/pipeline';
 
 export interface AppDataState {
     appState: AppState;
@@ -323,6 +367,16 @@ export interface AppDataState {
     selectedFluxModel: FluxModel;
     aiModelTier: AIModelTier;
     contentFormat: ContentFormat;
+    /** Phase A: 에피소드 단위 엔진 모드. 'legacy'(기본) | 'context'(Phase B). initial 상태에서만 변경. */
+    imageEngineMode: ImageEngineMode;
+    /** Phase B: gpt-image-2 quality. 기본 'medium'. */
+    openaiImageQuality: OpenAIImageQuality;
+    /** Phase B: gpt-image-2 사용량 추적 (falUsage와 평등 패턴) */
+    openaiUsage: {
+        totalImages: number;
+        totalCostUsd: number;
+        history: { date: string; images: number; costUsd: number; quality: OpenAIImageQuality }[];
+    };
     pipelineCheckpoint: PipelineCheckpoint;
     scriptMetadata?: { metadataByLine: Record<number, any>; isDetailed: boolean };
     scenarioAnalysis: ScenarioAnalysis | null;
@@ -439,7 +493,22 @@ export type AppAction =
     | { type: 'SET_CINEMATOGRAPHY_PLAN', payload: CinematographyPlan | null }
     | { type: 'SET_CURRENT_PROJECT_ID', payload: string | null }
     | { type: 'SET_PROJECT_SAVED', payload: boolean }
-    | { type: 'SET_ASSET_CATALOG', payload: AssetCatalogEntry[] };
+    | { type: 'SET_ASSET_CATALOG', payload: AssetCatalogEntry[] }
+    // ── Phase A: Block Editor + Engine Mode ─────────────────────────
+    | { type: 'SET_IMAGE_ENGINE_MODE'; payload: ImageEngineMode }
+    | { type: 'UPDATE_SCENE_LAYER'; payload: { layerId: string; data: Partial<SceneLayer> } }
+    | { type: 'UPDATE_OUTFIT_SESSION'; payload: { index: number; data: Partial<OutfitSession> } }
+    | { type: 'SPLIT_OUTFIT_SESSION'; payload: { index: number; splitAtLine: number } }
+    | { type: 'MERGE_OUTFIT_SESSIONS'; payload: { firstIndex: number } }
+    | { type: 'CONVERT_TO_MEMORY_BATCH'; payload: { sessionIndex: number; layerLabel: string; toneModifier?: ToneModifier } }
+    | { type: 'ADD_SCENE_LAYER'; payload: SceneLayer }
+    | { type: 'DELETE_SCENE_LAYER'; payload: string }
+    | { type: 'ADD_CHARACTER_VARIANT'; payload: { characterKey: string; variant: CharacterVariant } }
+    | { type: 'UPDATE_CHARACTER_VARIANT'; payload: { characterKey: string; variantId: string; data: Partial<CharacterVariant> } }
+    | { type: 'DELETE_CHARACTER_VARIANT'; payload: { characterKey: string; variantId: string } }
+    // ── Phase B: OpenAI gpt-image-2 ─────────────────────────────────
+    | { type: 'SET_OPENAI_IMAGE_QUALITY'; payload: OpenAIImageQuality }
+    | { type: 'ADD_OPENAI_USAGE'; payload: { images: number; costUsd: number; quality: OpenAIImageQuality } };
 
 // ─── Phase 5: 로컬 스토리지 타입 ─────────────────────────────────
 
