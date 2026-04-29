@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     PlusIcon, BookmarkSquareIcon, FolderOpenIcon, DocumentArrowDownIcon, DocumentArrowUpIcon,
     UserIcon, ClipboardIcon, PhotoIcon, CheckIcon, SparklesIcon, StopIcon, RefreshIcon,
@@ -9,7 +9,7 @@ import {
 import { IS_TAURI, openAssetCatalog, resetWindowSize, loadLoraRegistry } from '../services/tauriAdapter';
 import { LoraRegistryModal } from './LoraRegistryModal';
 import { BatchEditorPanel } from './BatchEditorPanel';
-import type { LoRAEntry, ImageEngineMode, ScenarioAnalysis, CharacterDescription, OpenAIImageQuality } from '../types';
+import type { LoRAEntry, ImageEngineMode, ScenarioAnalysis, CharacterDescription, OpenAIImageQuality, ContextSceneDesign, AppDataState } from '../types';
 
 const STYLE_NAMES: Record<string, string> = {
     'normal': '정통 썰툰',
@@ -64,6 +64,12 @@ interface SidebarProps {
     characterDescriptions: { [key: string]: CharacterDescription };
     // ── Phase B ──
     openaiImageQuality: OpenAIImageQuality;
+    // ── Phase B v3 Stage 2: 배치 패널 stale 카운트용 ──
+    generatedContent?: any;
+    // ── Phase A.6: Context 모드 ──
+    contextSceneDesigns?: ContextSceneDesign[];
+    contextAnalysisStatus?: AppDataState['contextAnalysisStatus'];
+    contextGenerationStatus?: AppDataState['contextGenerationStatus'];
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -77,8 +83,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setIsApiKeySettingsOpen, setIsAssetCatalogOpen, setIsAssetWindowOpen, setIsProjectListOpen,
     setIsDalleGeneratorOpen,
     imageEngineMode, scenarioAnalysis, characterDescriptions,
-    openaiImageQuality,
+    openaiImageQuality, generatedContent,
+    contextSceneDesigns, contextAnalysisStatus, contextGenerationStatus,
 }) => {
+    const allCutsForBatch = useMemo(
+        () => (generatedContent?.scenes || []).flatMap((s: any) => s.cuts || []),
+        [generatedContent],
+    );
     // ── LoRA 상태 ──
     const [loraEntries, setLoraEntries] = useState<LoRAEntry[]>([]);
     const [isLoraRegistryOpen, setIsLoraRegistryOpen] = useState(false);
@@ -275,27 +286,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         scenarioAnalysis={scenarioAnalysis}
                         characterDescriptions={characterDescriptions}
                         dispatch={dispatch}
+                        cuts={allCutsForBatch}
+                        showStaleUI={imageEngineMode === 'context' && selectedImageEngine === 'openai'}
+                        onGenerateCuts={(cutNumbers) => actions?.handleRunSelectiveGeneration?.(cutNumbers)}
+                        imageEngineMode={imageEngineMode}
+                        selectedImageEngine={selectedImageEngine as any}
+                        contextSceneDesigns={contextSceneDesigns}
+                        contextAnalysisStatus={contextAnalysisStatus}
+                        contextGenerationStatus={contextGenerationStatus}
+                        onAnalyzeAllScenes={actions?.handleAnalyzeAllScenes}
+                        onAnalyzeOneScene={actions?.handleAnalyzeOneScene}
+                        onGenerateScene={actions?.handleGenerateScene}
                     />
 
-                    {/* ★ Phase A: 엔진 모드 (에피소드 단위) — Context는 Phase B에서 활성화 */}
+                    {/* ★ Phase B v3: 엔진 모드 — 에피소드 중에도 토글 가능 (런타임 reference 결정) */}
                     <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-2">Engine Mode</h3>
                     <div className="grid grid-cols-2 gap-1.5 mb-3">
                         <button
                             onClick={() => dispatch({ type: 'SET_IMAGE_ENGINE_MODE', payload: 'legacy' })}
-                            disabled={appState !== 'initial'}
-                            title={appState !== 'initial' ? '에피소드 진행 중에는 변경 불가. 새 에피소드에서만 변경 가능.' : ''}
                             className={`py-2 text-xs font-bold rounded-xl border transition-all text-center ${
                                 imageEngineMode === 'legacy'
                                     ? 'bg-transparent border-orange-500/60 text-orange-400'
                                     : 'bg-transparent border-zinc-700/50 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
-                            } ${appState !== 'initial' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            }`}
                         >Legacy</button>
                         <button
-                            disabled={true}
-                            title="Phase B (gpt-image-2 도입) 후 활성화"
-                            className="py-2 text-xs font-bold rounded-xl border border-zinc-800/30 text-zinc-700 cursor-not-allowed text-center"
-                        >Context (예정)</button>
+                            onClick={() => dispatch({ type: 'SET_IMAGE_ENGINE_MODE', payload: 'context' })}
+                            disabled={selectedImageEngine !== 'openai'}
+                            title={
+                                selectedImageEngine !== 'openai'
+                                    ? 'Context 모드는 OpenAI 엔진에서만 활성화됩니다'
+                                    : '배치 첫 컷을 anchor로 자동 지정 → 후속 컷의 시각 reference로 활용'
+                            }
+                            className={`py-2 text-xs font-bold rounded-xl border transition-all text-center ${
+                                imageEngineMode === 'context'
+                                    ? 'bg-transparent border-cyan-500/60 text-cyan-400'
+                                    : 'bg-transparent border-zinc-700/50 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
+                            } ${selectedImageEngine !== 'openai' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >Context</button>
                     </div>
+                    {imageEngineMode === 'context' && selectedImageEngine !== 'openai' && (
+                        <p className="text-[9px] text-violet-400/60 -mt-2 mb-3 leading-relaxed">
+                            💡 Context 모드는 현재 OpenAI 엔진 전용입니다.
+                        </p>
+                    )}
 
                     {/* Engine 토글 — Phase B: Gemini / Flux / OpenAI 3개 평등 */}
                     <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-2">Engine</h3>

@@ -2,7 +2,10 @@
 // props 패턴 — useAppContext 직접 호출 금지 (CLAUDE.md 일관성)
 
 import React, { useState, useMemo } from 'react';
-import type { ScenarioAnalysis, CharacterDescription, AppAction, SceneLayer, OutfitSession, ToneModifier } from '../types';
+import type { ScenarioAnalysis, CharacterDescription, AppAction, SceneLayer, OutfitSession, ToneModifier, Cut, ImageEngine, ImageEngineMode, ContextSceneDesign, AppDataState, PlannedCut } from '../types';
+import { DEFAULT_SCENE_LAYER_ID } from '../types/pipeline';
+import { deriveOutfitSessionsFromCuts, buildSessionKey } from '../appUtils';
+import { ContextSceneSection } from './ContextSceneSection';
 
 interface BatchEditorPanelProps {
     isCollapsed: boolean;
@@ -10,6 +13,21 @@ interface BatchEditorPanelProps {
     scenarioAnalysis: ScenarioAnalysis | null;
     characterDescriptions: { [key: string]: CharacterDescription };
     dispatch: React.Dispatch<AppAction>;
+    /** Phase B v3 Stage 2: stale 카운트 계산 + 일괄 재생성용. 없으면 stale 기능 비활성. */
+    cuts?: Cut[];
+    /** Phase B v3 Stage 2: Context + OpenAI 모드일 때만 stale UI + 배치 생성 버튼 노출. */
+    showStaleUI?: boolean;
+    /** Phase B v3 Stage 2: 배치의 컷 일괄 생성/재생성. */
+    onGenerateCuts?: (cutNumbers: string[]) => void;
+    // ── Phase A.6 신규 ──
+    imageEngineMode?: ImageEngineMode;
+    selectedImageEngine?: ImageEngine;
+    contextSceneDesigns?: ContextSceneDesign[];
+    contextAnalysisStatus?: AppDataState['contextAnalysisStatus'];
+    contextGenerationStatus?: AppDataState['contextGenerationStatus'];
+    onAnalyzeAllScenes?: () => void;
+    onAnalyzeOneScene?: (sessionKey: string) => void;
+    onGenerateScene?: (sessionKey: string) => void;
 }
 
 const TONE_MODIFIER_OPTIONS: { value: ToneModifier; label: string }[] = [
@@ -29,24 +47,80 @@ const toneModifierLabel = (t?: ToneModifier) =>
 
 export const BatchEditorPanel: React.FC<BatchEditorPanelProps> = ({
     isCollapsed, onToggle, scenarioAnalysis, dispatch,
+    cuts, showStaleUI, onGenerateCuts,
+    imageEngineMode, selectedImageEngine,
+    contextSceneDesigns, contextAnalysisStatus, contextGenerationStatus,
+    onAnalyzeAllScenes, onAnalyzeOneScene, onGenerateScene,
 }) => {
     const [convertTarget, setConvertTarget] = useState<number | null>(null);
     const [splitTarget, setSplitTarget] = useState<number | null>(null);
     const [editTarget, setEditTarget] = useState<number | null>(null);
 
+    // Phase A.6: Context 모드 메타
+    const isContextMode = imageEngineMode === 'context' && selectedImageEngine === 'openai';
+    const designsByKey = useMemo(() => {
+        const map = new Map<string, ContextSceneDesign>();
+        (contextSceneDesigns || []).forEach(d => map.set(d.sessionKey, d));
+        return map;
+    }, [contextSceneDesigns]);
+    const isAnalyzing = !!contextAnalysisStatus?.isRunning;
+    const isGenerating = !!contextGenerationStatus?.isRunning;
+
+    // outfitSessions 없으면 cuts에서 자동 파생 (Phase 5 이전 프로젝트 호환)
+    const effectiveSessions = useMemo<OutfitSession[]>(() => {
+        const real = scenarioAnalysis?.outfitSessions;
+        if (real && real.length > 0) return real;
+        return deriveOutfitSessionsFromCuts(cuts || []);
+    }, [scenarioAnalysis?.outfitSessions, cuts]);
+    const isDerivedSessions = !(scenarioAnalysis?.outfitSessions?.length);
+
     const sortedSessions = useMemo(() => {
-        if (!scenarioAnalysis?.outfitSessions) return [];
+        if (effectiveSessions.length === 0) return [];
         // ★ 인덱스 보존을 위해 원본 인덱스를 페이로드로 같이 들고 다님
-        return scenarioAnalysis.outfitSessions
+        return effectiveSessions
             .map((s, originalIndex) => ({ session: s, originalIndex }))
             .sort((a, b) => a.session.lineRange[0] - b.session.lineRange[0]);
-    }, [scenarioAnalysis?.outfitSessions]);
+    }, [effectiveSessions]);
 
-    if (!scenarioAnalysis || !scenarioAnalysis.outfitSessions || scenarioAnalysis.outfitSessions.length === 0) {
+    // Phase B v3 Stage 2: 배치별 컷 정보 (anchor 먼저, 그 뒤 후속 컷 순)
+    const batchMeta = useMemo(() => {
+        const map = new Map<number, {
+            allCutNumbers: string[];      // anchor 먼저, 후속 컷 순
+            staleCutNumbers: string[];    // staleByAnchor 컷만
+            anchorCutNumber: string | null;
+            totalCount: number;
+        }>();
+        if (!cuts || cuts.length === 0 || effectiveSessions.length === 0) return map;
+        effectiveSessions.forEach((session, idx) => {
+            const layerId = session.layerId || DEFAULT_SCENE_LAYER_ID;
+            const matched = cuts.filter(
+                c => c.location === session.location
+                    && (c.sceneLayerId || DEFAULT_SCENE_LAYER_ID) === layerId,
+            );
+            const stale = matched.filter(c => c.staleByAnchor).map(c => c.cutNumber);
+            const anchorOverride = session.anchorCutNumber
+                && matched.find(c => c.cutNumber === session.anchorCutNumber);
+            const anchor = anchorOverride ? anchorOverride.cutNumber : (matched[0]?.cutNumber ?? null);
+            // anchor 먼저, 그 뒤 나머지 컷 (script 순서 유지)
+            const ordered = anchor
+                ? [anchor, ...matched.filter(c => c.cutNumber !== anchor).map(c => c.cutNumber)]
+                : matched.map(c => c.cutNumber);
+            map.set(idx, {
+                allCutNumbers: ordered,
+                staleCutNumbers: stale,
+                anchorCutNumber: anchor,
+                totalCount: matched.length,
+            });
+        });
+        return map;
+    }, [cuts, effectiveSessions]);
+
+    // 컷도 없고 outfitSessions도 없으면 표시할 게 없음
+    if (effectiveSessions.length === 0) {
         return null;
     }
 
-    const layers = scenarioAnalysis.sceneLayers || [];
+    const layers = scenarioAnalysis?.sceneLayers || [];
     const layerById = (id: string) => layers.find(l => l.id === id);
 
     const findOriginalIndex = (idx: number) => idx; // outfitSessions index가 그대로 reducer payload
@@ -57,9 +131,35 @@ export const BatchEditorPanel: React.FC<BatchEditorPanelProps> = ({
                 onClick={onToggle}
                 className="w-full flex items-center justify-between mb-2 text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] hover:text-zinc-300 transition-colors"
             >
-                <span>배치 구조 ({scenarioAnalysis.outfitSessions.length})</span>
+                <span>배치 구조 ({effectiveSessions.length}){isDerivedSessions ? ' · 자동' : ''}</span>
                 <span className="text-xs">{isCollapsed ? '▸' : '▾'}</span>
             </button>
+
+            {/* Phase A.6: Context 모드 전체 분석 헤더 */}
+            {!isCollapsed && isContextMode && (
+                <div className="mb-3 p-2 rounded-lg bg-violet-500/10 border border-violet-500/30">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-bold text-violet-300 uppercase tracking-wider">
+                            🎬 Context 씬 디자인
+                        </span>
+                        <span className="text-[9px] text-violet-400/60">
+                            {(contextSceneDesigns || []).filter(d => !d.isStale).length} / {effectiveSessions.length} 분석됨
+                        </span>
+                    </div>
+                    <button
+                        onClick={onAnalyzeAllScenes}
+                        disabled={isAnalyzing || effectiveSessions.length === 0}
+                        className="w-full py-2 text-xs font-bold rounded-lg bg-violet-600/40 hover:bg-violet-600/60 text-violet-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                        {isAnalyzing && contextAnalysisStatus?.target === 'all'
+                            ? `분석 중... ${contextAnalysisStatus?.message ?? ''}`
+                            : (contextSceneDesigns?.length ?? 0) > 0 ? '🔄 전체 재분석' : '🎬 전체 씬 분석 시작'}
+                    </button>
+                    <p className="text-[9px] text-violet-400/50 mt-1.5 leading-relaxed">
+                        Claude가 각 배치를 영상 시퀀스로 디자인합니다. 결과 검수 후 배치별로 일괄 생성하세요.
+                    </p>
+                </div>
+            )}
 
             {!isCollapsed && (
                 <div className="space-y-1.5 max-h-[40vh] overflow-y-auto pr-1">
@@ -87,8 +187,14 @@ export const BatchEditorPanel: React.FC<BatchEditorPanelProps> = ({
                             >
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-xs font-semibold text-zinc-200 truncate">
-                                            {session.userLabel || `${session.location} · ${layer?.label ?? session.layerId}`}
+                                        <div className="text-xs font-semibold text-zinc-200 truncate flex items-center gap-1.5">
+                                            {showStaleUI && batchMeta.get(originalIndex)?.anchorCutNumber && (
+                                                <span
+                                                    className="text-[9px] font-bold bg-cyan-600/30 text-cyan-300 px-1 py-0.5 rounded"
+                                                    title={`anchor 컷: ${batchMeta.get(originalIndex)?.anchorCutNumber}`}
+                                                >⚓ {batchMeta.get(originalIndex)?.anchorCutNumber}</span>
+                                            )}
+                                            <span className="truncate">{session.userLabel || `${session.location} · ${layer?.label ?? session.layerId}`}</span>
                                         </div>
                                         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                                             <span className="text-[10px] text-zinc-500 font-mono">
@@ -118,6 +224,7 @@ export const BatchEditorPanel: React.FC<BatchEditorPanelProps> = ({
                                     </div>
                                 </div>
 
+                                {!isDerivedSessions && (
                                 <div className="flex gap-1 mt-2">
                                     <button
                                         onClick={() => setSplitTarget(originalIndex)}
@@ -156,13 +263,61 @@ export const BatchEditorPanel: React.FC<BatchEditorPanelProps> = ({
                                         ✏️ 편집
                                     </button>
                                 </div>
+                                )}
+
+                                {/* Phase B v3 Stage 2: 배치 전체 생성 + stale 컷 일괄 재생성 */}
+                                {showStaleUI && onGenerateCuts && (() => {
+                                    const meta = batchMeta.get(originalIndex);
+                                    if (!meta || meta.totalCount === 0) return null;
+                                    return (
+                                        <div className="flex flex-col gap-1.5 mt-1.5">
+                                            <button
+                                                onClick={() => onGenerateCuts(meta.allCutNumbers)}
+                                                className="w-full text-[10px] py-1.5 rounded bg-cyan-700/40 hover:bg-cyan-700/60 text-cyan-100 font-semibold transition-colors"
+                                                title={`anchor부터 순서대로 ${meta.totalCount}개 컷을 생성합니다 (Context 모드 일관성 확보)`}
+                                            >
+                                                ⚓ 배치 전체 생성 ({meta.totalCount}컷)
+                                            </button>
+                                            {meta.staleCutNumbers.length > 0 && (
+                                                <button
+                                                    onClick={() => onGenerateCuts(meta.staleCutNumbers)}
+                                                    className="w-full text-[10px] py-1 rounded bg-yellow-700/40 hover:bg-yellow-700/60 text-yellow-100 font-semibold transition-colors"
+                                                    title={`anchor 변경으로 일관성이 흔들린 ${meta.staleCutNumbers.length}개 컷만 재생성합니다`}
+                                                >
+                                                    ⚠ stale {meta.staleCutNumbers.length}개 재생성
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Phase A.6: Context 모드 씬 디자인 섹션 */}
+                                {isContextMode && !isDerivedSessions && (() => {
+                                    const sKey = buildSessionKey(session);
+                                    const design = designsByKey.get(sKey);
+                                    const myAnalyzing = isAnalyzing && (contextAnalysisStatus?.target === 'all' || contextAnalysisStatus?.target === sKey);
+                                    const myGenerating = isGenerating && contextGenerationStatus?.target === sKey;
+                                    return (
+                                        <ContextSceneSection
+                                            sessionKey={sKey}
+                                            session={session}
+                                            design={design}
+                                            isAnalyzing={myAnalyzing}
+                                            isGenerating={myGenerating}
+                                            onAnalyzeOne={() => onAnalyzeOneScene?.(sKey)}
+                                            onGenerate={() => onGenerateScene?.(sKey)}
+                                            onUpdateCutCount={(count: number) => dispatch({ type: 'SET_TARGET_CUT_COUNT', payload: { sessionKey: sKey, count } })}
+                                            onUpdatePlannedCut={(cutIndex: number, data: Partial<PlannedCut>) => dispatch({ type: 'UPDATE_PLANNED_CUT', payload: { sessionKey: sKey, cutIndex, data } })}
+                                        />
+                                    );
+                                })()}
                             </div>
                         );
                     })}
                 </div>
             )}
 
-            {convertTarget != null && (
+            {!isDerivedSessions && convertTarget != null && scenarioAnalysis?.outfitSessions?.[convertTarget] && (
                 <ConvertToMemoryDialog
                     sessionIndex={convertTarget}
                     target={scenarioAnalysis.outfitSessions[convertTarget]}
@@ -170,7 +325,7 @@ export const BatchEditorPanel: React.FC<BatchEditorPanelProps> = ({
                     dispatch={dispatch}
                 />
             )}
-            {splitTarget != null && (
+            {!isDerivedSessions && splitTarget != null && scenarioAnalysis?.outfitSessions?.[splitTarget] && (
                 <SplitDialog
                     sessionIndex={splitTarget}
                     target={scenarioAnalysis.outfitSessions[splitTarget]}
@@ -178,7 +333,7 @@ export const BatchEditorPanel: React.FC<BatchEditorPanelProps> = ({
                     dispatch={dispatch}
                 />
             )}
-            {editTarget != null && (
+            {!isDerivedSessions && editTarget != null && scenarioAnalysis?.outfitSessions?.[editTarget] && (
                 <EditDialog
                     sessionIndex={editTarget}
                     target={scenarioAnalysis.outfitSessions[editTarget]}

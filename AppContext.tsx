@@ -106,7 +106,7 @@ interface AppContextType {
         handleDeleteCut: (cutNumber: string) => void;
         handleTextRender: (target: TextEditingTarget, text: string, textType: 'speech' | 'narration', characterName?: string) => Promise<void>;
         handleAutoGenerateImageForCut: (cut: Cut) => void;
-        handleGenerateForCut: (cutNumber: string, mode: 'rough' | 'normal') => Promise<void>;
+        handleGenerateForCut: (cutNumber: string, mode: 'rough' | 'normal') => Promise<boolean | void>;
         handleGenerateAll: (mode: 'rough' | 'normal') => Promise<void>;
         handleRefinePrompt: (cutNumber: string, request: string) => Promise<void>;
         handleBatchRefine: (request: string) => Promise<void>;
@@ -129,6 +129,10 @@ interface AppContextType {
         handleCancelGenerateAll: () => void;
         handleRunSelectiveGeneration: (selectedCutNumbers: string[], overrideContent?: GeneratedScript) => Promise<void>;
         handleRetryFailedCuts: () => Promise<void>;
+        // Phase A.6: Context 모드
+        handleAnalyzeAllScenes: () => Promise<void>;
+        handleAnalyzeOneScene: (sessionKey: string) => Promise<void>;
+        handleGenerateScene: (sessionKey: string) => Promise<void>;
         handleRunNormalization: (updatedScenes: EditableScene[], modifiedCutIds: Set<string>) => Promise<void>;
         handleAttachAudioToCut: (cutNumber: string, file: File) => void;
         handleRemoveAudioFromCut: (cutNumber: string, indexToRemove: number) => void;
@@ -185,6 +189,7 @@ import { createMiscActions } from './appMiscActions';
 import { createDownloadActions } from './appDownloadActions';
 import { createNormalizationActions } from './appNormalizationActions';
 import { createGenerationActions } from './appGenerationActions';
+import { createContextModeActions } from './appContextModeActions';
 import { createCharacterActions } from './appCharacterActions';
 import { createCutEditActions } from './appCutEditActions';
 import { getEngineFromModel, createGeneratedImage, detectScriptFormat } from './appUtils';
@@ -745,7 +750,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { handleRunNormalization, handleGenerateStoryboardWithCustomCostumes } = normalizationActions;
 
     // ── 이미지 생성/수정 (appGenerationActions.ts에서 생성) ──
-    const generateForCutRef = useRef<(cutNumber: string, mode: 'rough' | 'normal') => Promise<void>>(null as any);
+    const generateForCutRef = useRef<(cutNumber: string, mode: 'rough' | 'normal') => Promise<boolean | void>>(null as any);
     const cancelGenerateAllRef = useRef(false);
     const generationActions = createGenerationActions({
         dispatch, stateRef, addNotification, handleAddUsage, calculateFinalPrompt,
@@ -754,6 +759,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         generateForCutRef, cancelGenerateAllRef, loraRegistryRef,
     });
     const { handleRunSelectiveGeneration, handleGenerateForCut, handleGenerateAll, handleRefinePrompt, handleBatchRefine } = generationActions;
+
+    // ── Phase A.6: Context 모드 액션 ──
+    const contextModeActions = createContextModeActions({ dispatch, stateRef, addNotification });
 
     const actions = {
         setUIState: updateUIState,
@@ -941,6 +949,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         handleCancelGenerateAll: () => { cancelGenerateAllRef.current = true; dispatch({ type: 'STOP_LOADING' }); },
         handleRunSelectiveGeneration,
         handleRetryFailedCuts: async () => handleRunSelectiveGeneration(stateRef.current.failedCutNumbers),
+        // Phase A.6: Context 모드
+        handleAnalyzeAllScenes: contextModeActions.handleAnalyzeAllScenes,
+        handleAnalyzeOneScene: contextModeActions.handleAnalyzeOneScene,
+        handleGenerateScene: contextModeActions.handleGenerateScene,
         handleRunNormalization,
         handleAttachAudioToCut: (cutNumber: string, file: File) => { const reader = new FileReader(); reader.onload = (e) => dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cutNumber, data: { audioDataUrls: [...(stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber)?.audioDataUrls || []), e.target?.result as string] } } }); reader.readAsDataURL(file); },
         handleRemoveAudioFromCut: (cutNumber: string, idx: number) => { const current = stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber)?.audioDataUrls || []; dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cutNumber, data: { audioDataUrls: current.filter((_, i) => i !== idx) } } }); },

@@ -1,7 +1,7 @@
 // appGenerationActions.ts — 이미지 생성/수정 액션 (AppContext에서 분리)
 
 import type { AppAction, Cut, GeneratedImage, GeneratedScript, EditableCut, ArtStyle, LoRAEntry } from './types';
-import { getEngineFromModel, createGeneratedImage, buildMechanicalOutfit } from './appUtils';
+import { getEngineFromModel, createGeneratedImage, buildMechanicalOutfit, findOutfitSessionForCut, findAnchorCutForBatch, isFirstCutInBatch, buildBatchAnchorKey, deriveOutfitSessionsFromCuts } from './appUtils';
 import { buildArtStylePrompt, buildFinalPrompt, PromptContext } from './appStyleEngine';
 import { generateImageForCut, CutGenerationContext } from './appImageEngine';
 import { refinePromptWithAI, refineAllPromptsWithAI } from './services/geminiService';
@@ -9,7 +9,7 @@ import { buildFluxPromptSmart, FluxPromptContext, translateImageScriptToFlux } f
 import { sanitizeChildSafety } from './appSafetySanitize';
 // ★ Phase B: gpt-image-2 직접 호출 + 자연어 프롬프트
 import { buildGptImage2Prompt } from './appOpenaiPromptEngine';
-import { generateWithGptImage2, editWithGptImage2, collectCharacterReferences, pickBestCharacterReferenceUrl } from './services/openaiImageService';
+import { generateWithGptImage2, editWithGptImage2, collectCharacterReferences, pickBestCharacterReferenceUrl, urlToBase64Public } from './services/openaiImageService';
 
 export interface GenerationActionHelpers {
     dispatch: (action: AppAction) => void;
@@ -24,7 +24,7 @@ export interface GenerationActionHelpers {
     triggerConfetti: (targetId?: string) => void;
     currentSessionIdRef: { current: number };
     isAutoGeneratingLocalRef: { current: boolean };
-    generateForCutRef: { current: (cutNumber: string, mode: 'rough' | 'normal') => Promise<void> };
+    generateForCutRef: { current: (cutNumber: string, mode: 'rough' | 'normal') => Promise<boolean | void> };
     cancelGenerateAllRef: { current: boolean };
     loraRegistryRef: { current: LoRAEntry[] };
 }
@@ -63,6 +63,16 @@ export function createGenerationActions(h: GenerationActionHelpers) {
 
             dispatch({ type: 'SET_LOADING_DETAIL', payload: `이미지 생성 진행 중... [컷 #${cut.cutNumber}] (${i + 1}/${targets.length})` });
             dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cut.cutNumber, data: { imageLoading: true } } });
+
+            // ★ Phase B v3: OpenAI 엔진은 단일 컷 생성 함수에 위임 (Context anchor 로직 포함).
+            // 같은 배치 내 anchor 컷이 먼저 생성되어야 후속 컷이 그 이미지를 reference로 받으므로 순차 await 필수.
+            if (stateRef.current.selectedImageEngine === 'openai') {
+                const ok = await handleGenerateForCut(cut.cutNumber, 'normal');
+                if (currentSessionIdRef.current !== thisSessionId) break;
+                if (ok === false) failedCuts.push(cut.cutNumber);
+                dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cut.cutNumber, data: { imageLoading: false } } });
+                continue;
+            }
 
             try {
                 const styleToUse = cut.artStyleOverride || stateRef.current.artStyle;
@@ -207,7 +217,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
         }
     };
 
-    const handleGenerateForCut = async (cutNumber: string, mode: 'rough' | 'normal') => {
+    const handleGenerateForCut = async (cutNumber: string, mode: 'rough' | 'normal'): Promise<boolean | void> => {
         const s = stateRef.current;
         const cut = s.generatedContent?.scenes.flatMap((sc: any) => sc.cuts).find((c: Cut) => c.cutNumber === cutNumber);
         if (!cut) return;
@@ -217,6 +227,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
 
         // ── ★ Phase B: OpenAI gpt-image-2 분기 (Gemini/Flux와 평등) ──
         if (s.selectedImageEngine === 'openai') {
+            let succeeded = false;
             try {
                 // ★ Phase B 패치: 멀티 캐릭터 reference 매핑 함께 받기
                 const { base64Images, mapping } = await collectCharacterReferences(
@@ -224,6 +235,48 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                     cut.characters || [],
                     (cut as any).sceneLayerId,
                 );
+
+                // ── Phase B v3 Stage 1: Context 모드 anchor reference 자동 주입 ──
+                let batchAnchorIndex: number | undefined;
+                let batchAnchorLabel: string | undefined;
+                let isAnchorCut = false;
+                let anchorBatchKey: string | undefined;
+                if (s.imageEngineMode === 'context') {
+                    const allCuts: Cut[] = (s.generatedContent?.scenes || []).flatMap((sc: any) => sc.cuts);
+                    const realSessions = s.scenarioAnalysis?.outfitSessions || [];
+                    const outfitSessions = realSessions.length > 0
+                        ? realSessions
+                        : deriveOutfitSessionsFromCuts(allCuts);
+                    const found = findOutfitSessionForCut(cut, outfitSessions);
+                    if (found) {
+                        anchorBatchKey = buildBatchAnchorKey(found.session);
+                        const layerLabel = (s.scenarioAnalysis?.sceneLayers || []).find(l => l.id === (found.session.layerId || '')) ?.label || found.session.layerId;
+                        batchAnchorLabel = found.session.userLabel || `${found.session.location} · ${layerLabel}`;
+                        isAnchorCut = isFirstCutInBatch(cut, allCuts, outfitSessions);
+                        if (!isAnchorCut) {
+                            const anchorCut = findAnchorCutForBatch(found.session, allCuts);
+                            if (anchorCut) {
+                                const anchorImg = (s.generatedImageHistory || []).find(
+                                    (img: GeneratedImage) =>
+                                        img.id === (found.session.anchorImageId || anchorCut.selectedImageId),
+                                ) || (s.generatedImageHistory || []).filter(
+                                    (img: GeneratedImage) => img.sourceCutNumber === anchorCut.cutNumber,
+                                ).pop();
+                                if (anchorImg) {
+                                    const sourceUrl = anchorImg.localPath || anchorImg.imageUrl;
+                                    const anchorB64 = await urlToBase64Public(sourceUrl);
+                                    if (anchorB64) {
+                                        // 첫 슬롯에 anchor 삽입, 캐릭터 mapping 인덱스 +1 시프트
+                                        base64Images.unshift(anchorB64);
+                                        mapping.forEach(m => { m.imageIndex += 1; });
+                                        batchAnchorIndex = 0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 const hasReference = base64Images.length > 0;
                 const openaiPrompt = buildGptImage2Prompt({
                     cut: cut as any,
@@ -235,6 +288,8 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                     imageRatio: s.imageRatio || '1:1',
                     hasReference,
                     referenceImageMapping: mapping,  // ★ Image N 라벨링 활성화
+                    batchAnchorIndex,
+                    batchAnchorLabel,
                 });
                 const sanitized = sanitizeChildSafety(openaiPrompt);
                 const size = s.imageRatio === '9:16' ? '1024x1536'
@@ -272,9 +327,15 @@ export function createGenerationActions(h: GenerationActionHelpers) {
 
                 for (const img of result.images) {
                     const localPath = await persistImageToDisk(img.imageUrl, cutNumber, img.id);
-                    const persisted: GeneratedImage = { ...img, localPath };
+                    const persisted: GeneratedImage = {
+                        ...img,
+                        localPath,
+                        // Phase B v3 Stage 1: anchor 컷 결과면 batchAnchorFor 채움 (후속 컷이 reference로 활용)
+                        ...(isAnchorCut && anchorBatchKey ? { batchAnchorFor: anchorBatchKey } : {}),
+                    };
                     dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: persisted, cutNumber } });
                 }
+                succeeded = result.images.length > 0;
             } catch (err: any) {
                 const msg = String(err?.message ?? err ?? 'Unknown OpenAI error');
                 if (msg.includes('moderation')) {
@@ -289,7 +350,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
             } finally {
                 dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { imageLoading: false } } });
             }
-            return;
+            return succeeded;
         }
 
         try {

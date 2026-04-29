@@ -1,6 +1,6 @@
 // appUtils.ts — 프로젝트 공통 유틸리티 (중복 제거)
 
-import type { GeneratedImage, CharacterDescription, NanoModel } from './types';
+import type { GeneratedImage, CharacterDescription, NanoModel, Cut } from './types';
 import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 
 // ── 1. 엔진 판별 (14곳 중복 제거) ──
@@ -381,4 +381,96 @@ export function detectScriptFormat(script: string): 'narration' | 'msf' | 'uss' 
 
     // 폴백: USS
     return 'uss';
+}
+
+// ── Phase B v3 Stage 1: 배치 anchor 헬퍼 ──
+
+/**
+ * outfitSessions가 비어있는 프로젝트(Phase 5 이전 분석 등)를 위한 자동 파생.
+ * cuts를 (location, sceneLayerId) 조합으로 묶어 가상의 OutfitSession[] 반환.
+ * lineRange는 컷 인덱스 기반 가짜 값 (1부터 +1씩) — 실제 라인 매핑은 안 됨.
+ */
+export function deriveOutfitSessionsFromCuts(cuts: Cut[]): OutfitSession[] {
+    if (!Array.isArray(cuts) || cuts.length === 0) return [];
+    const seen = new Map<string, OutfitSession>();
+    cuts.forEach((c, idx) => {
+        const layerId = c.sceneLayerId || DEFAULT_SCENE_LAYER_ID;
+        const key = `${c.location}::${layerId}`;
+        if (!seen.has(key)) {
+            seen.set(key, {
+                location: c.location || '',
+                layerId,
+                lineRange: [idx + 1, idx + 1],
+            });
+        } else {
+            const existing = seen.get(key)!;
+            existing.lineRange = [existing.lineRange[0], idx + 1];
+        }
+    });
+    return Array.from(seen.values()).filter(s => s.location);
+}
+
+/**
+ * outfitSession 안정 키. GeneratedImage.batchAnchorFor 값으로 사용.
+ * `${location}::${layerId}::${lineRangeStart}-${lineRangeEnd}`
+ */
+export function buildBatchAnchorKey(session: OutfitSession): string {
+    const layerId = session.layerId || DEFAULT_SCENE_LAYER_ID;
+    const [start, end] = session.lineRange || [0, 0];
+    return `${session.location}::${layerId}::${start}-${end}`;
+}
+
+/** Phase A.6: Context 모드 sessionKey alias — buildBatchAnchorKey와 동일 형식. */
+export const buildSessionKey = buildBatchAnchorKey;
+
+/**
+ * 컷이 어느 outfitSession에 속하는지 판정.
+ * (location, sceneLayerId) 복합 매칭. sceneLayerId 없으면 'DEFAULT_SCENE_LAYER_ID' 폴백.
+ */
+export function findOutfitSessionForCut(
+    cut: Pick<Cut, 'location' | 'sceneLayerId'>,
+    outfitSessions: OutfitSession[],
+): { session: OutfitSession; index: number } | null {
+    if (!Array.isArray(outfitSessions) || outfitSessions.length === 0) return null;
+    const layerId = cut.sceneLayerId || DEFAULT_SCENE_LAYER_ID;
+    const idx = outfitSessions.findIndex(
+        os => os.location === cut.location && (os.layerId || DEFAULT_SCENE_LAYER_ID) === layerId,
+    );
+    if (idx === -1) return null;
+    return { session: outfitSessions[idx], index: idx };
+}
+
+/**
+ * 같은 outfitSession에 속한 컷들 중 anchor 컷 반환.
+ * 우선순위: 1) session.anchorCutNumber 수동 오버라이드 → 2) cuts 순서상 첫 매칭 컷.
+ */
+export function findAnchorCutForBatch(
+    session: OutfitSession,
+    cuts: Cut[],
+): Cut | null {
+    if (!Array.isArray(cuts) || cuts.length === 0) return null;
+    const layerId = session.layerId || DEFAULT_SCENE_LAYER_ID;
+    if (session.anchorCutNumber) {
+        const overridden = cuts.find(c => c.cutNumber === session.anchorCutNumber);
+        if (overridden) return overridden;
+    }
+    return cuts.find(
+        c => c.location === session.location
+            && (c.sceneLayerId || DEFAULT_SCENE_LAYER_ID) === layerId,
+    ) || null;
+}
+
+/**
+ * 이 컷이 자기 배치에서 첫 컷(=자동 anchor)인가.
+ * 사용자 수동 오버라이드된 anchorCutNumber도 anchor로 인정.
+ */
+export function isFirstCutInBatch(
+    cut: Pick<Cut, 'cutNumber' | 'location' | 'sceneLayerId'>,
+    cuts: Cut[],
+    outfitSessions: OutfitSession[],
+): boolean {
+    const found = findOutfitSessionForCut(cut, outfitSessions);
+    if (!found) return false;
+    const anchor = findAnchorCutForBatch(found.session, cuts);
+    return anchor?.cutNumber === cut.cutNumber;
 }

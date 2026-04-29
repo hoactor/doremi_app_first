@@ -226,6 +226,14 @@ export async function collectCharacterReferences(
  * - 로컬 path: resolveImageUrl(Tauri: read_image_base64)로 data:URL 변환 후 추출
  * - http(s)/blob: fetch → blob → readAsDataURL
  */
+/**
+ * Phase B v3 Stage 1: 배치 anchor 이미지를 base64로 변환.
+ * 외부에서 호출 가능 (appGenerationActions의 Context 분기에서 사용).
+ */
+export async function urlToBase64Public(url: string): Promise<string | null> {
+    return urlToBase64(url);
+}
+
 async function urlToBase64(url: string): Promise<string | null> {
     try {
         // resolveImageUrl이 로컬 path는 data:URL로, 그 외는 그대로 반환

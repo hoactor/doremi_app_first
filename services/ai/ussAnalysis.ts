@@ -488,6 +488,13 @@ export function ussToAppData(
         // Phase 7: LocationEntry[]. USS 파이프라인은 이름에서 카테고리 자동 유추 (휴리스틱).
         locations: locations.map(l => ({ name: l.name, category: inferLocationCategory(l.name) })),
         locationVisualDNA,
+        // ★ Phase B v3: USS도 outfitSessions/sceneLayers를 채워서 Context 모드 + 배치 패널 활성화
+        sceneLayers: [{ id: 'current', label: '현재', toneModifier: 'none' }],
+        outfitSessions: locations.map(l => ({
+            location: l.name,
+            layerId: 'current',
+            lineRange: [1, totalCuts] as [number, number],
+        })),
     };
 
     // ── location 정규화 함수: 시각 묘사가 들어온 경우 가장 가까운 장소명으로 매칭 ──

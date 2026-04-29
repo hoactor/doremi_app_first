@@ -7,6 +7,7 @@ import type {
     CharacterDescription,
     SceneLayer, ToneModifier, ScenarioAnalysis,
     ArtStyle, ImageRatio,
+    ContextSceneDesign,
 } from './types';
 import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 
@@ -151,11 +152,23 @@ function buildSubjectSection(
     characterDescriptions: { [key: string]: CharacterDescription },
     sceneLayerId: string | undefined,
     referenceImageMapping?: ReferenceImageMapping[],
+    batchAnchorIndex?: number,
+    batchAnchorLabel?: string,
 ): string {
     const characters: string[] = cut.characters ?? cut.character ?? [];
-    if (characters.length === 0) return '';
-
     const lines: string[] = [];
+
+    // Phase B v3 Stage 1: 배치 anchor reference가 첫 슬롯에 있으면 명시
+    if (batchAnchorIndex !== undefined && batchAnchorIndex >= 0) {
+        lines.push(
+            `Image ${batchAnchorIndex + 1} (batch anchor): visual continuity reference for ${batchAnchorLabel || 'this batch'} — match its lighting, color palette, costume, and background style exactly.`
+        );
+    }
+
+    if (characters.length === 0) {
+        return lines.join('\n');
+    }
+
     characters.forEach(key => {
         const anchor = buildCharacterAnchorText(key, characterDescriptions, sceneLayerId);
         if (!anchor) return;
@@ -284,6 +297,13 @@ export interface BuildPromptInput {
     insertText?: string;
     /** ★ Phase B 패치: 멀티 캐릭터 reference 매핑 — Image N 라벨링용 */
     referenceImageMapping?: ReferenceImageMapping[];
+    /**
+     * Phase B v3 Stage 1: 배치 anchor reference가 첨부된 인덱스 (0-based).
+     * undefined면 anchor 없음. Context 모드 + 후속 컷일 때만 채워짐.
+     */
+    batchAnchorIndex?: number;
+    /** Phase B v3 Stage 1: anchor 라벨 (UI/프롬프트 컨텍스트용). 예: "거실 · 현재" */
+    batchAnchorLabel?: string;
 }
 
 export function buildGptImage2Prompt(input: BuildPromptInput): string {
@@ -291,6 +311,7 @@ export function buildGptImage2Prompt(input: BuildPromptInput): string {
         cut, characterDescriptions, scenarioAnalysis,
         cinematographyPlan, artStyle, customArtStyle,
         imageRatio, hasReference, insertText, referenceImageMapping,
+        batchAnchorIndex, batchAnchorLabel,
     } = input;
 
     const layerId = (cut as any).sceneLayerId || DEFAULT_SCENE_LAYER_ID;
@@ -302,7 +323,7 @@ export function buildGptImage2Prompt(input: BuildPromptInput): string {
     const sceneSection = buildSceneSection(cut);
     if (sceneSection) sections.push(`[Scene]\n${sceneSection}`);
 
-    const subjectSection = buildSubjectSection(cut, characterDescriptions, layerId, referenceImageMapping);
+    const subjectSection = buildSubjectSection(cut, characterDescriptions, layerId, referenceImageMapping, batchAnchorIndex, batchAnchorLabel);
     if (subjectSection) sections.push(`[Subject]\n${subjectSection}`);
 
     const detailsSection = buildDetailsSection(cut);
@@ -352,4 +373,107 @@ export function buildGptImage2EditPrompt(
         `[Context]`,
         baseDescription,
     ].join('\n');
+}
+
+// ───────────────────────────────────────────────────────────────
+// Phase A.6: 씬 일괄 생성 프롬프트 — gpt-image-2 n=N 호출용
+// ───────────────────────────────────────────────────────────────
+
+export interface BuildScenePromptInput {
+    design: ContextSceneDesign;
+    characterDescriptions: { [key: string]: CharacterDescription };
+    sceneLayerId?: string;
+    artStyle: ArtStyle;
+    customArtStyle: string;
+    imageRatio: ImageRatio;
+    /** 멀티 캐릭터 reference 매핑 (collectCharacterReferences 출력 그대로) */
+    referenceImageMapping?: ReferenceImageMapping[];
+}
+
+export function buildScenePrompt(input: BuildScenePromptInput): string {
+    const {
+        design, characterDescriptions, sceneLayerId,
+        artStyle, customArtStyle, imageRatio, referenceImageMapping,
+    } = input;
+
+    const sections: string[] = [];
+
+    // [Scene Setting]
+    sections.push(`[Scene Setting]\n${design.sourceSession.location}\n${design.sceneNarrative}`);
+
+    // [Characters] — 멀티 캐릭터 매핑 (rawKey/resolvedKey 형식 정정 반영)
+    if (referenceImageMapping && referenceImageMapping.length > 0) {
+        const charLines = referenceImageMapping.map(m => {
+            const lookupKey = m.resolvedKey ?? m.rawKey;
+            const displayKey = m.rawKey ?? m.resolvedKey;
+            const anchor = buildCharacterAnchorText(lookupKey, characterDescriptions, sceneLayerId);
+            return `Image ${m.imageIndex + 1} (character "${displayKey}"): ${cleanseSdSyntax(anchor)}`;
+        });
+        sections.push(`[Characters]\n${charLines.join('\n')}`);
+
+        if (referenceImageMapping.length >= 2) {
+            const matchLines = referenceImageMapping.map(m => {
+                const displayKey = m.rawKey ?? m.resolvedKey;
+                return `- Character "${displayKey}" must match Image ${m.imageIndex + 1} exactly in face, hair, body, and outfit`;
+            });
+            sections.push(
+                `[Character Matching]\nAll characters appear together. Each must match their reference exactly:\n${matchLines.join('\n')}`
+            );
+        }
+    }
+
+    // [Mood Arc]
+    if (design.moodArc) sections.push(`[Mood Arc]\n${design.moodArc}`);
+
+    // [Camera Approach]
+    if (design.cameraIntent) sections.push(`[Camera Approach]\n${design.cameraIntent}`);
+
+    // [Style]
+    sections.push(`[Style]\n${buildOpenAIArtStyle(artStyle, customArtStyle)}`);
+
+    // [Layout]
+    sections.push(`[Layout]\n${buildLayoutSection(imageRatio)}`);
+
+    // ★ [Sequence] — 핵심: N컷 일괄 생성 지시
+    const sequenceLines = design.plannedCuts.slice(0, design.targetCutCount).map(cut => {
+        const role = cut.role === 'anchor' ? ' (Anchor — defines the scene)' : '';
+        const lines = [
+            `Cut ${cut.cutIndex}${role}:`,
+            `  Moment: ${cut.momentDescription}`,
+            `  Camera: ${cut.cameraNote}`,
+        ];
+        if (cut.role === 'follow') lines.push(`  Action: ${cut.actionDelta}`);
+        lines.push(`  Mood: ${cut.moodPoint}`);
+        return lines.join('\n');
+    });
+
+    sections.push(
+        `[Sequence — generate ${design.targetCutCount} connected cuts in this order]\n` +
+        sequenceLines.join('\n\n')
+    );
+
+    // [Continuity Requirements]
+    sections.push(
+        `[Continuity Requirements]\n` +
+        `- All ${design.targetCutCount} cuts share the SAME character identity, SAME outfit, SAME location, SAME lighting, SAME art style\n` +
+        `- Time progression: continuous within minutes (not days)\n` +
+        `- Each cut shows a DIFFERENT visual moment of the same scene\n` +
+        `- Camera angles and compositions MUST vary between cuts (avoid duplicate compositions)\n` +
+        `- Cut 1 (Anchor) defines the scene's visual baseline\n` +
+        `- Cuts 2~${design.targetCutCount} show progression while preserving Cut 1's character/outfit/space`
+    );
+
+    // [Constraints]
+    sections.push(
+        `[Constraints]\n` +
+        `- Avoid distorted anatomy, extra fingers, blurry rendering\n` +
+        `- Do not add text, captions, speech bubbles, or floating labels in any cut\n` +
+        `- No watermarks or signatures\n` +
+        `- Each cut must clearly differ in moment, camera angle, or action — duplicates are FORBIDDEN\n` +
+        `- Preserve character identity from reference images exactly`
+    );
+
+    sections.push(`[Use case]\nDoReMiSsul Studio scene "${design.sessionKey}" — ${design.targetCutCount}-cut sequence`);
+
+    return sections.join('\n\n');
 }

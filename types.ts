@@ -3,6 +3,7 @@
 
 // ─── 분리된 모듈 re-export ────────────────────────────────────────
 export type { UniversalScriptSchema, USSCharacter, USSLocation, USSCut } from './types/uss';
+export type { ContextSceneDesign, PlannedCut, ContextSceneGeneration, ContextGeneratedImage } from './types/contextMode';
 export type {
     CutType, PipelineCheckpoint, ApiSource, EnrichedBeat,
     ScenarioAnalysis, BehaviorPatterns, OutfitRecommendation,
@@ -50,6 +51,13 @@ export interface GeneratedImage {
     tag?: 'rough' | 'normal' | 'hq';
     model?: string;
     artStyleLabel?: string;
+    /**
+     * Phase B v3: 이 이미지가 어느 outfitSession 배치의 anchor 인지.
+     * 값이 있으면 해당 배치 후속 컷 생성 시 시각 reference로 자동 첨부됨.
+     * 형식: `${location}::${layerId}::${lineRangeStart}-${lineRangeEnd}` (안정 키).
+     * 없으면 일반 컷 이미지.
+     */
+    batchAnchorFor?: string;
 }
 
 export interface CostumeSuggestion {
@@ -186,6 +194,12 @@ export interface Cut {
     cameraNote?: string;
     moodNote?: string;
     detailsNarrative?: string;
+    /**
+     * Phase B v3 Stage 2: anchor 재생성 후 후속 컷이 stale 상태인지.
+     * true → SceneCard 노란 보더. 후속 컷 재생성 시 false 복원.
+     * anchor 여부 자체는 런타임 계산(isFirstCutInBatch)으로 결정.
+     */
+    staleByAnchor?: boolean;
 }
 
 export interface Scene {
@@ -390,6 +404,15 @@ export interface AppDataState {
     styleLoraScaleOverride?: number;
     currentProjectId: string | null;
     isProjectSaved: boolean;
+    /**
+     * Phase A.6: Context 모드 씬 디자인. outfitSession별 1개.
+     * sessionKey로 매칭. Context+OpenAI에서만 사용. 미정의=undefined.
+     */
+    contextSceneDesigns?: import('./types/contextMode').ContextSceneDesign[];
+    /** Phase A.6: 분석 진행 상태 (휘발성, 세션 시작 시 초기화) */
+    contextAnalysisStatus?: { isRunning: boolean; target: 'all' | string; progress: number; message?: string };
+    /** Phase A.6: 생성 진행 상태 (휘발성) */
+    contextGenerationStatus?: { isRunning: boolean; target: string; progress: number; message?: string };
 }
 
 // ─── AppAction ────────────────────────────────────────────────────
@@ -508,7 +531,18 @@ export type AppAction =
     | { type: 'DELETE_CHARACTER_VARIANT'; payload: { characterKey: string; variantId: string } }
     // ── Phase B: OpenAI gpt-image-2 ─────────────────────────────────
     | { type: 'SET_OPENAI_IMAGE_QUALITY'; payload: OpenAIImageQuality }
-    | { type: 'ADD_OPENAI_USAGE'; payload: { images: number; costUsd: number; quality: OpenAIImageQuality } };
+    | { type: 'ADD_OPENAI_USAGE'; payload: { images: number; costUsd: number; quality: OpenAIImageQuality } }
+    // ── Phase A.6: Context 모드 씬 디자인 ─────────────────────────────
+    | { type: 'SET_CONTEXT_ANALYSIS_STATUS'; payload: AppDataState['contextAnalysisStatus'] }
+    | { type: 'SET_CONTEXT_SCENE_DESIGNS'; payload: import('./types/contextMode').ContextSceneDesign[] }
+    | { type: 'UPDATE_CONTEXT_SCENE_DESIGN'; payload: { sessionKey: string; design: import('./types/contextMode').ContextSceneDesign } }
+    | { type: 'DELETE_CONTEXT_SCENE_DESIGN'; payload: string }
+    | { type: 'UPDATE_PLANNED_CUT'; payload: { sessionKey: string; cutIndex: number; data: Partial<import('./types/contextMode').PlannedCut> } }
+    | { type: 'SET_TARGET_CUT_COUNT'; payload: { sessionKey: string; count: number } }
+    | { type: 'SET_CONTEXT_GENERATION_STATUS'; payload: AppDataState['contextGenerationStatus'] }
+    | { type: 'SET_CONTEXT_SCENE_GENERATION'; payload: { sessionKey: string; result: import('./types/contextMode').ContextSceneGeneration } }
+    | { type: 'CLEAR_CONTEXT_SCENE_GENERATION'; payload: string }
+    | { type: 'MARK_CONTEXT_DESIGNS_STALE'; payload: string[] };
 
 // ─── Phase 5: 로컬 스토리지 타입 ─────────────────────────────────
 

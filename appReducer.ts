@@ -8,7 +8,7 @@ import {
     ImageEngine, FluxModel, SceneLayer, OutfitSession, ContiCut, EditableScene
 } from './types';
 import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
-import { getEngineFromModel, createGeneratedImage, normalizeLocationEntries } from './appUtils';
+import { getEngineFromModel, createGeneratedImage, normalizeLocationEntries, findOutfitSessionForCut, findAnchorCutForBatch, deriveOutfitSessionsFromCuts, buildSessionKey } from './appUtils';
 
 export const createInitialStudioSession = (): StudioSession => ({
     originalImage: null,
@@ -66,6 +66,21 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
                 sa.locations = normalizeLocationEntries(sa.locations);
             }
         }
+        // ★ Phase B v3: outfitSessions 빈 배열 + locations 있음 → 자동 폴백 생성
+        // USS 파이프라인은 outfitSessions를 채우지 않으므로 여기서 보강.
+        if (sa.outfitSessions.length === 0 && Array.isArray(sa.locations) && sa.locations.length > 0) {
+            const cuts = (sanitized.generatedContent?.scenes || []).flatMap(s => s.cuts || []);
+            const totalLines = Math.max(cuts.length, 1);
+            sa.outfitSessions = sa.locations
+                .map(l => (typeof l === 'string' ? l : l.name))
+                .filter(Boolean)
+                .map((loc: string) => ({
+                    location: loc,
+                    layerId: DEFAULT_SCENE_LAYER_ID,
+                    lineRange: [1, totalLines] as [number, number],
+                }));
+            console.warn('[sanitizeState] outfitSessions 빈 배열 → locations 기반 자동 생성 (USS/레거시 호환)');
+        }
         // ★ Phase A: sceneLayers의 각 레이어에 toneModifier 기본값 부여 (기존 프로젝트 호환)
         sa.sceneLayers = sa.sceneLayers.map((layer: SceneLayer) => ({
             ...layer,
@@ -100,6 +115,13 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
     if (!('openaiUsage' in sanitized) || !sanitized.openaiUsage) {
         sanitized.openaiUsage = { totalImages: 0, totalCostUsd: 0, history: [] };
     }
+    // ★ Phase A.6: Context 모드 안전망
+    if ('contextSceneDesigns' in sanitized && !Array.isArray(sanitized.contextSceneDesigns)) {
+        sanitized.contextSceneDesigns = undefined;
+    }
+    // 진행 상태는 휘발성 — 새 세션에선 항상 초기화
+    sanitized.contextAnalysisStatus = undefined;
+    sanitized.contextGenerationStatus = undefined;
     if (!('logline' in sanitized) || sanitized.logline === undefined) {
         sanitized.logline = '';
     }
@@ -498,16 +520,57 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         case 'ADD_IMAGE_TO_CUT': {
             const { image, cutNumber } = action.payload;
             if (!state.generatedContent) return state;
-            
+
             // Deduplicate history to prevent confusion
             const nextHistory = [image, ...state.generatedImageHistory.filter(img => img.id !== image.id)];
+
+            // Phase B v3 Stage 2: anchor 컷 재생성 시 후속 컷에 staleByAnchor 표시.
+            // Context 모드 + OpenAI 엔진일 때만 의미 있음.
+            const allCuts = state.generatedContent.scenes.flatMap(s => s.cuts);
+            const targetCut = allCuts.find(c => c.cutNumber === cutNumber);
+            const realSessions = state.scenarioAnalysis?.outfitSessions || [];
+            const outfitSessions = realSessions.length > 0
+                ? realSessions
+                : deriveOutfitSessionsFromCuts(allCuts);
+            const isContextMode = state.imageEngineMode === 'context' && state.selectedImageEngine === 'openai';
+
+            let staleCutNumbers: Set<string> | null = null;
+            if (isContextMode && targetCut) {
+                const found = findOutfitSessionForCut(targetCut, outfitSessions);
+                if (found) {
+                    const anchor = findAnchorCutForBatch(found.session, allCuts);
+                    if (anchor && anchor.cutNumber === cutNumber) {
+                        // 같은 배치의 다른 컷들 stale 표시
+                        staleCutNumbers = new Set(
+                            allCuts
+                                .filter(c =>
+                                    c.cutNumber !== cutNumber
+                                    && c.location === found.session.location
+                                    && (c.sceneLayerId || DEFAULT_SCENE_LAYER_ID)
+                                        === (found.session.layerId || DEFAULT_SCENE_LAYER_ID)
+                                )
+                                .map(c => c.cutNumber)
+                        );
+                    }
+                }
+            }
+
             const nextScenes = state.generatedContent.scenes.map(scene => ({
                 ...scene,
-                cuts: scene.cuts.map(cut => cut.cutNumber === cutNumber ? { ...cut, selectedImageId: image.id } : cut)
+                cuts: scene.cuts.map(cut => {
+                    if (cut.cutNumber === cutNumber) {
+                        // 자신은 새 이미지 받음 + stale 플래그 해제
+                        return { ...cut, selectedImageId: image.id, staleByAnchor: false };
+                    }
+                    if (staleCutNumbers && staleCutNumbers.has(cut.cutNumber)) {
+                        return { ...cut, staleByAnchor: true };
+                    }
+                    return cut;
+                })
             }));
-            
-            return { 
-                ...state, 
+
+            return {
+                ...state,
                 generatedImageHistory: nextHistory,
                 generatedContent: { ...state.generatedContent, scenes: nextScenes }
             };
@@ -747,7 +810,14 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         }
         case 'SET_CINEMATOGRAPHY_PLAN': return { ...state, cinematographyPlan: action.payload };
         // ★ Flux 엔진 (병행 운영)
-        case 'SET_IMAGE_ENGINE': return { ...state, selectedImageEngine: action.payload };
+        case 'SET_IMAGE_ENGINE': {
+            // Phase B v3: Context 모드는 OpenAI 엔진일 때만 활성. 다른 엔진 선택 시 자동 'legacy' 폴백.
+            const nextEngine = action.payload;
+            if (state.imageEngineMode === 'context' && nextEngine !== 'openai') {
+                return { ...state, selectedImageEngine: nextEngine, imageEngineMode: 'legacy' };
+            }
+            return { ...state, selectedImageEngine: nextEngine };
+        }
         case 'SET_FLUX_MODEL': return { ...state, selectedFluxModel: action.payload };
         // Phase 6: LoRA
         case 'SET_STYLE_LORA': return { ...state, styleLoraId: action.payload.id, styleLoraScaleOverride: action.payload.scaleOverride };
@@ -779,10 +849,7 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         }
         // ── Phase A: Block Editor + Engine Mode ─────────────────────
         case 'SET_IMAGE_ENGINE_MODE': {
-            if (state.appState !== 'initial') {
-                console.warn('[imageEngineMode] 에피소드 진행 중에는 변경 불가. 새 에피소드에서만 변경 가능.');
-                return state;
-            }
+            // Phase B v3: 에피소드 중에도 토글 가능 (런타임 reference 결정 — 기존 데이터 안 깨짐)
             return { ...state, imageEngineMode: action.payload };
         }
         case 'UPDATE_SCENE_LAYER': {
@@ -796,10 +863,18 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         case 'UPDATE_OUTFIT_SESSION': {
             if (!state.scenarioAnalysis) return state;
             const sa = state.scenarioAnalysis;
+            const old = (sa.outfitSessions || [])[action.payload.index];
             const newSessions = (sa.outfitSessions || []).map((os, i) =>
                 i === action.payload.index ? { ...os, ...action.payload.data } : os
             );
-            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions } };
+            // Phase A.6: 영향받는 design을 stale 표시 (lineRange/location/layerId 변경 시)
+            const affectedKey = old ? buildSessionKey(old) : null;
+            const designs = affectedKey
+                ? (state.contextSceneDesigns || []).map(d =>
+                    d.sessionKey === affectedKey ? { ...d, isStale: true } : d
+                )
+                : state.contextSceneDesigns;
+            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions }, contextSceneDesigns: designs };
         }
         case 'SPLIT_OUTFIT_SESSION': {
             if (!state.scenarioAnalysis) return state;
@@ -822,7 +897,12 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                 right,
                 ...sessions.slice(action.payload.index + 1),
             ];
-            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions } };
+            // Phase A.6: 분리된 원본 session의 design을 stale 표시
+            const affectedKey = buildSessionKey(target);
+            const designs = (state.contextSceneDesigns || []).map(d =>
+                d.sessionKey === affectedKey ? { ...d, isStale: true } : d
+            );
+            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions }, contextSceneDesigns: designs };
         }
         case 'MERGE_OUTFIT_SESSIONS': {
             if (!state.scenarioAnalysis) return state;
@@ -845,7 +925,12 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                 merged,
                 ...sessions.slice(action.payload.firstIndex + 2),
             ];
-            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions } };
+            // Phase A.6: 두 원본 session의 design 모두 stale 표시
+            const aKey = buildSessionKey(a), bKey = buildSessionKey(b);
+            const designs = (state.contextSceneDesigns || []).map(d =>
+                (d.sessionKey === aKey || d.sessionKey === bKey) ? { ...d, isStale: true } : d
+            );
+            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions }, contextSceneDesigns: designs };
         }
         case 'CONVERT_TO_MEMORY_BATCH': {
             if (!state.scenarioAnalysis) return state;
@@ -900,12 +985,18 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                 })),
             } : null;
 
+            // Phase A.6: 변환된 session의 design stale 표시
+            const affectedKey = buildSessionKey(target);
+            const designs = (state.contextSceneDesigns || []).map(d =>
+                d.sessionKey === affectedKey ? { ...d, isStale: true } : d
+            );
             return {
                 ...state,
                 scenarioAnalysis: { ...sa, sceneLayers: newLayers, outfitSessions: newSessions },
                 editableStoryboard: newStoryboard,
                 contiCuts: newContiCuts,
                 generatedContent: newGeneratedContent,
+                contextSceneDesigns: designs,
             };
         }
         case 'ADD_SCENE_LAYER': {
@@ -917,7 +1008,10 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
             if (!state.scenarioAnalysis) return state;
             const sa = state.scenarioAnalysis;
             if (action.payload === DEFAULT_SCENE_LAYER_ID) return state;
-            const newSessions = (sa.outfitSessions || []).map(os =>
+            // Phase A.6: 영향받는 모든 session의 design stale 표시
+            const oldSessions = sa.outfitSessions || [];
+            const affectedKeys = new Set(oldSessions.filter(os => os.layerId === action.payload).map(buildSessionKey));
+            const newSessions = oldSessions.map(os =>
                 os.layerId === action.payload ? { ...os, layerId: DEFAULT_SCENE_LAYER_ID, userLabel: undefined } : os
             );
             const newLayers = (sa.sceneLayers || []).filter(l => l.id !== action.payload);
@@ -938,12 +1032,16 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                 })),
             } : null;
 
+            const designs = (state.contextSceneDesigns || []).map(d =>
+                affectedKeys.has(d.sessionKey) ? { ...d, isStale: true } : d
+            );
             return {
                 ...state,
                 scenarioAnalysis: { ...sa, sceneLayers: newLayers, outfitSessions: newSessions },
                 editableStoryboard: newStoryboard,
                 contiCuts: newContiCuts,
                 generatedContent: newGeneratedContent,
+                contextSceneDesigns: designs,
             };
         }
         case 'ADD_CHARACTER_VARIANT': {
@@ -1005,6 +1103,70 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                     totalCostUsd: state.openaiUsage.totalCostUsd + costUsd,
                     history,
                 },
+            };
+        }
+        // ── Phase A.6: Context 모드 씬 디자인 ─────────────────────────
+        case 'SET_CONTEXT_ANALYSIS_STATUS':
+            return { ...state, contextAnalysisStatus: action.payload };
+        case 'SET_CONTEXT_SCENE_DESIGNS':
+            return { ...state, contextSceneDesigns: action.payload };
+        case 'UPDATE_CONTEXT_SCENE_DESIGN': {
+            const existing = state.contextSceneDesigns || [];
+            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
+            if (idx === -1) return { ...state, contextSceneDesigns: [...existing, action.payload.design] };
+            const next = [...existing];
+            next[idx] = action.payload.design;
+            return { ...state, contextSceneDesigns: next };
+        }
+        case 'DELETE_CONTEXT_SCENE_DESIGN':
+            return { ...state, contextSceneDesigns: (state.contextSceneDesigns || []).filter(d => d.sessionKey !== action.payload) };
+        case 'UPDATE_PLANNED_CUT': {
+            const existing = state.contextSceneDesigns || [];
+            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
+            if (idx === -1) return state;
+            const design = existing[idx];
+            const cutIdx = design.plannedCuts.findIndex(p => p.cutIndex === action.payload.cutIndex);
+            if (cutIdx === -1) return state;
+            const updatedCuts = [...design.plannedCuts];
+            updatedCuts[cutIdx] = { ...updatedCuts[cutIdx], ...action.payload.data };
+            const next = [...existing];
+            next[idx] = { ...design, plannedCuts: updatedCuts };
+            return { ...state, contextSceneDesigns: next };
+        }
+        case 'SET_TARGET_CUT_COUNT': {
+            const existing = state.contextSceneDesigns || [];
+            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
+            if (idx === -1) return state;
+            const count = Math.min(8, Math.max(1, action.payload.count));
+            const next = [...existing];
+            next[idx] = { ...next[idx], targetCutCount: count };
+            return { ...state, contextSceneDesigns: next };
+        }
+        case 'SET_CONTEXT_GENERATION_STATUS':
+            return { ...state, contextGenerationStatus: action.payload };
+        case 'SET_CONTEXT_SCENE_GENERATION': {
+            const existing = state.contextSceneDesigns || [];
+            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
+            if (idx === -1) return state;
+            const next = [...existing];
+            next[idx] = { ...next[idx], generationResult: action.payload.result };
+            return { ...state, contextSceneDesigns: next };
+        }
+        case 'CLEAR_CONTEXT_SCENE_GENERATION': {
+            const existing = state.contextSceneDesigns || [];
+            const idx = existing.findIndex(d => d.sessionKey === action.payload);
+            if (idx === -1) return state;
+            const next = [...existing];
+            next[idx] = { ...next[idx], generationResult: undefined };
+            return { ...state, contextSceneDesigns: next };
+        }
+        case 'MARK_CONTEXT_DESIGNS_STALE': {
+            const targetKeys = new Set(action.payload);
+            return {
+                ...state,
+                contextSceneDesigns: (state.contextSceneDesigns || []).map(d =>
+                    targetKeys.has(d.sessionKey) ? { ...d, isStale: true } : d
+                ),
             };
         }
         default: return state;

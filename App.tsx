@@ -298,6 +298,10 @@ export const App: React.FC = () => {
                 scenarioAnalysis={state.scenarioAnalysis}
                 characterDescriptions={state.characterDescriptions}
                 openaiImageQuality={state.openaiImageQuality || 'medium'}
+                generatedContent={state.generatedContent}
+                contextSceneDesigns={state.contextSceneDesigns}
+                contextAnalysisStatus={state.contextAnalysisStatus}
+                contextGenerationStatus={state.contextGenerationStatus}
             />
 
             <ApiKeySettings isOpen={isApiKeySettingsOpen} onClose={() => setIsApiKeySettingsOpen(false)} />

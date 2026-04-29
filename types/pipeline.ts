@@ -114,6 +114,17 @@ export interface OutfitSession {
     userLabel?: string;
     /** Phase A: 배치 메모 (검수 노트, 의도 기록). */
     userNote?: string;
+    /**
+     * Phase B v3 Stage 1: 사용자가 수동 오버라이드한 anchor 컷 번호.
+     * 없으면 lineRange 첫 줄에 매핑된 컷이 자동 anchor.
+     * Context 엔진 모드 + OpenAI 엔진일 때만 활용.
+     */
+    anchorCutNumber?: string;
+    /**
+     * Phase B v3 Stage 1: anchor로 사용할 GeneratedImage.id.
+     * 없으면 anchor 컷의 selectedImageId 폴백.
+     */
+    anchorImageId?: string;
 }
 
 export interface ScenarioAnalysis {

@@ -6,7 +6,7 @@ import { useAppContext } from '../AppContext';
 import { IS_TAURI, saveAsset, resolveImageUrl } from '../services/tauriAdapter';
 import { AssetTagPopup, AssetCatalogModal } from './AssetCatalogModal';
 import { buildArtStylePrompt } from '../appStyleEngine';
-import { createGeneratedImage } from '../appUtils';
+import { createGeneratedImage, isFirstCutInBatch, deriveOutfitSessionsFromCuts } from '../appUtils';
 import type { AssetCatalogEntry } from '../services/tauriAdapter';
 
 interface CutCardProps {
@@ -68,7 +68,20 @@ const InfoField: React.FC<{
 export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
     const { state, actions, dispatch } = useAppContext();
     const { generatedImageHistory } = state;
-    
+
+    // Phase B v3: anchor 컷 여부 (런타임 계산). Context 모드에서만 의미 있지만 표시는 항상.
+    const allCuts = React.useMemo(
+        () => (state.generatedContent?.scenes || []).flatMap(s => s.cuts),
+        [state.generatedContent],
+    );
+    const realSessions = state.scenarioAnalysis?.outfitSessions || [];
+    const outfitSessions = React.useMemo(
+        () => realSessions.length > 0 ? realSessions : deriveOutfitSessionsFromCuts(allCuts),
+        [realSessions, allCuts],
+    );
+    const isAnchorCut = isFirstCutInBatch(cut, allCuts, outfitSessions);
+    const showContextBadges = state.imageEngineMode === 'context' && state.selectedImageEngine === 'openai';
+
     // Compute derived state
     const availableImages = generatedImageHistory.filter(img => img.sourceCutNumber === cut.cutNumber);
     // Sort images: latest first
@@ -319,7 +332,11 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
 
     return (
         <>
-        <div id={`cut-${cut.cutNumber}`} className="relative bg-zinc-900/80 rounded-xl shadow-lg border p-4 flex flex-col gap-3 border-zinc-800 transition-all duration-300 hover:border-orange-500/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-0.5 group/card">
+        <div id={`cut-${cut.cutNumber}`} className={`relative bg-zinc-900/80 rounded-xl shadow-lg border p-4 flex flex-col gap-3 transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:-translate-y-0.5 group/card ${
+            cut.staleByAnchor && showContextBadges
+                ? 'border-yellow-500/60 ring-2 ring-yellow-500/30 hover:border-yellow-400'
+                : 'border-zinc-800 hover:border-orange-500/50'
+        }`}>
             {cut.isUpdatingIntent && (
                 <div className="absolute inset-0 bg-zinc-900/80 flex flex-col items-center justify-center z-20 rounded-xl backdrop-blur-sm">
                     <SpinnerIcon className="w-8 h-8 text-orange-400" />
@@ -331,6 +348,22 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                     <div className="flex items-center gap-3">
                         <div className={`w-2 h-2 rounded-full transition-colors duration-500 ${selectedImage ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-zinc-700'}`} title={selectedImage ? "이미지 있음" : "이미지 없음"} />
                         <h4 className="font-mono font-bold text-lg text-orange-400 tracking-tight">CUT {cut.cutNumber}</h4>
+                        {showContextBadges && isAnchorCut && (
+                            <span
+                                className="text-[10px] font-bold bg-cyan-600/80 text-white px-1.5 py-0.5 rounded-full border border-cyan-400/50"
+                                title="배치 anchor 컷 — 같은 outfitSession 후속 컷의 시각 reference로 자동 사용됩니다"
+                            >
+                                ⚓ ANCHOR
+                            </span>
+                        )}
+                        {showContextBadges && cut.staleByAnchor && (
+                            <span
+                                className="text-[10px] font-bold bg-yellow-600/80 text-white px-1.5 py-0.5 rounded-full border border-yellow-400/50"
+                                title="anchor 컷이 재생성되어 이 컷의 일관성이 흔들렸을 수 있습니다. 재생성 권장."
+                            >
+                                ⚠ STALE
+                            </span>
+                        )}
                         {cut.useIntenseEmotion && <span className="text-[8px] font-bold bg-rose-600 text-white px-1.5 py-0.5 rounded-full">🔥</span>}
                         <div className="opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center gap-1">
                             <button onClick={() => actions.handleAutoGenerateImageForCut(cut)} className="p-1.5 text-purple-400 hover:text-white bg-purple-900/30 hover:bg-purple-600 rounded-md transition-all duration-200" title="컷 자동 생성 (AI)">
