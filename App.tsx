@@ -117,6 +117,43 @@ export const App: React.FC = () => {
         return () => { if (unlisten) unlisten(); };
     }, []);
 
+    // Phase A.7: 통합 이미지 스튜디오 → 메인 앱 이벤트 리스너
+    useEffect(() => {
+        if (!IS_TAURI) return;
+        const unlisteners: (() => void)[] = [];
+
+        // 카탈로그에 새 에셋 저장됨 → 카탈로그 갱신 신호
+        listen('image-studio-asset-saved', () => {
+            import('./services/tauriAdapter').then(m => m.emit?.('asset-catalog-updated', null).catch(() => {}));
+            actions.addNotification('이미지 스튜디오: 카탈로그에 저장됨', 'success');
+        }).then(fn => { unlisteners.push(fn); });
+
+        // 컷에 이미지 적용 요청 → ADD_IMAGE_TO_CUT
+        listen('image-studio-apply-to-cut', async (payload: { cutNumber: string; imageUrl: string; prompt?: string }) => {
+            if (!payload?.cutNumber || !payload?.imageUrl) return;
+            try {
+                const { createGeneratedImage } = await import('./appUtils');
+                const newImage = createGeneratedImage({
+                    imageUrl: payload.imageUrl,
+                    sourceCutNumber: payload.cutNumber,
+                    prompt: payload.prompt || '',
+                    engine: 'gpt-image-2',
+                    tag: 'normal',
+                });
+                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImage, cutNumber: payload.cutNumber } });
+                actions.addNotification(`컷 ${payload.cutNumber}에 이미지 추가됨`, 'success');
+            } catch (e: any) {
+                console.error('[image-studio-apply-to-cut]', e);
+                actions.addNotification(`컷 적용 실패: ${e?.message ?? e}`, 'error');
+            }
+        }).then(fn => { unlisteners.push(fn); });
+
+        // 스튜디오 창 닫힘 (현재 UI 정리할 게 없지만 향후 확장용)
+        listen('image-studio-window-closed', () => { /* no-op */ }).then(fn => { unlisteners.push(fn); });
+
+        return () => { unlisteners.forEach(u => u()); };
+    }, [actions, dispatch]);
+
     useLayoutEffect(() => {
         const updateHeaderHeight = () => { if (headerRef.current) actions.setUIState({ headerHeight: headerRef.current.offsetHeight }); };
         updateHeaderHeight();

@@ -4,7 +4,8 @@
   "description": "도레미썰 스튜디오 기본 권한",
   "windows": [
     "main",
-    "asset-catalog"
+    "asset-catalog",
+    "image-studio"
   ],
   "permissions": [
     "core:default",

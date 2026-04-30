@@ -1285,6 +1285,28 @@ async fn open_asset_catalog(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Phase A.7: 통합 이미지 스튜디오 독립 윈도우 ────────────────
+#[tauri::command]
+async fn open_image_studio(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+    if let Some(win) = app.get_webview_window("image-studio") {
+        let _ = win.set_focus();
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        &app,
+        "image-studio",
+        tauri::WebviewUrl::App("/?view=image-studio".into()),
+    )
+    .title("이미지 스튜디오")
+    .inner_size(1280.0, 820.0)
+    .min_inner_size(900.0, 600.0)
+    .center()
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn main() {
     // 마이그레이션은 첫 키 접근 시 lazy 실행 (cached_keys 내부)
 
@@ -1332,6 +1354,7 @@ fn main() {
             load_lora_registry,
             // 멀티윈도우
             open_asset_catalog,
+            open_image_studio,
         ])
         .run(tauri::generate_context!())
         .expect("도레미썰 스튜디오 실행 오류");

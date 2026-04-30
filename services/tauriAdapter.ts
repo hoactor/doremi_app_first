@@ -36,6 +36,28 @@ export async function openAssetCatalog(): Promise<void> {
     return invoke('open_asset_catalog');
 }
 
+/**
+ * Phase A.7: 통합 이미지 스튜디오 독립 윈도우 열기.
+ * payload는 emit('image-studio-init')로 새 창에 전달 (창 ready 이후).
+ * - mode: 'create' | 'edit'
+ * - sourceCutNumber, initialImageUrl: 컷에서 호출 시 컨텍스트
+ * - initialAssetType: character/background/outfit/prop
+ */
+export interface ImageStudioInitPayload {
+    mode?: 'create' | 'edit';
+    sourceCutNumber?: string;
+    initialImageUrl?: string;
+    initialAssetType?: 'character' | 'background' | 'outfit' | 'prop';
+}
+
+export async function openImageStudio(payload?: ImageStudioInitPayload): Promise<void> {
+    await invoke('open_image_studio');
+    // 창 ready 이후 페이로드 전달 — 약간의 지연 후 emit (창 listener 등록 시간 확보)
+    if (payload && Object.keys(payload).length > 0) {
+        setTimeout(() => { emit('image-studio-init', payload).catch(() => {}); }, 300);
+    }
+}
+
 // ─── API Key Management ─────────────────────────────────────────
 
 export interface ApiKeys {

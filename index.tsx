@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client';
 import { App, ErrorBoundary } from './App';
 import { AppProvider } from './AppContext';
 import { AssetCatalogPage } from './components/AssetCatalogPage';
+import { UnifiedImageStudio } from './components/UnifiedImageStudio';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -21,6 +22,13 @@ if (viewMode === 'asset-catalog') {
   root.render(
     <React.StrictMode>
       <AssetCatalogPage />
+    </React.StrictMode>
+  );
+} else if (viewMode === 'image-studio') {
+  // Phase A.7: 통합 이미지 스튜디오 독립 창 — AppProvider 없이 독립 동작
+  root.render(
+    <React.StrictMode>
+      <UnifiedImageStudio />
     </React.StrictMode>
   );
 } else {

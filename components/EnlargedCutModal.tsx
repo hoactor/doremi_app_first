@@ -3,6 +3,7 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { CheckIcon, SparklesIcon, XIcon, RefreshIcon, TrashIcon, PencilIcon, PhotoIcon } from './icons';
+import { openImageStudio } from '../services/tauriAdapter';
 
 export const EnlargedCutModal: React.FC = () => {
     const { state, actions } = useAppContext();
@@ -64,9 +65,16 @@ export const EnlargedCutModal: React.FC = () => {
                             className={`flex-1 px-3 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all duration-200 ${eCut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : eCut.useIntenseEmotion ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500 shadow-[0_0_16px_rgba(244,63,94,0.45)]' : 'bg-gradient-to-br from-rose-500/15 to-rose-600/5 hover:from-rose-500/25 hover:to-rose-600/10 text-rose-300 hover:text-rose-200 border border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.12)] hover:shadow-[0_0_18px_rgba(244,63,94,0.28)]'}`}>
                             {eCut.isIntensifying ? '⏳ 생성중' : eCut.useIntenseEmotion ? '🔥 강화됨' : '🔥 강화'}
                         </button>
-                        <button onClick={() => { actions.handlePrepareStudioForCut(enlargedCutNumber, eCut.sceneDescription); actions.setUIState({ enlargedCutNumber: null }); }}
+                        <button onClick={() => {
+                                openImageStudio({
+                                    mode: 'edit',
+                                    sourceCutNumber: enlargedCutNumber,
+                                    initialImageUrl: eSelected?.imageUrl,
+                                });
+                                actions.setUIState({ enlargedCutNumber: null });
+                            }}
                             className="flex-1 px-3 py-2.5 bg-transparent hover:bg-zinc-700/50 text-zinc-300 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors border border-zinc-600">
-                            <PencilIcon className="w-3.5 h-3.5" /> Studio
+                            <PencilIcon className="w-3.5 h-3.5" /> 🎨 스튜디오
                         </button>
                     </div>
 

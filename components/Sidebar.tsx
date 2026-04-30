@@ -6,7 +6,7 @@ import {
     ScissorsIcon, MicrophoneIcon, DownloadIcon, XIcon, ChevronDownIcon, PlayIcon,
     PaintBrushIcon, CogIcon, ArrowsRightLeftIcon, ArrowTopRightOnSquareIcon, SpinnerIcon
 } from './icons';
-import { IS_TAURI, openAssetCatalog, resetWindowSize, loadLoraRegistry } from '../services/tauriAdapter';
+import { IS_TAURI, openAssetCatalog, openImageStudio, resetWindowSize, loadLoraRegistry } from '../services/tauriAdapter';
 import { LoraRegistryModal } from './LoraRegistryModal';
 import { BatchEditorPanel } from './BatchEditorPanel';
 import type { LoRAEntry, ImageEngineMode, ScenarioAnalysis, CharacterDescription, OpenAIImageQuality, ContextSceneDesign, AppDataState } from '../types';
@@ -492,11 +492,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 {isAssetWindowOpen && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full border border-zinc-800" />}
                             </button>
                             <button
-                                onClick={() => setIsDalleGeneratorOpen(true)}
+                                onClick={() => openImageStudio()}
                                 className="flex items-center px-2 py-2 text-xs font-medium rounded-lg bg-orange-900/30 hover:bg-orange-800/40 border border-orange-700/40 hover:border-orange-600/60 transition-all text-orange-300 hover:text-orange-200"
-                                title="DALL-E로 원본 에셋 생성"
+                                title="이미지 스튜디오 — Gemini · Flux · OpenAI 통합 생성/편집"
                             >
-                                <SparklesIcon className="w-3.5 h-3.5" />
+                                🎨
                             </button>
                         </div>
                     )}
