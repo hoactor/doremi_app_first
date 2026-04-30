@@ -132,11 +132,6 @@ export function createCutEditActions(h: CutEditActionHelpers) {
         finally { dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: finalSourceCut, data: { imageLoading: false } } }); }
     };
 
-    // Legacy wrapper — 기존 호출부 호환
-    const handleEditInStudio = async (_sId: 'a', img: GeneratedImage, p: string, refs: string[], mask?: string, override?: string) => {
-        await handleEditForCut(override || img.sourceCutNumber, img, p, refs, mask);
-    };
-
     const handleCreateForCut = async (cutNumber: string, base: GeneratedImage, p: string) => {
         const finalSourceCut = cutNumber || 'custom';
         dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: finalSourceCut, data: { imageLoading: true } } });
@@ -155,11 +150,6 @@ export function createCutEditActions(h: CutEditActionHelpers) {
             dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: finalSourceCut } });
         } catch { addNotification('생성 실패', 'error', { label: '재시도', callback: () => handleCreateForCut(cutNumber, base, p) }); }
         finally { dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: finalSourceCut, data: { imageLoading: false } } }); }
-    };
-
-    // Legacy wrapper — 기존 호출부 호환
-    const handleCreateInStudio = async (_sId: 'a', base: GeneratedImage, p: string) => {
-        await handleCreateForCut(base.sourceCutNumber || 'custom', base, p);
     };
 
     const handleUpdateCutCharacters = async (cutNumber: string, names: string[]) => {
@@ -233,8 +223,6 @@ export function createCutEditActions(h: CutEditActionHelpers) {
     };
 
     return {
-        handleEditInStudio,
-        handleCreateInStudio,
         handleEditForCut,
         handleCreateForCut,
         handleUpdateCutCharacters,

@@ -4,22 +4,11 @@
 
 import {
     AppDataState, AppAction, Cut, GeneratedImage, Notification,
-    StudioSession, CharacterDescription, Scene, GeneratedScript, ArtStyle, ContentFormat, AIModelTier,
+    CharacterDescription, Scene, GeneratedScript, ArtStyle, ContentFormat, AIModelTier,
     ImageEngine, FluxModel, SceneLayer, OutfitSession, ContiCut, EditableScene
 } from './types';
 import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 import { getEngineFromModel, createGeneratedImage, normalizeLocationEntries, findOutfitSessionForCut, findAnchorCutForBatch, deriveOutfitSessionsFromCuts, buildSessionKey } from './appUtils';
-
-export const createInitialStudioSession = (): StudioSession => ({
-    originalImage: null,
-    currentImage: null,
-    history: [],
-    referenceImageUrls: [],
-    editPrompt: '',
-    zoom: 1,
-    pan: { x: 0, y: 0 },
-    sourceCutForNextEdit: null,
-});
 
 export const sanitizeState = (state: AppDataState): AppDataState => {
     const sanitized = JSON.parse(JSON.stringify(state)) as AppDataState;
@@ -153,20 +142,10 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
         sanitized.pipelineCheckpoint = 'idle';
     }
     
-    // Migrate old referenceImageUrl → referenceImageUrls
-    if (sanitized.studioSessions) {
-        for (const key of Object.keys(sanitized.studioSessions) as ('a')[]) {
-            const s = sanitized.studioSessions[key] as any;
-            if ('referenceImageUrl' in s) {
-                s.referenceImageUrls = s.referenceImageUrl ? [s.referenceImageUrl] : [];
-                delete s.referenceImageUrl;
-            }
-            if (!Array.isArray(s.referenceImageUrls)) {
-                s.referenceImageUrls = [];
-            }
-        }
-    }
-    
+    // Phase A.7 cleanup: 기존 studioSessions/activeStudioTarget 필드 제거 (UnifiedImageStudio로 대체됨)
+    delete (sanitized as any).studioSessions;
+    delete (sanitized as any).activeStudioTarget;
+
     // Clean up character transient states
     if (sanitized.characterDescriptions) {
         Object.values(sanitized.characterDescriptions).forEach(char => {
@@ -425,9 +404,7 @@ export const initialAppDataState: AppDataState = {
     smartFieldSuggestions: {},
     animationStyle: 'none',
     generatedImageHistory: [],
-    studioSessions: { a: createInitialStudioSession() },
     filenameTemplate: 'cut#{cut}_{character}_{id}',
-    activeStudioTarget: 'a' as const,
     isAutoGenerating: false,
     isGeneratingSRT: false,
     backgroundMusicUrl: null,
@@ -580,38 +557,16 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
             if (!imageId) return state;
             const nextHistory = state.generatedImageHistory.filter(img => img.id !== imageId);
             
-            // 1. 컷 선택 이미지 초기화 (Selected Image)
+            // 컷 선택 이미지 초기화 (Selected Image)
             const nextScenes = state.generatedContent ? state.generatedContent.scenes.map(scene => ({
                 ...scene,
                 cuts: scene.cuts.map(cut => cut.selectedImageId === imageId ? { ...cut, selectedImageId: null } : cut)
             })) : null;
-            
-            // 2. 스튜디오 세션 이미지 정밀 제거 (Surgical nullification)
-            const updateSessionSurgically = (session: StudioSession): StudioSession => {
-                const isCurrentMatch = session.currentImage?.id === imageId;
-                const isOriginalMatch = session.originalImage?.id === imageId;
-                const nextSessionHistory = session.history.filter(img => img.id !== imageId);
-                
-                if (isCurrentMatch || isOriginalMatch || nextSessionHistory.length !== session.history.length) {
-                    return {
-                        ...session,
-                        currentImage: isCurrentMatch ? null : session.currentImage,
-                        originalImage: isOriginalMatch ? null : session.originalImage,
-                        history: nextSessionHistory,
-                        zoom: isCurrentMatch ? 1 : session.zoom,
-                        pan: isCurrentMatch ? { x: 0, y: 0 } : session.pan
-                    };
-                }
-                return session;
-            };
 
-            return { 
-                ...state, 
+            return {
+                ...state,
                 generatedImageHistory: nextHistory,
                 generatedContent: nextScenes ? { ...state.generatedContent!, scenes: nextScenes } : state.generatedContent,
-                studioSessions: {
-                    a: updateSessionSurgically(state.studioSessions.a)
-                } 
             };
         }
         case 'DELETE_CUT': {
@@ -706,44 +661,7 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         case 'CLEAR_SMART_FIELD_SUGGESTIONS': { const newSuggestions = { ...state.smartFieldSuggestions }; delete newSuggestions[action.payload.cutId]; return { ...state, smartFieldSuggestions: newSuggestions }; }
         case 'SET_ANIMATION_STYLE': return { ...state, animationStyle: action.payload };
         case 'ADD_TO_IMAGE_HISTORY': return { ...state, generatedImageHistory: [action.payload, ...state.generatedImageHistory] };
-        case 'LOAD_IMAGE_INTO_STUDIO': return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...state.studioSessions[action.payload.studioId], originalImage: action.payload.image, currentImage: action.payload.image, history: [action.payload.image], zoom: 1, pan: { x: 0, y: 0 }, sourceCutForNextEdit: action.payload.image.sourceCutNumber } } };
-        case 'LOAD_USER_IMAGE_INTO_STUDIO': {
-            const { studioId, imageDataUrl } = action.payload;
-            const newImage = createGeneratedImage({ imageUrl: imageDataUrl, sourceCutNumber: 'user-upload-original', prompt: 'User-uploaded image', model: state.selectedNanoModel });
-            return { ...state, studioSessions: { ...state.studioSessions, [studioId]: { ...state.studioSessions[studioId], originalImage: newImage } } };
-        }
-        case 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD': {
-            const { studioId, imageDataUrl } = action.payload;
-            const session = state.studioSessions[studioId];
-            const newImage = createGeneratedImage({ imageUrl: imageDataUrl, sourceCutNumber: session.currentImage?.sourceCutNumber || 'user-upload', prompt: 'User-uploaded image (edit)', model: state.selectedNanoModel });
-            if (!session.originalImage) return { ...state, studioSessions: { ...state.studioSessions, [studioId]: { ...createInitialStudioSession(), originalImage: newImage, currentImage: newImage, history: [newImage] } } };
-            return { ...state, studioSessions: { ...state.studioSessions, [studioId]: { ...session, currentImage: newImage, history: [...session.history, newImage] } } };
-        }
-        case 'UPDATE_STUDIO_SESSION': return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...state.studioSessions[action.payload.studioId], ...action.payload.data } } };
-        case 'SET_ORIGINAL_IMAGE': return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...state.studioSessions[action.payload.studioId], originalImage: action.payload.image } } };
-        case 'PREPARE_STUDIO_FOR_CUT': return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...state.studioSessions[action.payload.studioId], editPrompt: action.payload.prompt, sourceCutForNextEdit: action.payload.cutNumber } } };
-        case 'CLEAR_STUDIO_SESSION': return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: createInitialStudioSession() } };
-        case 'REVERT_STUDIO_SESSION': {
-            const session = state.studioSessions[action.payload.studioId];
-            const draftImage = session.history?.[0];
-            if (!draftImage) return state;
-            return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...session, currentImage: draftImage, history: [draftImage], zoom: 1, pan: { x: 0, y: 0 } } } };
-        }
-        case 'UNDO_STUDIO_SESSION': {
-            const session = state.studioSessions[action.payload.studioId];
-            if (session.history.length <= 1) return state;
-            const newHistory = session.history.slice(0, -1);
-            return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...session, currentImage: newHistory[newHistory.length - 1], history: newHistory } } };
-        }
-        case 'COPY_ORIGINAL_TO_CURRENT': {
-            const session = state.studioSessions[action.payload.studioId];
-            if (!session.originalImage) return state;
-            return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...session, currentImage: session.originalImage, history: [...session.history, session.originalImage], zoom: 1, pan: { x: 0, y: 0 } } } };
-        }
-        case 'COPY_PROMPT_TO_STUDIOS': return { ...state, studioSessions: { a: { ...state.studioSessions.a, editPrompt: action.payload } } };
         case 'SET_FILENAME_TEMPLATE': return { ...state, filenameTemplate: action.payload };
-        case 'SET_ACTIVE_STUDIO_TARGET': return { ...state, activeStudioTarget: action.payload };
-        case 'UPDATE_STUDIO_TRANSFORM': return { ...state, studioSessions: { ...state.studioSessions, [action.payload.studioId]: { ...state.studioSessions[action.payload.studioId], zoom: action.payload.zoom, pan: action.payload.pan } } };
         case 'START_AUTO_GENERATION': {
             const targetType = action.payload || '전체';
             return { ...state, isAutoGenerating: true, isLoading: true, loadingMessage: `${targetType} 자동 생성 중...`, failedCutNumbers: [] };

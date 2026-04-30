@@ -9,7 +9,7 @@ import {
 } from './services/geminiService';
 import React, { createContext, useContext, useReducer, useRef, useEffect, useCallback, useState } from 'react';
 import {
-    AppDataState, AppAction, Cut, GeneratedImage, Notification, TextEditingTarget, EditableScene, StudioSession, NanoModel, EditableCut, LibraryAsset, Scene, GeneratedScript, ArtStyle, ApiSource,
+    AppDataState, AppAction, Cut, GeneratedImage, Notification, TextEditingTarget, EditableScene, NanoModel, EditableCut, LibraryAsset, Scene, GeneratedScript, ArtStyle, ApiSource,
 } from './types';
 import { editImageWithFlux, generateImageWithFlux, getFluxImageSize } from './services/falService';
 import { buildFluxPrompt, buildFluxPromptSmart } from './appFluxPromptEngine';
@@ -72,27 +72,11 @@ interface AppContextType {
         handleUpdateCutCharacters: (cutNumber: string, newCharacterNames: string[]) => Promise<void>;
         handleUpdateCutIntent: (cutNumber: string, newIntent: string) => Promise<void>;
         handleAnalyzeYoutubeUrl: () => Promise<void>;
-        handleEditInStudio: (studioId: 'a', imageToEdit: GeneratedImage, editPrompt: string, refUrls: string[], maskBase64?: string, sourceCutNumberOverride?: string) => Promise<void>;
-        handleCreateInStudio: (studioId: 'a', baseIdentityImage: GeneratedImage, prompt: string) => Promise<void>;
         handleEditForCut: (cutNumber: string, img: GeneratedImage, prompt: string, refs: string[], mask?: string) => Promise<void>;
         handleCreateForCut: (cutNumber: string, base: GeneratedImage, prompt: string) => Promise<void>;
         handleConfirmCutAssignment: (cutNumber: string) => void;
         handleReplaceBackground: (newBackgroundPrompt: string, cutNumber: string) => Promise<void>;
-        handleClearStudioSession: (studioId: 'a') => void;
-        handleRevertInStudio: (studioId: 'a') => void;
-        handleUndoInStudio: (studioId: 'a') => void;
-        handleCopyOriginalToCurrent: (studioId: 'a') => void;
-        handleCopyPromptToStudios: (prompt: string) => void;
-        handleCopyPromptToStudio: (studioId: 'a', prompt: string) => void;
-        handleSaveStudioToHistory: (studioId: 'a') => void;
         handleSaveFromEditor: (newImageUrl: string, sourceInfo: GeneratedImage) => void;
-        handleStudioReferenceAdd: (studioId: 'a', url: string) => void;
-        handleStudioReferenceRemove: (studioId: 'a', index: number) => void;
-        handleStudioReferenceClear: (studioId: 'a') => void;
-        handleStudioPromptChange: (studioId: 'a', prompt: string) => void;
-        handleStudioTransformChange: (studioId: 'a', zoom: number, pan: { x: number; y: number }) => void;
-        handleCommitStudioTransform: (studioId: 'a', newImageDataUrl: string) => void;
-        handleStudioRefill: (studioId: 'a') => Promise<void>;
         handleDeleteFromHistory: (imageId: string) => void;
         handleDownloadAllImagesZip: () => Promise<void>;
         handleDownloadFilteredImagesZip: (tagFilter: 'rough' | 'normal' | 'hq') => Promise<void>;
@@ -112,19 +96,10 @@ interface AppContextType {
         handleBatchRefine: (request: string) => Promise<void>;
         handleToggleIntenseEmotion: (cutNumber: string) => Promise<void>;
         handleToggleAllIntenseEmotion: () => void;
-        handleApplyAndRunPrompt: (prompt: string, cutNumber: string) => void;
-        handleOriginalPromptToActiveStudio: (prompt: string) => void;
-        handlePrepareStudioForCut: (cutNumber: string, prompt: string) => void;
         handleUpdateCutFieldAndRegenerate: (cutNumber: string, field: keyof Cut, newValue: string) => Promise<void>;
         handleUpdateCutIntentAndRegenerate: (cutNumber: string, newIntent: string) => Promise<void>;
         handleRefineCharacter: (cutNumber: string, characterName: string) => void;
         handleRefineImage: (cutNumber: string) => Promise<void>;
-        handleUserImageUpload: (studioId: 'a', imageDataUrl: string) => void;
-        handleUpdateStudioImageFromUpload: (studioId: 'a', imageDataUrl: string) => void;
-        handleUserImageUploadForStudio: (studioId: 'a', imageDataUrl: string) => void;
-        handleLoadImageIntoStudio: (studioId: 'a', image: GeneratedImage) => void;
-        handleSetOriginalImage: (studioId: 'a', image: GeneratedImage) => void;
-        handleSetActiveStudioTarget: (studioId: 'a') => void;
         handleToggleAutoGeneration: () => void;
         handleCancelGenerateAll: () => void;
         handleRunSelectiveGeneration: (selectedCutNumbers: string[], overrideContent?: GeneratedScript) => Promise<void>;
@@ -178,7 +153,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // ─── 분리된 순수 함수 (appReducer.ts) ─────────────────────────
 import { 
-    createInitialStudioSession, sanitizeState, buildProjectMetadata,
+    sanitizeState, buildProjectMetadata,
     restoreStateFromProject, initialAppDataState, appReducer
 } from './appReducer';
 import { buildArtStylePrompt, buildFinalPrompt, PromptContext } from './appStyleEngine';
@@ -477,22 +452,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return () => { if (unlisten) unlisten(); };
     }, []);
 
-    useEffect(() => {
-        if (!IS_TAURI) return;
-        let unlisten: (() => void) | null = null;
-        listen('send-to-studio', (payload: any) => {
-            const { imageUrl } = payload || {};
-            if (!imageUrl) return;
-            const curr = stateRef.current.studioSessions['a'].referenceImageUrls || [];
-            if (curr.length >= 5) {
-                addNotification('참조 슬롯이 가득 찼습니다 (최대 5개)', 'error');
-                return;
-            }
-            dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: 'a', data: { referenceImageUrls: [...curr, imageUrl] } } });
-            addNotification('Studio 참조 슬롯에 이미지가 추가되었습니다.', 'success');
-        }).then(fn => { unlisten = fn; });
-        return () => { if (unlisten) unlisten(); };
-    }, [addNotification]);
+    // Phase A.7: send-to-studio 이벤트는 deprecated — 통합 스튜디오는 자체 IPC 사용
 
     const triggerConfetti = useCallback((targetId?: string) => {
         const pieces: React.ReactElement[] = [];
@@ -637,7 +597,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const cutEditActions = createCutEditActions({
         dispatch, stateRef, addNotification, handleAddUsage, calculateFinalPrompt, getArtStylePrompt, getVisionModelName, handleEditImageWithNanoWithRetry, persistImageToDisk, updateUIState,
     });
-    const { handleEditInStudio, handleCreateInStudio, handleEditForCut, handleCreateForCut } = cutEditActions;
+    const { handleEditForCut, handleCreateForCut } = cutEditActions;
 
     const handleStartStudio = async (overrides?: { artStyle?: ArtStyle, customArtStyle?: string }) => {
         cancelActivePipeline(); // ★ 이전 파이프라인 취소
@@ -846,43 +806,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...characterActions,
         ...cutEditActions,
         handleAnalyzeYoutubeUrl: async () => {},
-        handleEditInStudio,
-        handleCreateInStudio,
         handleEditForCut,
         handleCreateForCut,
         handleConfirmCutAssignment: (cutNumber: string) => {
-            const img = stateRef.current.imageToAssign; if (img) { 
-                const updated = { ...img, id: window.crypto.randomUUID(), sourceCutNumber: cutNumber }; 
-                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: updated, cutNumber } }); 
-                updateUIState({ isCutAssignmentModalOpen: false, imageToAssign: null }); 
+            const img = stateRef.current.imageToAssign; if (img) {
+                const updated = { ...img, id: window.crypto.randomUUID(), sourceCutNumber: cutNumber };
+                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: updated, cutNumber } });
+                updateUIState({ isCutAssignmentModalOpen: false, imageToAssign: null });
             }
         },
-        handleReplaceBackground: async (newBackgroundPrompt: string, cutNumber: string) => {},
-        handleClearStudioSession: (sId: 'a') => dispatch({ type: 'CLEAR_STUDIO_SESSION', payload: { studioId: sId } }),
-        handleRevertInStudio: (sId: 'a') => dispatch({ type: 'REVERT_STUDIO_SESSION', payload: { studioId: sId } }),
-        handleUndoInStudio: (sId: 'a') => dispatch({ type: 'UNDO_STUDIO_SESSION', payload: { studioId: sId } }),
-        handleCopyOriginalToCurrent: (sId: 'a') => dispatch({ type: 'COPY_ORIGINAL_TO_CURRENT', payload: { studioId: sId } }),
-        handleCopyPromptToStudios: (prompt: string) => dispatch({ type: 'COPY_PROMPT_TO_STUDIOS', payload: prompt }),
-        handleCopyPromptToStudio: (studioId: 'a', prompt: string) => dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId, data: { editPrompt: prompt } } }),
-        handleSaveStudioToHistory: (sId: 'a') => {
-            const sess = stateRef.current.studioSessions[sId]; 
-            if (sess.currentImage) { 
-                const newImg = { ...sess.currentImage, id: window.crypto.randomUUID() };
-                dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: sess.sourceCutForNextEdit || 'custom' } }); 
-                addNotification('저장되었습니다.', 'success'); 
-            }
+        handleReplaceBackground: async (_newBackgroundPrompt: string, _cutNumber: string) => {},
+        handleSaveFromEditor: (url: string, info: GeneratedImage) => {
+            const newImg = { ...info, id: window.crypto.randomUUID(), imageUrl: url, createdAt: new Date().toISOString() };
+            dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: info.sourceCutNumber } });
         },
-        handleSaveFromEditor: (url: string, info: GeneratedImage) => { 
-            const newImg = { ...info, id: window.crypto.randomUUID(), imageUrl: url, createdAt: new Date().toISOString() }; 
-            dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImg, cutNumber: info.sourceCutNumber } }); 
-        },
-        handleStudioReferenceAdd: (sId: 'a', url: string) => { const curr = stateRef.current.studioSessions[sId].referenceImageUrls || []; if (curr.length < 5) dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { referenceImageUrls: [...curr, url] } } }); },
-        handleStudioReferenceRemove: (sId: 'a', index: number) => { const curr = [...(stateRef.current.studioSessions[sId].referenceImageUrls || [])]; curr.splice(index, 1); dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { referenceImageUrls: curr } } }); },
-        handleStudioReferenceClear: (sId: 'a') => dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { referenceImageUrls: [] } } }),
-        handleStudioPromptChange: (sId: 'a', p: string) => dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { editPrompt: p } } }),
-        handleStudioTransformChange: (sId: 'a', z: number, p: { x: number; y: number }) => dispatch({ type: 'UPDATE_STUDIO_TRANSFORM', payload: { studioId: sId, zoom: z, pan: p } }),
-        handleCommitStudioTransform: (sId: 'a', url: string) => { const sess = stateRef.current.studioSessions[sId]; if (sess.currentImage) { const newImg = { ...sess.currentImage, id: window.crypto.randomUUID(), imageUrl: url, createdAt: new Date().toISOString() }; dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: sId, data: { currentImage: newImg, history: [...sess.history, newImg], zoom: 1, pan: { x: 0, y: 0 } } } }); } },
-        handleStudioRefill: (sId: 'a') => Promise.resolve(),
         handleDeleteFromHistory: (id: string) => dispatch({ type: 'DELETE_FROM_IMAGE_HISTORY', payload: id }),
         ...downloadActions,
         handleOpenEditor: (info: any) => updateUIState({ isEditorOpen: true, editingImageInfo: info }),
@@ -932,19 +869,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
         },
         handleToggleAllIntenseEmotion: () => dispatch({ type: 'TOGGLE_ALL_INTENSE_EMOTION' }),
-        handleApplyAndRunPrompt: (p: string, cutNumber: string) => dispatch({ type: 'UPDATE_STUDIO_SESSION', payload: { studioId: stateRef.current.activeStudioTarget, data: { editPrompt: p, sourceCutForNextEdit: cutNumber } } }),
-        handleOriginalPromptToActiveStudio: (p: string) => handleCreateInStudio(stateRef.current.activeStudioTarget, stateRef.current.studioSessions[stateRef.current.activeStudioTarget].originalImage!, p),
-        handlePrepareStudioForCut: (cutNumber: string, p: string) => dispatch({ type: 'PREPARE_STUDIO_FOR_CUT', payload: { studioId: stateRef.current.activeStudioTarget, cutNumber, prompt: p } }),
         handleUpdateCutFieldAndRegenerate: async (cutNumber: string, field: keyof Cut, val: string) => { const target = stateRef.current.generatedContent?.scenes.flatMap(s=>s.cuts).find(c=>c.cutNumber===cutNumber); if (!target) return; const updates: any = { [field]: val }; if (field !== 'imagePrompt') { const temp = { ...target, ...updates }; updates.imagePrompt = calculateFinalPrompt(temp as any); } dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cutNumber, data: updates } }); },
         handleUpdateCutIntentAndRegenerate: cutEditActions.handleUpdateCutIntent,
         handleRefineCharacter: cutEditActions.handleRefineCharacter,
         handleRefineImage: cutEditActions.handleRefineImage,
-        handleUserImageUpload: (sId: 'a', url: string) => dispatch({ type: 'LOAD_USER_IMAGE_INTO_STUDIO', payload: { studioId: sId, imageDataUrl: url } }),
-        handleUpdateStudioImageFromUpload: (sId: 'a', url: string) => dispatch({ type: 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD', payload: { studioId: sId, imageDataUrl: url } }),
-        handleUserImageUploadForStudio: (sId: 'a', url: string) => dispatch({ type: 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD', payload: { studioId: sId, imageDataUrl: url } }),
-        handleLoadImageIntoStudio: (sId: 'a', img: GeneratedImage) => dispatch({ type: 'LOAD_IMAGE_INTO_STUDIO', payload: { studioId: sId, image: img } }),
-        handleSetOriginalImage: (sId: 'a', image: GeneratedImage) => dispatch({ type: 'SET_ORIGINAL_IMAGE', payload: { studioId: sId, image: image } }),
-        handleSetActiveStudioTarget: (sId: 'a') => dispatch({ type: 'SET_ACTIVE_STUDIO_TARGET', payload: sId }),
         handleToggleAutoGeneration: () => { if (stateRef.current.isAutoGenerating) { isAutoGeneratingLocalRef.current = false; dispatch({ type: 'STOP_AUTO_GENERATION' }); } else handleRunSelectiveGeneration([]); },
         handleCancelGenerateAll: () => { cancelGenerateAllRef.current = true; dispatch({ type: 'STOP_LOADING' }); },
         handleRunSelectiveGeneration,

@@ -252,17 +252,6 @@ export interface ClosetCharacter {
     imageDataUrl: string;
 }
 
-export interface StudioSession {
-    originalImage: GeneratedImage | null;
-    currentImage: GeneratedImage | null;
-    history: GeneratedImage[];
-    referenceImageUrls: string[];
-    editPrompt: string;
-    zoom: number;
-    pan: { x: number; y: number };
-    sourceCutForNextEdit: string | null;
-}
-
 export interface EditableCut {
     id: string;
     cutNumber: string;
@@ -363,9 +352,7 @@ export interface AppDataState {
     smartFieldSuggestions: { [cutId: string]: { [field: string]: string[] } };
     animationStyle: 'none' | 'kyoto' | 'pa_works';
     generatedImageHistory: GeneratedImage[];
-    studioSessions: { a: StudioSession };
     filenameTemplate: string;
-    activeStudioTarget: 'a';
     isAutoGenerating: boolean;
     isGeneratingSRT: boolean;
     backgroundMusicUrl: string | null;
@@ -467,20 +454,7 @@ export type AppAction =
     | { type: 'ADD_TO_IMAGE_HISTORY'; payload: GeneratedImage }
     | { type: 'ADD_IMAGE_TO_CUT'; payload: { image: GeneratedImage; cutNumber: string } }
     | { type: 'DELETE_FROM_IMAGE_HISTORY'; payload: string }
-    | { type: 'LOAD_IMAGE_INTO_STUDIO'; payload: { studioId: 'a'; image: GeneratedImage } }
-    | { type: 'LOAD_USER_IMAGE_INTO_STUDIO'; payload: { studioId: 'a'; imageDataUrl: string } }
-    | { type: 'UPDATE_CURRENT_STUDIO_IMAGE_FROM_UPLOAD', payload: { studioId: 'a', imageDataUrl: string } }
-    | { type: 'UPDATE_STUDIO_SESSION', payload: { studioId: 'a'; data: Partial<StudioSession> } }
-    | { type: 'SET_ORIGINAL_IMAGE', payload: { studioId: 'a', image: GeneratedImage } }
-    | { type: 'PREPARE_STUDIO_FOR_CUT', payload: { studioId: 'a', cutNumber: string, prompt: string } }
-    | { type: 'CLEAR_STUDIO_SESSION', payload: { studioId: 'a' } }
-    | { type: 'REVERT_STUDIO_SESSION', payload: { studioId: 'a' } }
-    | { type: 'UNDO_STUDIO_SESSION', payload: { studioId: 'a' } }
-    | { type: 'COPY_ORIGINAL_TO_CURRENT', payload: { studioId: 'a' } }
-    | { type: 'COPY_PROMPT_TO_STUDIOS', payload: string }
     | { type: 'SET_FILENAME_TEMPLATE', payload: string }
-    | { type: 'SET_ACTIVE_STUDIO_TARGET', payload: 'a' }
-    | { type: 'UPDATE_STUDIO_TRANSFORM', payload: { studioId: 'a', zoom: number, pan: { x: number, y: number } } }
     | { type: 'START_AUTO_GENERATION'; payload: string }
     | { type: 'STOP_AUTO_GENERATION' }
     | { type: 'SET_FAILED_CUTS', payload: string[] }

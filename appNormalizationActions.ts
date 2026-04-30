@@ -249,29 +249,7 @@ export function createNormalizationActions(h: NormalizationActionHelpers) {
             }
         }
 
-        // 캐릭터 시트 → 스튜디오 연동
-        const getFinalImg = (key: string) => {
-            const char = characterDescriptions[key];
-            if (!char) return null;
-            const url = char.mannequinImageUrl || char.upscaledImageUrl || (char.characterSheetHistory?.[char.characterSheetHistory.length - 1]);
-            if (!url) return null;
-            return createGeneratedImage({
-                id: `char-sheet-${key}-${Date.now()}`,
-                imageUrl: url,
-                sourceCutNumber: 'character-sheet',
-                prompt: char.baseAppearance || 'Character Sheet Base',
-                model: stateRef.current.selectedNanoModel,
-            });
-        };
-
-        const charKeys = Object.keys(characterDescriptions);
-        if (charKeys.length > 0) {
-            const imgA = getFinalImg(charKeys[0]);
-            if (imgA) {
-                dispatch({ type: 'SET_ORIGINAL_IMAGE', payload: { studioId: 'a', image: imgA } });
-                dispatch({ type: 'LOAD_IMAGE_INTO_STUDIO', payload: { studioId: 'a', image: imgA } });
-            }
-        }
+        // Phase A.7: 기존 character sheet → studio 연동 코드는 통합 스튜디오로 대체됨 (제거)
         if (editableStoryboard) {
             const syncedDraft = editableStoryboard.map((scene: any) => ({
                 ...scene,
