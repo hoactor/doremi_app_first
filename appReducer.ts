@@ -9,6 +9,8 @@ import {
 } from './types';
 import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 import { getEngineFromModel, createGeneratedImage, normalizeLocationEntries, findOutfitSessionForCut, findAnchorCutForBatch, deriveOutfitSessionsFromCuts, buildSessionKey } from './appUtils';
+import { handleContextModeCases } from './appReducerHelpers/contextModeCases';
+import { handleBlockEditorCases } from './appReducerHelpers/blockEditorCases';
 
 export const sanitizeState = (state: AppDataState): AppDataState => {
     const sanitized = JSON.parse(JSON.stringify(state)) as AppDataState;
@@ -444,6 +446,12 @@ export const initialAppDataState: AppDataState = {
 };
 
 export function appReducer(state: AppDataState, action: AppAction): AppDataState {
+    // ── 카테고리별 헬퍼 위임 (매칭되면 즉시 반환, 없으면 메인 switch로) ──
+    const ctxResult = handleContextModeCases(state, action);
+    if (ctxResult) return ctxResult;
+    const blockResult = handleBlockEditorCases(state, action);
+    if (blockResult) return blockResult;
+
     switch (action.type) {
         case 'START_LOADING': return { ...state, isLoading: true, loadingMessage: action.payload, loadingMessageDetail: '', notifications: state.notifications.filter(n => n.type !== 'error') };
         case 'SET_LOADING_DETAIL': return { ...state, loadingMessageDetail: action.payload };
@@ -766,240 +774,6 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
             };
         }
         // ── Phase A: Block Editor + Engine Mode ─────────────────────
-        case 'SET_IMAGE_ENGINE_MODE': {
-            // Phase B v3: 에피소드 중에도 토글 가능 (런타임 reference 결정 — 기존 데이터 안 깨짐)
-            return { ...state, imageEngineMode: action.payload };
-        }
-        case 'UPDATE_SCENE_LAYER': {
-            if (!state.scenarioAnalysis) return state;
-            const sa = state.scenarioAnalysis;
-            const newLayers = (sa.sceneLayers || []).map(l =>
-                l.id === action.payload.layerId ? { ...l, ...action.payload.data } : l
-            );
-            return { ...state, scenarioAnalysis: { ...sa, sceneLayers: newLayers } };
-        }
-        case 'UPDATE_OUTFIT_SESSION': {
-            if (!state.scenarioAnalysis) return state;
-            const sa = state.scenarioAnalysis;
-            const old = (sa.outfitSessions || [])[action.payload.index];
-            const newSessions = (sa.outfitSessions || []).map((os, i) =>
-                i === action.payload.index ? { ...os, ...action.payload.data } : os
-            );
-            // Phase A.6: 영향받는 design을 stale 표시 (lineRange/location/layerId 변경 시)
-            const affectedKey = old ? buildSessionKey(old) : null;
-            const designs = affectedKey
-                ? (state.contextSceneDesigns || []).map(d =>
-                    d.sessionKey === affectedKey ? { ...d, isStale: true } : d
-                )
-                : state.contextSceneDesigns;
-            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions }, contextSceneDesigns: designs };
-        }
-        case 'SPLIT_OUTFIT_SESSION': {
-            if (!state.scenarioAnalysis) return state;
-            const sa = state.scenarioAnalysis;
-            const target = (sa.outfitSessions || [])[action.payload.index];
-            if (!target) return state;
-            const splitLine = action.payload.splitAtLine;
-            if (splitLine <= target.lineRange[0] || splitLine > target.lineRange[1]) return state;
-            const left: OutfitSession = { ...target, lineRange: [target.lineRange[0], splitLine - 1] };
-            const right: OutfitSession = {
-                ...target,
-                lineRange: [splitLine, target.lineRange[1]],
-                userLabel: undefined,
-                transitionFromPrev: 'maintain',
-            };
-            const sessions = sa.outfitSessions || [];
-            const newSessions = [
-                ...sessions.slice(0, action.payload.index),
-                left,
-                right,
-                ...sessions.slice(action.payload.index + 1),
-            ];
-            // Phase A.6: 분리된 원본 session의 design을 stale 표시
-            const affectedKey = buildSessionKey(target);
-            const designs = (state.contextSceneDesigns || []).map(d =>
-                d.sessionKey === affectedKey ? { ...d, isStale: true } : d
-            );
-            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions }, contextSceneDesigns: designs };
-        }
-        case 'MERGE_OUTFIT_SESSIONS': {
-            if (!state.scenarioAnalysis) return state;
-            const sa = state.scenarioAnalysis;
-            const sessions = sa.outfitSessions || [];
-            const a = sessions[action.payload.firstIndex];
-            const b = sessions[action.payload.firstIndex + 1];
-            if (!a || !b) return state;
-            if (a.location !== b.location || a.layerId !== b.layerId) return state;
-            if (a.lineRange[1] + 1 !== b.lineRange[0]) {
-                console.warn('[MERGE_OUTFIT_SESSIONS] 인접하지 않은 배치는 병합 불가:', a.lineRange, b.lineRange);
-                return state;
-            }
-            const merged: OutfitSession = {
-                ...a,
-                lineRange: [Math.min(a.lineRange[0], b.lineRange[0]), Math.max(a.lineRange[1], b.lineRange[1])],
-            };
-            const newSessions = [
-                ...sessions.slice(0, action.payload.firstIndex),
-                merged,
-                ...sessions.slice(action.payload.firstIndex + 2),
-            ];
-            // Phase A.6: 두 원본 session의 design 모두 stale 표시
-            const aKey = buildSessionKey(a), bKey = buildSessionKey(b);
-            const designs = (state.contextSceneDesigns || []).map(d =>
-                (d.sessionKey === aKey || d.sessionKey === bKey) ? { ...d, isStale: true } : d
-            );
-            return { ...state, scenarioAnalysis: { ...sa, outfitSessions: newSessions }, contextSceneDesigns: designs };
-        }
-        case 'CONVERT_TO_MEMORY_BATCH': {
-            if (!state.scenarioAnalysis) return state;
-            const sa = state.scenarioAnalysis;
-            const sessions = sa.outfitSessions || [];
-            const target = sessions[action.payload.sessionIndex];
-            if (!target) return state;
-            const oldLayerId = target.layerId;
-            const targetLocation = target.location;
-            const targetLineRange = target.lineRange;
-            const isInRange = (line: number) => line >= targetLineRange[0] && line <= targetLineRange[1];
-
-            const newLayerId = `회상_${Date.now()}`;
-            const newLayer: SceneLayer = {
-                id: newLayerId,
-                label: action.payload.layerLabel,
-                isFlashback: true,
-                toneModifier: action.payload.toneModifier ?? 'warm-vintage',
-            };
-            const updatedSession: OutfitSession = { ...target, layerId: newLayerId, userLabel: undefined };
-            const newLayers = [...(sa.sceneLayers || []), newLayer];
-            const newSessions = sessions.map((os, i) => i === action.payload.sessionIndex ? updatedSession : os);
-
-            // ContiCut: originLines + location 매칭 (가장 정확)
-            const updateContiByLine = (cuts: ContiCut[]): ContiCut[] =>
-                cuts.map(c => {
-                    const line = c.originLines?.[0];
-                    if (line != null && isInRange(line) && c.location === targetLocation) {
-                        return { ...c, sceneLayerId: newLayerId };
-                    }
-                    return c;
-                });
-
-            // EditableCut/Cut: (oldLayerId, location) 복합 매칭 — 같은 layerId의 다른 location 컷 보호
-            const updateByOldLayer = <T extends { sceneLayerId?: string; location: string }>(cuts: T[]): T[] =>
-                cuts.map(c =>
-                    c.sceneLayerId === oldLayerId && c.location === targetLocation
-                        ? { ...c, sceneLayerId: newLayerId }
-                        : c
-                );
-
-            const newStoryboard = state.editableStoryboard?.map(scene => ({
-                ...scene,
-                cuts: updateByOldLayer(scene.cuts),
-            })) ?? null;
-            const newContiCuts = state.contiCuts ? updateContiByLine(state.contiCuts) : null;
-            const newGeneratedContent = state.generatedContent ? {
-                ...state.generatedContent,
-                scenes: state.generatedContent.scenes.map(scene => ({
-                    ...scene,
-                    cuts: updateByOldLayer(scene.cuts),
-                })),
-            } : null;
-
-            // Phase A.6: 변환된 session의 design stale 표시
-            const affectedKey = buildSessionKey(target);
-            const designs = (state.contextSceneDesigns || []).map(d =>
-                d.sessionKey === affectedKey ? { ...d, isStale: true } : d
-            );
-            return {
-                ...state,
-                scenarioAnalysis: { ...sa, sceneLayers: newLayers, outfitSessions: newSessions },
-                editableStoryboard: newStoryboard,
-                contiCuts: newContiCuts,
-                generatedContent: newGeneratedContent,
-                contextSceneDesigns: designs,
-            };
-        }
-        case 'ADD_SCENE_LAYER': {
-            if (!state.scenarioAnalysis) return state;
-            const sa = state.scenarioAnalysis;
-            return { ...state, scenarioAnalysis: { ...sa, sceneLayers: [...(sa.sceneLayers || []), action.payload] } };
-        }
-        case 'DELETE_SCENE_LAYER': {
-            if (!state.scenarioAnalysis) return state;
-            const sa = state.scenarioAnalysis;
-            if (action.payload === DEFAULT_SCENE_LAYER_ID) return state;
-            // Phase A.6: 영향받는 모든 session의 design stale 표시
-            const oldSessions = sa.outfitSessions || [];
-            const affectedKeys = new Set(oldSessions.filter(os => os.layerId === action.payload).map(buildSessionKey));
-            const newSessions = oldSessions.map(os =>
-                os.layerId === action.payload ? { ...os, layerId: DEFAULT_SCENE_LAYER_ID, userLabel: undefined } : os
-            );
-            const newLayers = (sa.sceneLayers || []).filter(l => l.id !== action.payload);
-
-            const updateCutLayer = <T extends { sceneLayerId?: string }>(cuts: T[]): T[] =>
-                cuts.map(c => c.sceneLayerId === action.payload ? { ...c, sceneLayerId: DEFAULT_SCENE_LAYER_ID } : c);
-
-            const newStoryboard = state.editableStoryboard?.map(scene => ({
-                ...scene,
-                cuts: updateCutLayer(scene.cuts),
-            })) ?? null;
-            const newContiCuts = state.contiCuts ? updateCutLayer(state.contiCuts) : null;
-            const newGeneratedContent = state.generatedContent ? {
-                ...state.generatedContent,
-                scenes: state.generatedContent.scenes.map(scene => ({
-                    ...scene,
-                    cuts: updateCutLayer(scene.cuts),
-                })),
-            } : null;
-
-            const designs = (state.contextSceneDesigns || []).map(d =>
-                affectedKeys.has(d.sessionKey) ? { ...d, isStale: true } : d
-            );
-            return {
-                ...state,
-                scenarioAnalysis: { ...sa, sceneLayers: newLayers, outfitSessions: newSessions },
-                editableStoryboard: newStoryboard,
-                contiCuts: newContiCuts,
-                generatedContent: newGeneratedContent,
-                contextSceneDesigns: designs,
-            };
-        }
-        case 'ADD_CHARACTER_VARIANT': {
-            const char = state.characterDescriptions[action.payload.characterKey];
-            if (!char) return state;
-            const variants = [...(char.variants || []), action.payload.variant];
-            return {
-                ...state,
-                characterDescriptions: {
-                    ...state.characterDescriptions,
-                    [action.payload.characterKey]: { ...char, variants },
-                },
-            };
-        }
-        case 'UPDATE_CHARACTER_VARIANT': {
-            const char = state.characterDescriptions[action.payload.characterKey];
-            if (!char) return state;
-            const variants = (char.variants || []).map(v =>
-                v.variantId === action.payload.variantId ? { ...v, ...action.payload.data } : v
-            );
-            return {
-                ...state,
-                characterDescriptions: {
-                    ...state.characterDescriptions,
-                    [action.payload.characterKey]: { ...char, variants },
-                },
-            };
-        }
-        case 'DELETE_CHARACTER_VARIANT': {
-            const char = state.characterDescriptions[action.payload.characterKey];
-            if (!char) return state;
-            const variants = (char.variants || []).filter(v => v.variantId !== action.payload.variantId);
-            return {
-                ...state,
-                characterDescriptions: {
-                    ...state.characterDescriptions,
-                    [action.payload.characterKey]: { ...char, variants },
-                },
-            };
-        }
         // ── Phase B: OpenAI gpt-image-2 ─────────────────────────────
         case 'SET_OPENAI_IMAGE_QUALITY':
             return { ...state, openaiImageQuality: action.payload };
@@ -1021,70 +795,6 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                     totalCostUsd: state.openaiUsage.totalCostUsd + costUsd,
                     history,
                 },
-            };
-        }
-        // ── Phase A.6: Context 모드 씬 디자인 ─────────────────────────
-        case 'SET_CONTEXT_ANALYSIS_STATUS':
-            return { ...state, contextAnalysisStatus: action.payload };
-        case 'SET_CONTEXT_SCENE_DESIGNS':
-            return { ...state, contextSceneDesigns: action.payload };
-        case 'UPDATE_CONTEXT_SCENE_DESIGN': {
-            const existing = state.contextSceneDesigns || [];
-            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
-            if (idx === -1) return { ...state, contextSceneDesigns: [...existing, action.payload.design] };
-            const next = [...existing];
-            next[idx] = action.payload.design;
-            return { ...state, contextSceneDesigns: next };
-        }
-        case 'DELETE_CONTEXT_SCENE_DESIGN':
-            return { ...state, contextSceneDesigns: (state.contextSceneDesigns || []).filter(d => d.sessionKey !== action.payload) };
-        case 'UPDATE_PLANNED_CUT': {
-            const existing = state.contextSceneDesigns || [];
-            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
-            if (idx === -1) return state;
-            const design = existing[idx];
-            const cutIdx = design.plannedCuts.findIndex(p => p.cutIndex === action.payload.cutIndex);
-            if (cutIdx === -1) return state;
-            const updatedCuts = [...design.plannedCuts];
-            updatedCuts[cutIdx] = { ...updatedCuts[cutIdx], ...action.payload.data };
-            const next = [...existing];
-            next[idx] = { ...design, plannedCuts: updatedCuts };
-            return { ...state, contextSceneDesigns: next };
-        }
-        case 'SET_TARGET_CUT_COUNT': {
-            const existing = state.contextSceneDesigns || [];
-            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
-            if (idx === -1) return state;
-            const count = Math.min(8, Math.max(1, action.payload.count));
-            const next = [...existing];
-            next[idx] = { ...next[idx], targetCutCount: count };
-            return { ...state, contextSceneDesigns: next };
-        }
-        case 'SET_CONTEXT_GENERATION_STATUS':
-            return { ...state, contextGenerationStatus: action.payload };
-        case 'SET_CONTEXT_SCENE_GENERATION': {
-            const existing = state.contextSceneDesigns || [];
-            const idx = existing.findIndex(d => d.sessionKey === action.payload.sessionKey);
-            if (idx === -1) return state;
-            const next = [...existing];
-            next[idx] = { ...next[idx], generationResult: action.payload.result };
-            return { ...state, contextSceneDesigns: next };
-        }
-        case 'CLEAR_CONTEXT_SCENE_GENERATION': {
-            const existing = state.contextSceneDesigns || [];
-            const idx = existing.findIndex(d => d.sessionKey === action.payload);
-            if (idx === -1) return state;
-            const next = [...existing];
-            next[idx] = { ...next[idx], generationResult: undefined };
-            return { ...state, contextSceneDesigns: next };
-        }
-        case 'MARK_CONTEXT_DESIGNS_STALE': {
-            const targetKeys = new Set(action.payload);
-            return {
-                ...state,
-                contextSceneDesigns: (state.contextSceneDesigns || []).map(d =>
-                    targetKeys.has(d.sessionKey) ? { ...d, isStale: true } : d
-                ),
             };
         }
         default: return state;
