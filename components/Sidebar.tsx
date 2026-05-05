@@ -57,7 +57,6 @@ interface SidebarProps {
     setIsAssetCatalogOpen: (v: boolean) => void;
     setIsAssetWindowOpen: (v: boolean) => void;
     setIsProjectListOpen: (v: boolean) => void;
-    setIsDalleGeneratorOpen: (v: boolean) => void;
     // ── Phase A ──
     imageEngineMode: ImageEngineMode;
     scenarioAnalysis: ScenarioAnalysis | null;
@@ -81,7 +80,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     downloadDropdownRef, importProjectFileRef, dispatch, actions,
     handleSaveWithStatus, setIsResetConfirmOpen, setIsCutDetailOpen,
     setIsApiKeySettingsOpen, setIsAssetCatalogOpen, setIsAssetWindowOpen, setIsProjectListOpen,
-    setIsDalleGeneratorOpen,
     imageEngineMode, scenarioAnalysis, characterDescriptions,
     openaiImageQuality, generatedContent,
     contextSceneDesigns, contextAnalysisStatus, contextGenerationStatus,

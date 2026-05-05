@@ -5,11 +5,8 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { generateSpeech } from '../services/geminiService';
-import type { DalleAssetType } from '../services/openaiService';
-import { IS_TAURI } from '../services/tauriAdapter';
 
 import { ApiKeySettings } from './ApiKeySettings';
-import { DalleGeneratorModal } from './DalleGeneratorModal';
 import { AssetLibraryModal } from './AssetLibraryModal';
 import { AssetCatalogModal } from './AssetCatalogModal';
 import { ProjectListModal } from './ProjectListModal';
@@ -43,10 +40,6 @@ interface AppModalsProps {
     setIsProjectListOpen: (v: boolean) => void;
     isCutDetailOpen: boolean;
     setIsCutDetailOpen: (v: boolean) => void;
-    isDalleGeneratorOpen: boolean;
-    setIsDalleGeneratorOpen: (v: boolean) => void;
-    dalleInitialType: DalleAssetType;
-    setDalleInitialType: (t: DalleAssetType) => void;
     // 슬라이드쇼 props (App.tsx의 derived data)
     slideshowData: any[];
     backgroundMusicUrl: string | null;
@@ -58,8 +51,6 @@ export const AppModals: React.FC<AppModalsProps> = ({
     isAssetCatalogOpen, setIsAssetCatalogOpen,
     isProjectListOpen, setIsProjectListOpen,
     isCutDetailOpen, setIsCutDetailOpen,
-    isDalleGeneratorOpen, setIsDalleGeneratorOpen,
-    dalleInitialType, setDalleInitialType: _setDalleInitialType,
     slideshowData, backgroundMusicUrl,
 }) => {
     const { state, actions, dispatch } = useAppContext();
@@ -79,21 +70,6 @@ export const AppModals: React.FC<AppModalsProps> = ({
     return (
         <>
             <ApiKeySettings isOpen={isApiKeySettingsOpen} onClose={() => setIsApiKeySettingsOpen(false)} />
-
-            <DalleGeneratorModal
-                isOpen={isDalleGeneratorOpen}
-                onClose={() => setIsDalleGeneratorOpen(false)}
-                initialAssetType={dalleInitialType}
-                onOpenApiKeySettings={() => {
-                    setIsDalleGeneratorOpen(false);
-                    setIsApiKeySettingsOpen(true);
-                }}
-                onAssetSaved={() => {
-                    if (IS_TAURI) {
-                        import('../services/tauriAdapter').then(m => m.emit?.('asset-catalog-updated', null).catch(() => {}));
-                    }
-                }}
-            />
 
             {isResetConfirmOpen && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
@@ -158,10 +134,7 @@ export const AppModals: React.FC<AppModalsProps> = ({
                     isOpen={isAssetCatalogOpen}
                     onClose={() => setIsAssetCatalogOpen(false)}
                     currentArtStyle={artStyle}
-                    onRequestDalleGenerator={(initialType) => {
-                        _setDalleInitialType(initialType || 'character');
-                        setIsDalleGeneratorOpen(true);
-                    }}
+                    onRequestDalleGenerator={() => { /* 통합 스튜디오로 직접 호출 (AssetCatalogModal 내부에서 openImageStudio 호출) */ }}
                 />
             )}
 

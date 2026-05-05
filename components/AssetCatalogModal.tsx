@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { ArtStyle } from '../types';
 import { XIcon, TrashIcon, DownloadIcon, PencilIcon, CheckIcon, ExclamationTriangleIcon, PaintBrushIcon, UploadIcon, SpinnerIcon } from './icons';
-import { IS_TAURI, loadAssetCatalog, deleteAsset, updateAssetMetadata, resolveImageUrl, downloadFile, saveAsset } from '../services/tauriAdapter';
+import { IS_TAURI, loadAssetCatalog, deleteAsset, updateAssetMetadata, resolveImageUrl, downloadFile, saveAsset, openImageStudio } from '../services/tauriAdapter';
 import { ImageViewerModal } from './ImageViewerModal';
 import { callVisionTextModel } from '../services/ai/aiCore';
 import { useAppContext } from '../AppContext';
@@ -366,12 +366,12 @@ export const AssetCatalogModal: React.FC<AssetCatalogModalProps> = ({
                             <button
                                 onClick={() => {
                                     const hint = (typeFilter !== 'all' && typeFilter !== 'outfit') ? typeFilter : 'character';
-                                    onRequestDalleGenerator(hint as any);
+                                    openImageStudio({ mode: 'create', initialAssetType: hint as any });
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600/80 hover:bg-amber-500 text-white transition-colors"
-                                title="DALL-E로 새 에셋 생성"
+                                title="이미지 스튜디오로 새 에셋 생성 (Gemini · Flux · OpenAI)"
                             >
-                                ✨ 원본 생성
+                                🎨 원본 생성
                             </button>
                         )}
                         <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-orange-600 hover:bg-orange-500 text-white transition-colors">

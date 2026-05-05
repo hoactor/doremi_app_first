@@ -11,7 +11,6 @@ import { AppModals } from './components/AppModals';
 import { SparklesIcon, SpinnerIcon, ChevronRightIcon, ChevronDownIcon, XIcon } from './components/icons';
 import { useAppContext } from './AppContext';
 import { Notification } from './types';
-import type { DalleAssetType } from './services/openaiService';
 import { IS_TAURI, openAssetCatalog, listen, resetWindowSize } from './services/tauriAdapter';
 
 const NotificationToast: React.FC<{ notification: Notification, onDismiss: (id: number) => void }> = ({ notification, onDismiss }) => {
@@ -76,8 +75,6 @@ export const App: React.FC = () => {
     const [isAssetWindowOpen, setIsAssetWindowOpen] = useState(false);
     const [isProjectListOpen, setIsProjectListOpen] = useState(false);
     const [isCutDetailOpen, setIsCutDetailOpen] = useState(false);
-    const [isDalleGeneratorOpen, setIsDalleGeneratorOpen] = useState(false);
-    const [dalleInitialType, setDalleInitialType] = useState<DalleAssetType>('character');
     const [isBgMusicDragging, setIsBgMusicDragging] = useState(false);
     const [batchInput, setBatchInput] = useState('');
     const [collapsedScenes, setCollapsedScenes] = useState<Set<number>>(new Set());
@@ -305,7 +302,6 @@ export const App: React.FC = () => {
                 setIsAssetCatalogOpen={setIsAssetCatalogOpen}
                 setIsAssetWindowOpen={setIsAssetWindowOpen}
                 setIsProjectListOpen={setIsProjectListOpen}
-                setIsDalleGeneratorOpen={(v) => { setDalleInitialType('character'); setIsDalleGeneratorOpen(v); }}
                 imageEngineMode={state.imageEngineMode || 'legacy'}
                 scenarioAnalysis={state.scenarioAnalysis}
                 characterDescriptions={state.characterDescriptions}
@@ -517,10 +513,6 @@ export const App: React.FC = () => {
                 setIsProjectListOpen={setIsProjectListOpen}
                 isCutDetailOpen={isCutDetailOpen}
                 setIsCutDetailOpen={setIsCutDetailOpen}
-                isDalleGeneratorOpen={isDalleGeneratorOpen}
-                setIsDalleGeneratorOpen={setIsDalleGeneratorOpen}
-                dalleInitialType={dalleInitialType}
-                setDalleInitialType={setDalleInitialType}
                 slideshowData={slideshowData}
                 backgroundMusicUrl={backgroundMusicUrl}
             />
