@@ -175,17 +175,13 @@ export const App: React.FC = () => {
     const intenseCount = useMemo(() => allCuts.filter(c => c.useIntenseEmotion).length, [allCuts]);
     const toggleScene = useCallback((n: number) => setCollapsedScenes(prev => { const s = new Set(prev); s.has(n) ? s.delete(n) : s.add(n); return s; }), []);
 
-    // ★ 로딩 성능: generatedContent 첫 로드 시 첫 씬 외 모두 collapsed
-    //   사용자가 펼친 씬만 SceneCard 마운트 → 40~60컷 동시 렌더 회피.
-    //   사용자가 직접 펼침/접음 후에는 자동 collapse 다시 적용 안 함.
+    // 첫 로드 시 모든 씬 펼친 상태로 시작 (사용자 요청)
+    //   useState 초기값이 빈 Set()이라 별도 초기화 불필요. ref만 표시.
     useEffect(() => {
         if (!generatedContent || collapseInitDoneRef.current) return;
-        const scenes = generatedContent.scenes;
-        if (scenes.length === 0) return;
-        // 첫 씬은 펼치고 나머지는 collapsed
-        const initial = new Set<number>(scenes.slice(1).map(s => s.sceneNumber));
-        setCollapsedScenes(initial);
+        if (generatedContent.scenes.length === 0) return;
         collapseInitDoneRef.current = true;
+        // 모든 씬 펼침 (collapsedScenes는 빈 Set 유지)
     }, [generatedContent]);
 
 

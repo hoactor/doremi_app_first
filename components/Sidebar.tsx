@@ -94,7 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [loraEntries, setLoraEntries] = useState<LoRAEntry[]>([]);
     const [isLoraRegistryOpen, setIsLoraRegistryOpen] = useState(false);
     // ── Phase A: 배치 구조 패널 접힘/펼침 ──
-    const [isBatchPanelCollapsed, setIsBatchPanelCollapsed] = useState(false);
+    const [isBatchPanelCollapsed, setIsBatchPanelCollapsed] = useState(true);
 
     const refreshLoras = useCallback(() => {
         if (IS_TAURI) loadLoraRegistry().then(setLoraEntries).catch(() => {});
