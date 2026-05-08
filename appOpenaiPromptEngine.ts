@@ -64,6 +64,17 @@ export function buildOpenAIArtStyle(artStyle: ArtStyle, customArtStyle: string):
     return STYLE_PROMPTS_OPENAI[artStyle] || STYLE_PROMPTS_OPENAI['normal'];
 }
 
+/**
+ * cut.imagePrompt가 buildGptImage2Prompt가 만든 OpenAI 자연어 형식인지 감지.
+ * - OpenAI 형식: [Scene] / [Subject] / [Style] / [Camera] / [Layout] / [Constraints] 등 섹션 헤더로 시작
+ * - Gemini SD 형식: "masterpiece, best quality, ..." 같은 콤마 나열
+ * Gemini/Flux 경로에서 OpenAI 형식이 캐싱돼 있으면 무시하고 새로 빌드해야 함.
+ */
+export function isOpenAIFormatPrompt(prompt: string): boolean {
+    if (!prompt) return false;
+    return /^\s*\[(Scene|Subject|Style|Camera|Layout|Details|Constraints|Use case|Scene Setting|Characters|Mood Arc|Sequence)\]/m.test(prompt);
+}
+
 // ───────────────────────────────────────────────────────────────
 // 톤 modifier → 자연어 (회상/상상)
 // ───────────────────────────────────────────────────────────────
@@ -239,8 +250,13 @@ function buildStyleSection(
     customArtStyle: string,
     layer: SceneLayer | null | undefined,
     cut: any,
+    customStyleBlock?: string,
 ): string {
-    const styleBase = buildOpenAIArtStyle(artStyle, customArtStyle);
+    // OpenAI 화풍 레지스트리에서 명시적으로 선택한 styleBlock이 있으면 우선.
+    // 없으면 기존 ArtStyle 매핑(Gemini 5개)으로 폴백 → 회귀 없음.
+    const styleBase = (customStyleBlock && customStyleBlock.trim())
+        ? customStyleBlock.trim()
+        : buildOpenAIArtStyle(artStyle, customArtStyle);
     const tone = toneModifierToVisualStyle(layer);
     const moodNote = (typeof cut.moodNote === 'string' && cut.moodNote.trim()) ? cut.moodNote.trim() : '';
     return [styleBase, tone, moodNote].filter(Boolean).join(', ');
@@ -304,6 +320,11 @@ export interface BuildPromptInput {
     batchAnchorIndex?: number;
     /** Phase B v3 Stage 1: anchor 라벨 (UI/프롬프트 컨텍스트용). 예: "거실 · 현재" */
     batchAnchorLabel?: string;
+    /**
+     * OpenAIStyleRegistry에서 사용자가 명시적으로 선택한 styleBlock.
+     * 채워져 있으면 [Style] 섹션을 이걸로 대체. 비어있으면 기존 artStyle 매핑 폴백.
+     */
+    customStyleBlock?: string;
 }
 
 export function buildGptImage2Prompt(input: BuildPromptInput): string {
@@ -311,7 +332,7 @@ export function buildGptImage2Prompt(input: BuildPromptInput): string {
         cut, characterDescriptions, scenarioAnalysis,
         cinematographyPlan, artStyle, customArtStyle,
         imageRatio, hasReference, insertText, referenceImageMapping,
-        batchAnchorIndex, batchAnchorLabel,
+        batchAnchorIndex, batchAnchorLabel, customStyleBlock,
     } = input;
 
     const layerId = (cut as any).sceneLayerId || DEFAULT_SCENE_LAYER_ID;
@@ -332,7 +353,7 @@ export function buildGptImage2Prompt(input: BuildPromptInput): string {
     const cameraSection = buildCameraSection(cut, cineCut);
     if (cameraSection) sections.push(`[Camera]\n${cameraSection}`);
 
-    const styleSection = buildStyleSection(artStyle, customArtStyle, layer, cut);
+    const styleSection = buildStyleSection(artStyle, customArtStyle, layer, cut, customStyleBlock);
     if (styleSection) sections.push(`[Style]\n${styleSection}`);
 
     sections.push(`[Layout]\n${buildLayoutSection(imageRatio)}`);
@@ -388,12 +409,14 @@ export interface BuildScenePromptInput {
     imageRatio: ImageRatio;
     /** 멀티 캐릭터 reference 매핑 (collectCharacterReferences 출력 그대로) */
     referenceImageMapping?: ReferenceImageMapping[];
+    /** OpenAIStyleRegistry에서 명시 선택한 styleBlock. 비어있으면 artStyle 매핑 폴백. */
+    customStyleBlock?: string;
 }
 
 export function buildScenePrompt(input: BuildScenePromptInput): string {
     const {
         design, characterDescriptions, sceneLayerId,
-        artStyle, customArtStyle, imageRatio, referenceImageMapping,
+        artStyle, customArtStyle, imageRatio, referenceImageMapping, customStyleBlock,
     } = input;
 
     const sections: string[] = [];
@@ -428,8 +451,11 @@ export function buildScenePrompt(input: BuildScenePromptInput): string {
     // [Camera Approach]
     if (design.cameraIntent) sections.push(`[Camera Approach]\n${design.cameraIntent}`);
 
-    // [Style]
-    sections.push(`[Style]\n${buildOpenAIArtStyle(artStyle, customArtStyle)}`);
+    // [Style] — OpenAIStyleRegistry styleBlock이 명시되면 우선, 아니면 artStyle 매핑
+    const styleText = (customStyleBlock && customStyleBlock.trim())
+        ? customStyleBlock.trim()
+        : buildOpenAIArtStyle(artStyle, customArtStyle);
+    sections.push(`[Style]\n${styleText}`);
 
     // [Layout]
     sections.push(`[Layout]\n${buildLayoutSection(imageRatio)}`);

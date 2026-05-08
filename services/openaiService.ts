@@ -156,30 +156,24 @@ export async function generateImageWithDalle(
 
 const DEFAULT_CHAT_MODEL = 'gpt-4o';
 
-const CHAT_SYSTEM_PROMPT = `You are an image prompt assistant for DALL-E 3,
-working inside a Korean webtoon-style chibi character creation tool.
+// CHAT_SYSTEM_PROMPT — 콘텐츠 묘사 전용 (화풍은 styleRegistry가 따로 합침).
+// 화풍 키워드/aesthetic 단어 일절 출력 금지.
+const CHAT_SYSTEM_PROMPT = `You are an image content prompt assistant for DALL-E 3.
 
 Your job: take the user's request (Korean or English) and produce a single
-DALL-E 3 prompt. Output ONLY the final English prompt — no explanations,
-no quotes, no markdown, no prefix.
+ENGLISH content description for the image. Output ONLY the final English
+content description — no explanations, no quotes, no markdown, no prefix.
 
-Built-in style (include in every prompt you write):
-"Korean webtoon-style super cute chibi illustration. Characters have
-oversized round heads, tiny bodies (around 3 heads tall), extremely big
-sparkling eyes, and puffy round cheeks. Highly expressive faces with
-exaggerated emotions, blushing cheeks, and sweat drops. Colorful, clean,
-highly expressive rendering with exaggerated motion effects on a soft
-pastel background."
-
-Behavior:
+CRITICAL RULES:
+- Describe ONLY content: subject, action, expression, clothing, setting,
+  lighting mood. NEVER include style/aesthetic/illustration/medium words
+  (no "chibi", "anime", "webtoon", "illustration", "cartoon", "pastel",
+  "cel shading", "line art", etc.). Style is appended downstream.
 - If a "Current prompt" is provided, modify it minimally per the user's
   request. Don't rewrite from scratch. Keep successful elements.
-- If no Current prompt, create a new one that integrates the built-in style
-  with the user's request.
 - Keep the output ONE cohesive image description — never "two scenes side by
   side", never character sheets or turnarounds.
-- Prefer soft, diffused, natural lighting (not hyperreal/vivid).
-- Keep total length under ~500 characters when possible.
+- Keep total length under ~350 characters when possible.
 - Never add policy-sensitive content (minors in distress, violence, nudity).`;
 
 export interface OpenAiChatPromptOptions {
@@ -290,6 +284,89 @@ export async function suggestAssetNameViaOpenAI(
     } catch {
         return `새 ${typeLabel}`;
     }
+}
+
+// ─── 화풍 styleBlock 자동 변환 (한글 묘사 → 영문 키워드) ───────────
+
+const STYLE_BLOCK_CONVERTER_PROMPT = `You generate a DALL-E 3 / gpt-image-2 style block from a Korean description.
+
+Output format (single line, comma-separated English keywords, no headers, no bullet points, no SD-style weights):
+[medium/style] , [proportions/ratio] , [face features] , [line work] , [coloring] , [lighting] , [mood] , [polish]
+
+CRITICAL RULES:
+- ONE line only. Comma-separated. No newlines, no markdown, no quotes.
+- 80~150 characters total.
+- ENGLISH only — no Korean characters in output.
+- NO weight syntax like (keyword:1.4). NO directives like "DO NOT". NO section headers like "[Style]:".
+- NO content/subject words (no character, action, location). ONLY style/aesthetic descriptors.
+- Cover all 8 axes when relevant: medium, proportions, face, lines, coloring, lighting, mood, polish.
+
+EXAMPLES:
+Input: 수채화풍 부드럽고 따뜻한 색감
+Output: soft watercolor illustration, balanced proportions, gentle facial features, loose hand-painted lines, warm pastel color washes, diffused natural lighting, cozy nostalgic mood, polished hand-painted finish
+
+Input: 사이버펑크 네온 분위기
+Output: cyberpunk anime illustration, stylized proportions, sharp angular features, crisp neon-edged line art, saturated neon palette, dramatic rim lighting, gritty futuristic mood, polished cyberpunk rendering`;
+
+export async function generateStyleBlockFromKorean(
+    koreanDescription: string,
+    model: string = DEFAULT_CHAT_MODEL,
+): Promise<string> {
+    const desc = koreanDescription.trim();
+    if (!desc) throw new DalleError('invalid-response', '한글 묘사가 비어있습니다.');
+
+    const apiKey = await getOpenAiKey();
+
+    let response: Response;
+    try {
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                messages: [
+                    { role: 'system', content: STYLE_BLOCK_CONVERTER_PROMPT },
+                    { role: 'user', content: `Korean description: "${desc}"\n\nOutput the style block (single line, English keywords only):` },
+                ],
+                temperature: 0.5,
+                max_tokens: 220,
+            }),
+        });
+    } catch {
+        throw new DalleError('network', '네트워크 오류. 연결 확인 후 다시 시도해주세요.');
+    }
+
+    if (!response.ok) {
+        let body: any = null;
+        try { body = await response.json(); } catch { /* ignore */ }
+        const msg: string = body?.error?.message || response.statusText;
+        if (response.status === 401) throw new DalleError('missing-key', 'OpenAI API 키가 유효하지 않습니다.');
+        if (response.status === 429) throw new DalleError('rate-limit', '요청 한도 초과. 잠시 후 다시 시도해주세요.');
+        if (response.status >= 500) throw new DalleError('server', `OpenAI 서버 오류 (${response.status})`);
+        throw new DalleError('unknown', `변환 실패: ${msg}`);
+    }
+
+    let result: any;
+    try { result = await response.json(); } catch {
+        throw new DalleError('invalid-response', '응답을 해석할 수 없습니다.');
+    }
+
+    const content: string | undefined = result?.choices?.[0]?.message?.content;
+    if (!content || !content.trim()) {
+        throw new DalleError('invalid-response', '응답이 비어있습니다.');
+    }
+
+    // 정리: 줄바꿈/따옴표/마크다운/prefix 제거, 한 줄로 평탄화
+    return content
+        .trim()
+        .replace(/\n+/g, ' ')
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .replace(/^(Output:|Style:|Style block:)\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 /** 키 유효성 간단 테스트 (models 엔드포인트 호출) */

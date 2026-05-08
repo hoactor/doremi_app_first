@@ -9,6 +9,7 @@ import { editImageWithNano, generateOutfitImage } from './ai/imageGeneration';
 import { editImageWithFlux, generateImageWithFlux } from './falService';
 import { editWithGptImage2, generateWithGptImage2 } from './openaiImageService';
 import { generateImageWithDalle } from './openaiService';
+import { composePromptWithStyle, getStyleBlockById } from './openaiStyleRegistry';
 import type { ImageRatio, OpenAIImageQuality, NanoModel, FluxModel } from '../types';
 import type { DalleAssetType } from './openaiService';
 
@@ -28,6 +29,8 @@ export interface StudioGenerateInput {
     openaiQuality?: OpenAIImageQuality;
     /** DALL-E 3 assetType (size 결정에 영향) */
     dalleAssetType?: DalleAssetType;
+    /** DALL-E 3 화풍 프리셋 ID — 미지정 시 레지스트리 defaultStyleId 사용 */
+    dalleStyleId?: string;
     /** 시드 (Gemini/Flux) */
     seed?: number;
     /** 결과 식별용 (히스토리 라벨링) */
@@ -105,8 +108,12 @@ export async function studioGenerate(
     }
 
     if (engine === 'openai-gpt2') {
+        // 사용자가 화풍을 명시 선택한 경우만 합치기. 미선택이면 raw prompt 그대로 (기존 동작).
+        const finalPrompt = input.dalleStyleId
+            ? composePromptWithStyle(input.prompt, await getStyleBlockById(input.dalleStyleId))
+            : input.prompt;
         const result = await generateWithGptImage2({
-            prompt: input.prompt,
+            prompt: finalPrompt,
             quality: input.openaiQuality || 'medium',
             sourceCutNumber: input.sourceLabel || 'studio',
             size: ratioToOpenAiSize(input.ratio),
@@ -125,8 +132,12 @@ export async function studioGenerate(
     }
 
     if (engine === 'openai-dalle3') {
+        // 명시 선택 시만 합치기. 미선택이면 raw prompt 그대로 (기존 직접 입력 흐름 유지).
+        const finalPrompt = input.dalleStyleId
+            ? composePromptWithStyle(input.prompt, await getStyleBlockById(input.dalleStyleId))
+            : input.prompt;
         const result = await generateImageWithDalle({
-            prompt: input.prompt,
+            prompt: finalPrompt,
             assetType: input.dalleAssetType || 'character',
             ratio: input.ratio,
             quality: 'hd',

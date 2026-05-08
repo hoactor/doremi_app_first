@@ -7,14 +7,16 @@
 // - studio → main: 'image-studio-apply-to-cut' (컷에 이미지 추가)
 // - studio → main: 'image-studio-window-closed' (UI 정리)
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { listen, emit, saveAsset } from '../services/tauriAdapter';
 import type { ImageStudioInitPayload } from '../services/tauriAdapter';
 import {
     studioGenerate, studioEdit, engineDisplayName, engineSupportsEdit,
 } from '../services/imageStudioEngines';
 import type { StudioEngine } from '../services/imageStudioEngines';
-import type { ImageRatio, OpenAIImageQuality } from '../types';
+import { loadStyleRegistry, FALLBACK_STYLE_ID, invalidateStyleCache } from '../services/openaiStyleRegistry';
+import { OpenAIStyleManagerModal } from './OpenAIStyleManagerModal';
+import type { ImageRatio, OpenAIImageQuality, OpenAIStylePreset } from '../types';
 import type { DalleAssetType } from '../services/openaiService';
 
 interface HistoryItem {
@@ -61,6 +63,15 @@ export const UnifiedImageStudio: React.FC = () => {
     const [openaiQuality, setOpenaiQuality] = useState<OpenAIImageQuality>('medium');
     const [seed, setSeed] = useState<string>('');
 
+    // ── DALL-E 3 화풍 레지스트리 ──
+    const STYLE_PREF_KEY = 'doremissul_dalle_style_id';
+    const [dalleStyles, setDalleStyles] = useState<OpenAIStylePreset[]>([]);
+    const [dalleStyleId, setDalleStyleId] = useState<string>(() => {
+        try { return localStorage.getItem(STYLE_PREF_KEY) || FALLBACK_STYLE_ID; }
+        catch { return FALLBACK_STYLE_ID; }
+    });
+    const [isStyleManagerOpen, setIsStyleManagerOpen] = useState(false);
+
     // ── 입력 ──
     const [prompt, setPrompt] = useState('');
 
@@ -106,6 +117,34 @@ export const UnifiedImageStudio: React.FC = () => {
             setEngine('openai-gpt2');
         }
     }, [mode, engine]);
+
+    // ── DALL-E 3 화풍 레지스트리 로드 (마운트 + 외부 변경 이벤트) ──
+    const reloadStyles = useCallback(() => {
+        invalidateStyleCache();
+        loadStyleRegistry()
+            .then(reg => {
+                setDalleStyles(reg.styles);
+                if (!reg.styles.some(s => s.id === dalleStyleId)) {
+                    setDalleStyleId(reg.defaultStyleId);
+                }
+            })
+            .catch(err => console.warn('[UnifiedImageStudio] 화풍 레지스트리 로드 실패', err));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [dalleStyleId]);
+
+    useEffect(() => {
+        reloadStyles();
+        let unlisten: (() => void) | null = null;
+        listen('openai-styles-updated', () => reloadStyles())
+            .then(u => { unlisten = u; }).catch(() => {});
+        return () => { unlisten?.(); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // ── 화풍 선택 변경 시 localStorage 저장 ──
+    useEffect(() => {
+        try { localStorage.setItem(STYLE_PREF_KEY, dalleStyleId); } catch {}
+    }, [dalleStyleId]);
 
     const canSubmit = useMemo(() => {
         if (isBusy) return false;
@@ -162,6 +201,7 @@ export const UnifiedImageStudio: React.FC = () => {
                     ratio,
                     openaiQuality,
                     dalleAssetType: assetType,
+                    dalleStyleId,
                     seed: Number.isFinite(seedNum) ? seedNum : undefined,
                     sourceLabel: 'studio',
                 })
@@ -361,6 +401,36 @@ export const UnifiedImageStudio: React.FC = () => {
                         </section>
                     )}
 
+                    {/* DALL-E 3 화풍 picker */}
+                    {(engine === 'openai-dalle3') && (
+                        <section>
+                            <h3 className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-[0.18em] mb-1.5">화풍</h3>
+                            <div className="flex gap-1">
+                                <select
+                                    value={dalleStyleId}
+                                    onChange={e => setDalleStyleId(e.target.value)}
+                                    disabled={isBusy || dalleStyles.length === 0}
+                                    className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200 outline-none focus:border-amber-500 disabled:opacity-40">
+                                    {dalleStyles.length === 0 && <option value="">로딩 중...</option>}
+                                    {dalleStyles.map(s => (
+                                        <option key={s.id} value={s.id}>
+                                            {s.label}{s.isBuiltin ? ' 🔒' : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button
+                                    onClick={() => setIsStyleManagerOpen(true)}
+                                    disabled={isBusy}
+                                    title="화풍 추가/관리"
+                                    className="px-2 py-1 text-xs font-bold rounded bg-zinc-800 hover:bg-amber-900/40 border border-zinc-700 hover:border-amber-600 text-amber-300 disabled:opacity-40"
+                                >＋</button>
+                            </div>
+                            <p className="text-[9px] text-zinc-600 mt-1 line-clamp-2 break-all">
+                                {dalleStyles.find(s => s.id === dalleStyleId)?.styleBlock?.slice(0, 80) || ''}…
+                            </p>
+                        </section>
+                    )}
+
                     {/* Seed (Gemini/Flux) */}
                     {(engine === 'gemini' || engine === 'flux') && (
                         <section>
@@ -495,6 +565,16 @@ export const UnifiedImageStudio: React.FC = () => {
                     </section>
                 </aside>
             </div>
+
+            {/* OpenAI 화풍 추가/관리 모달 */}
+            <OpenAIStyleManagerModal
+                isOpen={isStyleManagerOpen}
+                onClose={() => { setIsStyleManagerOpen(false); reloadStyles(); }}
+                onChanged={(changedId) => {
+                    reloadStyles();
+                    if (changedId) setDalleStyleId(changedId);
+                }}
+            />
         </div>
     );
 };

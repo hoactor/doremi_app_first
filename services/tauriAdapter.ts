@@ -626,6 +626,29 @@ export async function loadLoraRegistry(): Promise<LoRAEntry[]> {
     return entries;
 }
 
+// ─── OpenAI(DALL-E) 화풍 레지스트리 ─────────────────────────────────
+
+/** OpenAI 화풍 레지스트리 저장 (모듈에서 mergeWithBuiltins 후 호출). */
+export async function saveOpenAIStyles(registry: import('../types').OpenAIStyleRegistry): Promise<void> {
+    const json = JSON.stringify(registry, null, 2);
+    return invoke('save_openai_styles', { json });
+}
+
+/** OpenAI 화풍 레지스트리 로드. 파일 없으면 빈 레지스트리 반환 (빌트인 보강은 호출 측 책임). */
+export async function loadOpenAIStyles(): Promise<import('../types').OpenAIStyleRegistry | null> {
+    try {
+        const json = await invoke<string>('load_openai_styles');
+        const data = JSON.parse(json);
+        if (data && Array.isArray(data.styles)) {
+            return data as import('../types').OpenAIStyleRegistry;
+        }
+        return null;
+    } catch (err) {
+        console.warn('[openaiStyles] 로드 실패 → null 반환', err);
+        return null;
+    }
+}
+
 /** ★ 창 크기 초기화 (1728×1200, 화면 중앙) */
 export async function resetWindowSize(): Promise<void> {
     if (!IS_TAURI) return;

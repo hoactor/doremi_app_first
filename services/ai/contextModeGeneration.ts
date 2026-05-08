@@ -8,6 +8,7 @@ import type {
 import { editWithGptImage2, generateWithGptImage2, collectCharacterReferences } from '../openaiImageService';
 import { buildScenePrompt } from '../../appOpenaiPromptEngine';
 import { sanitizeChildSafety } from '../../appSafetySanitize';
+import { getStyleBlockById } from '../openaiStyleRegistry';
 
 export interface GenerateContextSceneOptions {
     design: ContextSceneDesign;
@@ -19,6 +20,8 @@ export interface GenerateContextSceneOptions {
     customArtStyle: string;
     imageRatio: ImageRatio;
     quality: OpenAIImageQuality;
+    /** OpenAIStyleRegistry 명시 선택 ID. 없으면 artStyle 매핑 폴백. */
+    selectedDalleStyleId?: string;
     onProgress?: (message: string) => void;
 }
 
@@ -27,7 +30,7 @@ export async function generateContextScene(
 ): Promise<ContextSceneGeneration> {
     const {
         design, characters, characterDescriptions, sceneLayerId,
-        artStyle, customArtStyle, imageRatio, quality, onProgress,
+        artStyle, customArtStyle, imageRatio, quality, selectedDalleStyleId, onProgress,
     } = opts;
 
     // 1. 캐릭터 reference 수집
@@ -39,6 +42,9 @@ export async function generateContextScene(
     );
 
     // 2. 씬 프롬프트 빌드
+    const customStyleBlock = selectedDalleStyleId
+        ? await getStyleBlockById(selectedDalleStyleId)
+        : undefined;
     const rawPrompt = buildScenePrompt({
         design,
         characterDescriptions,
@@ -47,6 +53,7 @@ export async function generateContextScene(
         customArtStyle,
         imageRatio,
         referenceImageMapping: mapping,
+        customStyleBlock,
     });
     const prompt = sanitizeChildSafety(rawPrompt);
 

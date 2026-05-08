@@ -1121,6 +1121,33 @@ fn load_lora_registry() -> Result<String, String> {
     }
 }
 
+// ─── OpenAI(DALL-E) 화풍 레지스트리 ───────────────────────────────
+
+#[tauri::command]
+fn save_openai_styles(json: String) -> Result<(), String> {
+    let parsed: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|e| format!("OpenAI 화풍 레지스트리 JSON 파싱 실패: {e}"))?;
+    let validated = serde_json::to_string_pretty(&parsed)
+        .map_err(|e| format!("OpenAI 화풍 레지스트리 직렬화 실패: {e}"))?;
+    let root = app_data_root()?;
+    let path = root.join("openai_styles.json");
+    std::fs::write(&path, &validated)
+        .map_err(|e| format!("OpenAI 화풍 레지스트리 저장 실패: {e}"))
+}
+
+#[tauri::command]
+fn load_openai_styles() -> Result<String, String> {
+    let root = app_data_root()?;
+    let path = root.join("openai_styles.json");
+    if path.exists() {
+        std::fs::read_to_string(&path)
+            .map_err(|e| format!("OpenAI 화풍 레지스트리 로드 실패: {e}"))
+    } else {
+        // 빈 상태 — 프론트의 mergeWithBuiltins가 빌트인을 시드.
+        Ok(r#"{"styles":[],"defaultStyleId":"webtoon-chibi"}"#.to_string())
+    }
+}
+
 #[tauri::command]
 fn delete_asset(asset_id: String) -> Result<(), String> {
     let root = app_data_root()?;
@@ -1352,6 +1379,9 @@ fn main() {
             // Phase 6: LoRA 레지스트리
             save_lora_registry,
             load_lora_registry,
+            // OpenAI(DALL-E) 화풍 레지스트리
+            save_openai_styles,
+            load_openai_styles,
             // 멀티윈도우
             open_asset_catalog,
             open_image_studio,

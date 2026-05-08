@@ -306,6 +306,7 @@ export const App: React.FC = () => {
                 scenarioAnalysis={state.scenarioAnalysis}
                 characterDescriptions={state.characterDescriptions}
                 openaiImageQuality={state.openaiImageQuality || 'medium'}
+                selectedDalleStyleId={state.selectedDalleStyleId}
                 generatedContent={state.generatedContent}
                 contextSceneDesigns={state.contextSceneDesigns}
                 contextAnalysisStatus={state.contextAnalysisStatus}

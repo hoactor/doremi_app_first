@@ -9,7 +9,10 @@ import {
 import { IS_TAURI, openAssetCatalog, openImageStudio, resetWindowSize, loadLoraRegistry } from '../services/tauriAdapter';
 import { LoraRegistryModal } from './LoraRegistryModal';
 import { BatchEditorPanel } from './BatchEditorPanel';
-import type { LoRAEntry, ImageEngineMode, ScenarioAnalysis, CharacterDescription, OpenAIImageQuality, ContextSceneDesign, AppDataState } from '../types';
+import { OpenAIStyleManagerModal } from './OpenAIStyleManagerModal';
+import { loadStyleRegistry, FALLBACK_STYLE_ID, invalidateStyleCache } from '../services/openaiStyleRegistry';
+import { listen } from '../services/tauriAdapter';
+import type { LoRAEntry, ImageEngineMode, ScenarioAnalysis, CharacterDescription, OpenAIImageQuality, ContextSceneDesign, AppDataState, OpenAIStylePreset } from '../types';
 
 const STYLE_NAMES: Record<string, string> = {
     'normal': '정통 썰툰',
@@ -63,6 +66,7 @@ interface SidebarProps {
     characterDescriptions: { [key: string]: CharacterDescription };
     // ── Phase B ──
     openaiImageQuality: OpenAIImageQuality;
+    selectedDalleStyleId?: string;
     // ── Phase B v3 Stage 2: 배치 패널 stale 카운트용 ──
     generatedContent?: any;
     // ── Phase A.6: Context 모드 ──
@@ -81,7 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     handleSaveWithStatus, setIsResetConfirmOpen, setIsCutDetailOpen,
     setIsApiKeySettingsOpen, setIsAssetCatalogOpen, setIsAssetWindowOpen, setIsProjectListOpen,
     imageEngineMode, scenarioAnalysis, characterDescriptions,
-    openaiImageQuality, generatedContent,
+    openaiImageQuality, selectedDalleStyleId, generatedContent,
     contextSceneDesigns, contextAnalysisStatus, contextGenerationStatus,
 }) => {
     const allCutsForBatch = useMemo(
@@ -101,6 +105,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
     useEffect(() => { refreshLoras(); }, [refreshLoras]);
 
     const linkedStyleLora = loraEntries.find(e => e.id === styleLoraId);
+
+    // ── OpenAI 화풍 레지스트리 ──
+    const [dalleStyles, setDalleStyles] = useState<OpenAIStylePreset[]>([]);
+    const [dalleDefaultId, setDalleDefaultId] = useState<string>(FALLBACK_STYLE_ID);
+    const [isDalleStyleManagerOpen, setIsDalleStyleManagerOpen] = useState(false);
+    const refreshDalleStyles = useCallback(() => {
+        invalidateStyleCache();
+        loadStyleRegistry()
+            .then(reg => { setDalleStyles(reg.styles); setDalleDefaultId(reg.defaultStyleId); })
+            .catch(() => {});
+    }, []);
+    useEffect(() => { refreshDalleStyles(); }, [refreshDalleStyles]);
+
+    // 멀티윈도우 동기화: 다른 창에서 화풍 변경 시 reload
+    useEffect(() => {
+        let unlisten: (() => void) | null = null;
+        listen('openai-styles-updated', () => { refreshDalleStyles(); }).then(u => { unlisten = u; }).catch(() => {});
+        return () => { unlisten?.(); };
+    }, [refreshDalleStyles]);
+
+    const effectiveDalleStyleId = selectedDalleStyleId || dalleDefaultId;
 
     return (<>
             <aside className="w-64 flex-shrink-0 bg-[#111113] border-r border-orange-600/40 flex flex-col z-20">
@@ -363,6 +388,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 ))}
                             </div>
                             <p className="text-[9px] text-zinc-600 text-center mt-1">Low ~$0.005 · Medium ~$0.05 · High ~$0.21 (1K 기준)</p>
+
+                            {/* OpenAI 화풍 dropdown — Gemini/Flux 사이드바 ArtStyle dropdown과 평등.
+                                "기본" 선택 시 selectedDalleStyleId=undefined → 본편 경로는 기존 ArtStyle 매핑 유지 (회귀 0). */}
+                            <div className="flex gap-1.5 mt-2">
+                                <div className="relative flex-1 min-w-0">
+                                    <select
+                                        value={selectedDalleStyleId || ''}
+                                        onChange={e => dispatch({ type: 'SET_DALLE_STYLE_ID', payload: e.target.value || undefined })}
+                                        disabled={dalleStyles.length === 0}
+                                        className="w-full h-full px-2 py-2.5 text-xs font-medium bg-zinc-800/40 hover:bg-zinc-800 border border-violet-700/40 hover:border-violet-600 text-violet-400 rounded-xl focus:outline-none focus:ring-1 focus:ring-violet-500 appearance-none cursor-pointer truncate pr-6 disabled:opacity-40"
+                                        title="OpenAI 화풍 (DALL-E/gpt-image-2 공통). '기본'은 위쪽 ArtStyle 매핑을 따름."
+                                    >
+                                        <option value="">기본 (Gemini 화풍 매핑)</option>
+                                        {dalleStyles.map(s => (
+                                            <option key={s.id} value={s.id}>{s.label}{s.isBuiltin ? ' 🔒' : ''}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDownIcon className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-violet-500 pointer-events-none" />
+                                </div>
+                                <button
+                                    onClick={() => setIsDalleStyleManagerOpen(true)}
+                                    title="화풍 추가/관리"
+                                    className="px-2.5 py-2.5 text-xs font-bold rounded-xl border border-violet-700/40 hover:border-violet-500 bg-zinc-800/40 hover:bg-violet-900/30 text-violet-300 hover:text-violet-200 transition-all"
+                                >＋</button>
+                            </div>
                         </>
                     )}
 
@@ -533,6 +583,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }
                     setIsLoraRegistryOpen(false);
                     refreshLoras();
+                }}
+            />
+
+            {/* OpenAI 화풍 추가/관리 모달 */}
+            <OpenAIStyleManagerModal
+                isOpen={isDalleStyleManagerOpen}
+                onClose={() => { setIsDalleStyleManagerOpen(false); refreshDalleStyles(); }}
+                onChanged={(changedId) => {
+                    refreshDalleStyles();
+                    if (changedId) dispatch({ type: 'SET_DALLE_STYLE_ID', payload: changedId });
                 }}
             />
     </>);

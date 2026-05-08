@@ -8,8 +8,9 @@ import { refinePromptWithAI, refineAllPromptsWithAI } from './services/geminiSer
 import { buildFluxPromptSmart, FluxPromptContext, translateImageScriptToFlux } from './appFluxPromptEngine';
 import { sanitizeChildSafety } from './appSafetySanitize';
 // ★ Phase B: gpt-image-2 직접 호출 + 자연어 프롬프트
-import { buildGptImage2Prompt } from './appOpenaiPromptEngine';
+import { buildGptImage2Prompt, isOpenAIFormatPrompt } from './appOpenaiPromptEngine';
 import { generateWithGptImage2, editWithGptImage2, collectCharacterReferences, pickBestCharacterReferenceUrl, urlToBase64Public } from './services/openaiImageService';
+import { getStyleBlockById } from './services/openaiStyleRegistry';
 
 export interface GenerationActionHelpers {
     dispatch: (action: AppAction) => void;
@@ -78,7 +79,11 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 const styleToUse = cut.artStyleOverride || stateRef.current.artStyle;
                 const artStylePrompt = getArtStylePrompt(styleToUse);
                 const modelName = getVisionModelName();
-                const geminiPrompt = sanitizeChildSafety(cut.imagePrompt || calculateFinalPrompt(cut as any));
+                // cut.imagePrompt가 OpenAI 자연어 형식이면(이전에 OpenAI 엔진에서 refine된 프롬프트)
+                // Gemini/Flux가 알아먹지 못하므로 무시하고 새로 빌드 — 엔진 전환 후 회귀 방지
+                const cachedPromptForGemini = (cut.imagePrompt && !isOpenAIFormatPrompt(cut.imagePrompt))
+                    ? cut.imagePrompt : null;
+                const geminiPrompt = sanitizeChildSafety(cachedPromptForGemini || calculateFinalPrompt(cut as any));
 
                 // Flux 엔진: 스마트 프롬프트 (복잡 씬 → Claude 번역)
                 let prompt = geminiPrompt;
@@ -278,6 +283,10 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 }
 
                 const hasReference = base64Images.length > 0;
+                // 사용자가 OpenAI 화풍을 명시 선택했으면 styleBlock 조회. 미선택이면 undefined → ArtStyle 매핑 폴백.
+                const customStyleBlock = s.selectedDalleStyleId
+                    ? await getStyleBlockById(s.selectedDalleStyleId)
+                    : undefined;
                 const openaiPrompt = buildGptImage2Prompt({
                     cut: cut as any,
                     characterDescriptions: s.characterDescriptions || {},
@@ -290,6 +299,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                     referenceImageMapping: mapping,  // ★ Image N 라벨링 활성화
                     batchAnchorIndex,
                     batchAnchorLabel,
+                    customStyleBlock,
                 });
                 const sanitized = sanitizeChildSafety(openaiPrompt);
                 const size = s.imageRatio === '9:16' ? '1024x1536'
@@ -354,7 +364,10 @@ export function createGenerationActions(h: GenerationActionHelpers) {
         }
 
         try {
-        const geminiPrompt = sanitizeChildSafety(cut.imagePrompt || calculateFinalPrompt(cut as any));
+        // cut.imagePrompt가 OpenAI 자연어 형식이면 Gemini/Flux가 못 알아먹으므로 무시 (엔진 전환 회귀 방지)
+        const cachedPrompt = (cut.imagePrompt && !isOpenAIFormatPrompt(cut.imagePrompt))
+            ? cut.imagePrompt : null;
+        const geminiPrompt = sanitizeChildSafety(cachedPrompt || calculateFinalPrompt(cut as any));
 
         // Flux 엔진: 스마트 프롬프트 (복잡 씬 → Claude 번역)
         let prompt = geminiPrompt;
@@ -519,6 +532,9 @@ export function createGenerationActions(h: GenerationActionHelpers) {
             }
             const promptCtx: PromptContext = { characterDescriptions: s.characterDescriptions, locationVisualDNA: s.locationVisualDNA || {}, cinematographyPlan: s.cinematographyPlan || null, imageRatio: s.imageRatio || '1:1', artStyle: s.artStyle };
             // ★ Phase B: OpenAI 엔진이면 자연어 프롬프트로 빌드, 그 외는 Gemini SD 프롬프트
+            const customStyleBlockRefine = (s.selectedImageEngine === 'openai' && s.selectedDalleStyleId)
+                ? await getStyleBlockById(s.selectedDalleStyleId)
+                : undefined;
             const newPrompt = s.selectedImageEngine === 'openai'
                 ? sanitizeChildSafety(buildGptImage2Prompt({
                     cut: merged,
@@ -532,6 +548,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                         const c = s.characterDescriptions[k];
                         return c && !!pickBestCharacterReferenceUrl(c, merged.sceneLayerId);
                     }),
+                    customStyleBlock: customStyleBlockRefine,
                 }))
                 : sanitizeChildSafety(buildFinalPrompt(merged, promptCtx));
             const upd: Partial<Cut> = { ...fieldChanges, imagePrompt: newPrompt };

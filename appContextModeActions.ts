@@ -152,6 +152,7 @@ export function createContextModeActions(helpers: Helpers) {
                 customArtStyle: state.customArtStyle,
                 imageRatio: state.imageRatio || '9:16',
                 quality: state.openaiImageQuality || 'medium',
+                selectedDalleStyleId: state.selectedDalleStyleId,
                 onProgress: (message) => {
                     dispatch({
                         type: 'SET_CONTEXT_GENERATION_STATUS',

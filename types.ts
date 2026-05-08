@@ -26,6 +26,18 @@ export type FluxModel = 'flux-pro' | 'flux-flex' | 'flux-lora';
 export type OpenAIImageQuality = 'low' | 'medium' | 'high';
 export type ScriptInputMode = 'auto' | 'narration' | 'msf' | 'uss';
 
+export interface OpenAIStylePreset {
+    id: string;
+    label: string;
+    styleBlock: string;
+    isBuiltin: boolean;
+}
+
+export interface OpenAIStyleRegistry {
+    styles: OpenAIStylePreset[];
+    defaultStyleId: string;
+}
+
 // ─── Phase 6: LoRA 레지스트리 ────────────────────────────────────
 export interface LoRAEntry {
     id: string;
@@ -372,6 +384,8 @@ export interface AppDataState {
     imageEngineMode: ImageEngineMode;
     /** Phase B: gpt-image-2 quality. 기본 'medium'. */
     openaiImageQuality: OpenAIImageQuality;
+    /** OpenAI(DALL-E/gpt-image-2) 화풍 프리셋 ID. 미지정 시 레지스트리 defaultStyleId 폴백. */
+    selectedDalleStyleId?: string;
     /** Phase B: gpt-image-2 사용량 추적 (falUsage와 평등 패턴) */
     openaiUsage: {
         totalImages: number;
@@ -506,6 +520,7 @@ export type AppAction =
     // ── Phase B: OpenAI gpt-image-2 ─────────────────────────────────
     | { type: 'SET_OPENAI_IMAGE_QUALITY'; payload: OpenAIImageQuality }
     | { type: 'ADD_OPENAI_USAGE'; payload: { images: number; costUsd: number; quality: OpenAIImageQuality } }
+    | { type: 'SET_DALLE_STYLE_ID'; payload: string | undefined }
     // ── Phase A.6: Context 모드 씬 디자인 ─────────────────────────────
     | { type: 'SET_CONTEXT_ANALYSIS_STATUS'; payload: AppDataState['contextAnalysisStatus'] }
     | { type: 'SET_CONTEXT_SCENE_DESIGNS'; payload: import('./types/contextMode').ContextSceneDesign[] }

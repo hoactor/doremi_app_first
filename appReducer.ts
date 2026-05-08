@@ -777,6 +777,8 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         // ── Phase B: OpenAI gpt-image-2 ─────────────────────────────
         case 'SET_OPENAI_IMAGE_QUALITY':
             return { ...state, openaiImageQuality: action.payload };
+        case 'SET_DALLE_STYLE_ID':
+            return { ...state, selectedDalleStyleId: action.payload };
         case 'ADD_OPENAI_USAGE': {
             const { images, costUsd, quality } = action.payload;
             const today = new Date().toISOString().slice(0, 10);
