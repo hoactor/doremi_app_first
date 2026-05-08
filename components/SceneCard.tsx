@@ -5,7 +5,7 @@ import { SparklesIcon, CheckIcon, SpeakerWaveIcon, TrashIcon, PhotoIcon, Chevron
 import { useAppContext } from '../AppContext';
 import { IS_TAURI, saveAsset, resolveImageUrl } from '../services/tauriAdapter';
 import { AssetTagPopup, AssetCatalogModal } from './AssetCatalogModal';
-import { buildArtStylePrompt } from '../appStyleEngine';
+// buildArtStylePrompt import 제거됨 (2026-05-08) — FULL 모달 제거로 미사용
 import { createGeneratedImage, isFirstCutInBatch, deriveOutfitSessionsFromCuts } from '../appUtils';
 import type { AssetCatalogEntry } from '../services/tauriAdapter';
 
@@ -97,9 +97,7 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
     const [isEditingIntent, setIsEditingIntent] = useState(false);
     const [editedIntent, setEditedIntent] = useState(cut.directorialIntent || '');
     const [showAssetTagPopup, setShowAssetTagPopup] = useState(false);
-    const [showFullPromptModal, setShowFullPromptModal] = useState(false);
-    const [fluxPromptCache, setFluxPromptCache] = useState('');
-    const [isFluxPromptLoading, setIsFluxPromptLoading] = useState(false);
+    // ★ FULL 모달 + Predicted Prompt 캐시 제거됨 (2026-05-08) — Actual Prompt(selectedImage.prompt)로 통합.
     const [refineInput, setRefineInput] = useState('');
 
     // FIX: Use the Gemini API for smart narration line breaks via an action
@@ -639,166 +637,72 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                                 className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg"
                                 labelClassName="text-indigo-400 font-mono uppercase tracking-widest text-[10px]"
                             />
-                            <button
-                                onClick={() => setShowFullPromptModal(true)}
-                                className="absolute top-2 right-2 px-2 py-1 text-[9px] font-mono bg-zinc-800 hover:bg-indigo-600 text-zinc-400 hover:text-white rounded border border-zinc-700 hover:border-indigo-500 transition-all"
-                                title={`${state.selectedImageEngine === 'flux' ? 'Flux' : 'Gemini'} 최종 프롬프트 보기`}
-                            >
-                                🔍 FULL
-                            </button>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <InfoField label="Scene Description" value={cut.sceneDescription} onUpdate={(val) => handleFieldUpdate('sceneDescription', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
-                            <InfoField label="Emotion & Expression" value={cut.characterEmotionAndExpression} onUpdate={(val) => handleFieldUpdate('characterEmotionAndExpression', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
-                            <InfoField label="Pose" value={cut.characterPose} onUpdate={(val) => handleFieldUpdate('characterPose', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
-                            <InfoField label="Outfit" value={cut.characterOutfit} onUpdate={(val) => handleFieldUpdate('characterOutfit', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
-                            {cut.characterIdentityDNA && <InfoField label="Body DNA" value={cut.characterIdentityDNA} onUpdate={(val) => handleFieldUpdate('characterIdentityDNA', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-amber-600" />}
-                            <InfoField label="Location" value={cut.locationDescription} onUpdate={(val) => handleFieldUpdate('locationDescription', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
-                            <InfoField label="Notes" value={cut.otherNotes} onUpdate={(val) => handleFieldUpdate('otherNotes', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
-                        </div>
+
+                        {/* ★ ACTUAL PROMPT — 선택된 이미지를 실제로 만든 호출 prompt */}
+                        {(() => {
+                            if (!selectedImage || !selectedImage.prompt) {
+                                return (
+                                    <div className="p-3 bg-zinc-900/40 border border-zinc-800/60 rounded-lg">
+                                        <h4 className="font-mono uppercase tracking-widest text-[10px] text-zinc-500 mb-1">🎯 Actual Prompt</h4>
+                                        <p className="text-[10px] text-zinc-600 italic">이미지 생성 후 실제 호출된 prompt가 여기 표시됩니다.</p>
+                                    </div>
+                                );
+                            }
+                            const engineLabel = selectedImage.engine || 'unknown';
+                            const engineColor =
+                                engineLabel === 'gpt-image-2' || engineLabel === 'dalle3' ? 'violet'
+                                : engineLabel === 'nano' || engineLabel === 'nano-v3' ? 'orange'
+                                : 'teal';
+                            const colorMap: Record<string, string> = {
+                                violet: 'border-violet-500/40 bg-violet-500/5 text-violet-400',
+                                orange: 'border-orange-500/40 bg-orange-500/5 text-orange-400',
+                                teal:   'border-teal-500/40   bg-teal-500/5   text-teal-400',
+                            };
+                            const headerColor = colorMap[engineColor];
+                            const metaParts: string[] = [];
+                            if (selectedImage.engine) metaParts.push(`engine: ${selectedImage.engine}`);
+                            if (selectedImage.model) metaParts.push(`model: ${selectedImage.model}`);
+                            if (selectedImage.tag) metaParts.push(`tag: ${selectedImage.tag}`);
+                            if (selectedImage.openaiQuality) metaParts.push(`quality: ${selectedImage.openaiQuality}`);
+                            if (selectedImage.artStyleLabel) metaParts.push(`화풍: ${selectedImage.artStyleLabel}`);
+                            return (
+                                <div className={`p-3 border rounded-lg ${headerColor}`}>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="font-mono uppercase tracking-widest text-[10px] flex items-center gap-2">
+                                            🎯 Actual Prompt
+                                            <span className="text-[9px] text-zinc-500 normal-case font-normal">{metaParts.join(' · ')}</span>
+                                        </h4>
+                                        <button
+                                            onClick={() => { navigator.clipboard.writeText(selectedImage.prompt || ''); actions.addNotification('Actual Prompt 복사됨', 'success'); }}
+                                            className="px-2 py-0.5 text-[9px] font-mono bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded border border-zinc-700 transition-all"
+                                        >📋 Copy</button>
+                                    </div>
+                                    <pre className="text-[11px] text-zinc-300 bg-zinc-950/60 border border-zinc-800/60 rounded p-3 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[40vh] overflow-y-auto">{selectedImage.prompt}</pre>
+                                </div>
+                            );
+                        })()}
+
+                        {/* 레거시 필드 (수정용) — 기본 접힘. 필요 시 펼쳐서 수정 */}
+                        <details className="mt-1">
+                            <summary className="text-[10px] font-mono text-zinc-600 cursor-pointer hover:text-zinc-400 transition-colors uppercase tracking-widest">
+                                📝 Legacy Source Fields (수정용 — 클릭해서 펼치기)
+                            </summary>
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <InfoField label="Scene Description" value={cut.sceneDescription} onUpdate={(val) => handleFieldUpdate('sceneDescription', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
+                                <InfoField label="Emotion & Expression" value={cut.characterEmotionAndExpression} onUpdate={(val) => handleFieldUpdate('characterEmotionAndExpression', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
+                                <InfoField label="Pose" value={cut.characterPose} onUpdate={(val) => handleFieldUpdate('characterPose', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
+                                <InfoField label="Outfit" value={cut.characterOutfit} onUpdate={(val) => handleFieldUpdate('characterOutfit', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
+                                {cut.characterIdentityDNA && <InfoField label="Body DNA" value={cut.characterIdentityDNA} onUpdate={(val) => handleFieldUpdate('characterIdentityDNA', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-amber-600" />}
+                                <InfoField label="Location" value={cut.locationDescription} onUpdate={(val) => handleFieldUpdate('locationDescription', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
+                                <InfoField label="Notes" value={cut.otherNotes} onUpdate={(val) => handleFieldUpdate('otherNotes', val)} labelClassName="font-mono uppercase tracking-widest text-[10px] text-zinc-500" />
+                            </div>
+                        </details>
                     </div>
                 </div>
             </div>
         </div>
 
-        {/* 최종 프롬프트 확인 모달 */}
-        {showFullPromptModal && (
-            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowFullPromptModal(false)}>
-                <div className="bg-zinc-900 border border-zinc-700 rounded-xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
-                        <h3 className="text-sm font-mono text-indigo-400 uppercase tracking-wider">🔍 Full Prompt — Cut {cut.cutNumber}</h3>
-                        <button onClick={() => setShowFullPromptModal(false)} className="p-1 hover:bg-zinc-800 rounded transition-colors">
-                            <XIcon className="w-5 h-5 text-zinc-400" />
-                        </button>
-                    </div>
-                    <div className="overflow-y-auto flex-1 p-5 space-y-4">
-                        {state.selectedImageEngine === 'flux' ? (
-                            /* ═══ Flux 프롬프트 ═══ */
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-[10px] font-mono text-teal-400 uppercase tracking-widest">Flux Prompt {/[가-힣]/.test(cut.sceneDescription || '') ? '(이미지대본 직통)' : '(buildFluxPromptSmart)'}</span>
-                                    <div className="flex items-center gap-1.5">
-                                        <button
-                                            disabled={isFluxPromptLoading}
-                                            onClick={async () => {
-                                                setIsFluxPromptLoading(true);
-                                                try {
-                                                    const { buildFluxPromptSmart, translateImageScriptToFlux } = await import('../appFluxPromptEngine');
-                                                    const pCtx: any = {
-                                                        characterDescriptions: state.characterDescriptions || {},
-                                                        locationVisualDNA: state.locationVisualDNA || {},
-                                                        cinematographyPlan: state.cinematographyPlan,
-                                                        artStyle: state.artStyle || 'normal',
-                                                        imageRatio: state.imageRatio || '9:16',
-                                                        styleLoraId: state.styleLoraId,
-                                                        fluxModel: state.selectedFluxModel,
-                                                    };
-
-                                                    // 이미지대본 직통 번역 경로
-                                                    let result = '';
-                                                    const sceneDesc = cut.sceneDescription || '';
-                                                    const hasKorean = /[가-힣]/.test(sceneDesc);
-                                                    if (hasKorean && sceneDesc.length > 10) {
-                                                        const charDescs = state.characterDescriptions || {};
-                                                        const charList = cut.characters.map((name: string) => {
-                                                            const key = Object.keys(charDescs).find(k => { const cd = charDescs[k]; return (cd.canonicalName && cd.canonicalName === name) || cd.koreanName === name; });
-                                                            const char = key ? charDescs[key] : null;
-                                                            const loraEntry = (pCtx.fluxModel === 'flux-lora' && char?.loraId)
-                                                                ? (pCtx.loraRegistry || []).find((e: any) => e.id === char.loraId) : null;
-                                                            return { koreanName: name, triggerWord: loraEntry?.triggerWord, appearance: char?.baseAppearance };
-                                                        });
-                                                        result = await translateImageScriptToFlux(sceneDesc, charList, pCtx.artStyle, {
-                                                            styleLoraId: pCtx.styleLoraId, loraRegistry: pCtx.loraRegistry, fluxModel: pCtx.fluxModel,
-                                                        });
-                                                    }
-                                                    // 폴백
-                                                    if (!result) {
-                                                        result = await buildFluxPromptSmart(cut, pCtx);
-                                                    }
-                                                    setFluxPromptCache(result);
-                                                } catch (err: any) {
-                                                    setFluxPromptCache(`에러: ${err.message || err}`);
-                                                }
-                                                setIsFluxPromptLoading(false);
-                                            }}
-                                            className="px-2 py-0.5 text-[9px] font-mono bg-teal-900/50 hover:bg-teal-600 text-teal-400 hover:text-white rounded border border-teal-700/50 transition-all disabled:opacity-50"
-                                        >{isFluxPromptLoading ? '⏳ 생성중...' : '⚡ Flux 프롬프트 생성'}</button>
-                                        {fluxPromptCache && (
-                                            <button
-                                                onClick={() => { navigator.clipboard.writeText(fluxPromptCache); actions.addNotification('Flux Prompt 복사됨', 'success'); }}
-                                                className="px-2 py-0.5 text-[9px] font-mono bg-zinc-800 hover:bg-teal-600 text-zinc-400 hover:text-white rounded border border-zinc-700 transition-all"
-                                            >📋 Copy</button>
-                                        )}
-                                    </div>
-                                </div>
-                                {fluxPromptCache ? (
-                                    <pre className="text-[11px] text-zinc-300 bg-zinc-950 border border-teal-800/30 rounded-lg p-4 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[50vh] overflow-y-auto">{fluxPromptCache}</pre>
-                                ) : (
-                                    <div className="text-[10px] text-zinc-500 font-mono bg-zinc-950 border border-zinc-800 rounded-lg p-4 leading-relaxed">
-                                        「⚡ Flux 프롬프트 생성」을 클릭하면 Claude가 Gemini 프롬프트를 Flux 형식으로 변환합니다.
-                                    </div>
-                                )}
-                                {/* Gemini 원본 (참고용, 접기) */}
-                                <details className="mt-3">
-                                    <summary className="text-[10px] font-mono text-zinc-600 cursor-pointer hover:text-zinc-400 transition-colors">📄 Gemini 원본 프롬프트 (참고용)</summary>
-                                    <pre className="mt-2 text-[10px] text-zinc-500 bg-zinc-950 border border-zinc-800 rounded-lg p-3 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[30vh] overflow-y-auto">{cut.imagePrompt || '(없음)'}</pre>
-                                </details>
-                            </div>
-                        ) : (
-                            /* ═══ Gemini 프롬프트 (기존) ═══ */
-                            <>
-                                <div>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-[10px] font-mono text-amber-400 uppercase tracking-widest">Scene Prompt (buildFinalPrompt)</span>
-                                        <button
-                                            onClick={() => { navigator.clipboard.writeText(cut.imagePrompt || ''); actions.addNotification('Scene Prompt 복사됨', 'success'); }}
-                                            className="px-2 py-0.5 text-[9px] font-mono bg-zinc-800 hover:bg-amber-600 text-zinc-400 hover:text-white rounded border border-zinc-700 transition-all"
-                                        >📋 Copy</button>
-                                    </div>
-                                    <pre className="text-[11px] text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[40vh] overflow-y-auto">{cut.imagePrompt || '(없음)'}</pre>
-                                </div>
-                                <div>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-[10px] font-mono text-teal-400 uppercase tracking-widest">Art Style Prompt</span>
-                                        <button
-                                            onClick={() => {
-                                                const activeStyle = cut.artStyleOverride || state.artStyle;
-                                                const artPrompt = buildArtStylePrompt(activeStyle, state.customArtStyle || '');
-                                                navigator.clipboard.writeText(artPrompt);
-                                                actions.addNotification('Art Style Prompt 복사됨', 'success');
-                                            }}
-                                            className="px-2 py-0.5 text-[9px] font-mono bg-zinc-800 hover:bg-teal-600 text-zinc-400 hover:text-white rounded border border-zinc-700 transition-all"
-                                        >📋 Copy</button>
-                                    </div>
-                                    <pre className="text-[11px] text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-lg p-4 whitespace-pre-wrap break-words font-mono leading-relaxed max-h-[30vh] overflow-y-auto">{(() => {
-                                        const activeStyle = cut.artStyleOverride || state.artStyle;
-                                        return buildArtStylePrompt(activeStyle, state.customArtStyle || '');
-                                    })()}</pre>
-                                </div>
-                                <div>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-[10px] font-mono text-rose-400 uppercase tracking-widest">Combined → Gemini (Scene + Style)</span>
-                                        <button
-                                            onClick={() => {
-                                                const activeStyle = cut.artStyleOverride || state.artStyle;
-                                                const artPrompt = buildArtStylePrompt(activeStyle, state.customArtStyle || '');
-                                                const combined = `${cut.imagePrompt || ''}\n\n---ART STYLE---\n${artPrompt}`;
-                                                navigator.clipboard.writeText(combined);
-                                                actions.addNotification('Combined Prompt 복사됨', 'success');
-                                            }}
-                                            className="px-2 py-0.5 text-[9px] font-mono bg-zinc-800 hover:bg-rose-600 text-zinc-400 hover:text-white rounded border border-zinc-700 transition-all"
-                                        >📋 Copy All</button>
-                                    </div>
-                                    <div className="text-[10px] text-zinc-500 font-mono bg-zinc-950 border border-rose-500/20 rounded-lg p-4 leading-relaxed max-h-[20vh] overflow-y-auto">
-                                        이 두 프롬프트가 Gemini API에 전달됩니다. Scene Prompt는 editPrompt/prompt로, Art Style은 artStylePrompt로 분리 전송.
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            </div>
-        )}
 
         {/* 에셋 태그 선택 팝업 */}
         {showAssetTagPopup && selectedImage && (

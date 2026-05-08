@@ -811,24 +811,33 @@ fn save_project(project_id: String, metadata_json: String) -> Result<(), String>
         .map_err(|e| format!("project.json rename 실패: {e}"))?;
 
     // project_list 업데이트 (title, cutCount 추출)
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&metadata_json) {
-        let title = parsed["title"].as_str().unwrap_or("").to_string();
-        let cut_count = parsed["scenes"]
-            .as_array()
-            .map(|scenes| {
-                scenes.iter().map(|s| s["cuts"].as_array().map_or(0, |c| c.len())).sum::<usize>()
-            })
-            .unwrap_or(0);
-        let thumb = parsed["scenes"]
-            .as_array()
-            .and_then(|s| s.first())
-            .and_then(|s| s["cuts"].as_array())
-            .and_then(|c| c.first())
-            .and_then(|c| c["selectedImagePath"].as_str().or(c["imagePaths"][0].as_str()))
-            .map(|s| s.to_string());
-        let art_style = parsed["artStyle"].as_str().map(|s| s.to_string());
-        let now = chrono_now();
-        let _ = update_project_list_entry(&root, &project_id, &title, &now, cut_count, thumb, art_style);
+    match serde_json::from_str::<serde_json::Value>(&metadata_json) {
+        Ok(parsed) => {
+            let title = parsed["title"].as_str().unwrap_or("").to_string();
+            let cut_count = parsed["scenes"]
+                .as_array()
+                .map(|scenes| {
+                    scenes.iter().map(|s| s["cuts"].as_array().map_or(0, |c| c.len())).sum::<usize>()
+                })
+                .unwrap_or(0);
+            let thumb = parsed["scenes"]
+                .as_array()
+                .and_then(|s| s.first())
+                .and_then(|s| s["cuts"].as_array())
+                .and_then(|c| c.first())
+                .and_then(|c| c["selectedImagePath"].as_str().or(c["imagePaths"][0].as_str()))
+                .map(|s| s.to_string());
+            let art_style = parsed["artStyle"].as_str().map(|s| s.to_string());
+            let now = chrono_now();
+            // ★ silent 실패 방지 — 인덱스 업데이트 실패 시 경고 출력 (목록에 안 뜨는 원인 추적용).
+            //   project.json 자체는 이미 저장됐으므로 list_projects가 폴더 스캔 폴백으로 자동 복구.
+            if let Err(e) = update_project_list_entry(&root, &project_id, &title, &now, cut_count, thumb, art_style) {
+                eprintln!("[save_project] project_list 업데이트 실패 ({}): {} — 다음 list_projects 호출 시 폴더 스캔으로 자동 복구됨", project_id, e);
+            }
+        }
+        Err(e) => {
+            eprintln!("[save_project] metadata_json 파싱 실패: {} — project.json은 저장됐지만 인덱스 업데이트 스킵 (폴더 스캔 폴백 의존)", e);
+        }
     }
 
     Ok(())
@@ -846,12 +855,89 @@ fn load_project(project_id: String) -> Result<String, String> {
 fn list_projects() -> Result<String, String> {
     let root = app_data_root()?;
     let list_path = root.join("project_list.json");
-    if list_path.exists() {
-        std::fs::read_to_string(&list_path)
-            .map_err(|e| format!("목록 로드 실패: {e}"))
+    let projects_dir = root.join("projects");
+
+    // 1) 인덱스 파일 로드 (없으면 빈 list)
+    let mut list: serde_json::Value = if list_path.exists() {
+        let text = std::fs::read_to_string(&list_path)
+            .map_err(|e| format!("목록 로드 실패: {e}"))?;
+        serde_json::from_str(&text).unwrap_or(serde_json::json!({"projects": []}))
     } else {
-        Ok(r#"{"projects":[]}"#.to_string())
+        serde_json::json!({"projects": []})
+    };
+
+    // 2) projects 폴더 스캔 — 인덱스에 없는 폴더 자동 보강 (인덱스 손상 복구)
+    if projects_dir.exists() {
+        let indexed_ids: std::collections::HashSet<String> = list["projects"]
+            .as_array()
+            .map(|arr| arr.iter().filter_map(|p| p["id"].as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+            let mut recovered: Vec<serde_json::Value> = Vec::new();
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() { continue; }
+                let id = match path.file_name().and_then(|s| s.to_str()) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                if !id.starts_with("proj_") { continue; }
+                if indexed_ids.contains(&id) { continue; }
+                // 인덱스에 없는 폴더 — project.json 읽어서 보강
+                let json_path = path.join("project.json");
+                if !json_path.exists() { continue; }
+                let raw = match std::fs::read_to_string(&json_path) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                let title = parsed["title"].as_str().unwrap_or("(제목 없음)").to_string();
+                let cut_count = parsed["scenes"]
+                    .as_array()
+                    .map(|scenes| scenes.iter().map(|s| s["cuts"].as_array().map_or(0, |c| c.len())).sum::<usize>())
+                    .unwrap_or(0);
+                let thumb = parsed["scenes"]
+                    .as_array()
+                    .and_then(|s| s.first())
+                    .and_then(|s| s["cuts"].as_array())
+                    .and_then(|c| c.first())
+                    .and_then(|c| c["selectedImagePath"].as_str().or(c["imagePaths"][0].as_str()))
+                    .map(|s| s.to_string());
+                let art_style = parsed["artStyle"].as_str().map(|s| s.to_string());
+                let updated_at = parsed["updatedAt"].as_str()
+                    .or(parsed["createdAt"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                eprintln!("[list_projects] 인덱스 누락 복구: {} ({})", id, title);
+                recovered.push(serde_json::json!({
+                    "id": id,
+                    "title": title,
+                    "cutCount": cut_count,
+                    "thumbnailPath": thumb,
+                    "updatedAt": updated_at,
+                    "artStyle": art_style,
+                }));
+            }
+
+            if !recovered.is_empty() {
+                if let Some(arr) = list["projects"].as_array_mut() {
+                    // 복구된 항목을 맨 앞에 추가
+                    for entry in recovered.into_iter().rev() {
+                        arr.insert(0, entry);
+                    }
+                    // 인덱스 파일 갱신 (다음 호출부터는 보강 안 해도 됨)
+                    let _ = std::fs::write(&list_path, serde_json::to_string_pretty(&list).unwrap());
+                }
+            }
+        }
     }
+
+    serde_json::to_string(&list).map_err(|e| format!("목록 직렬화 실패: {e}"))
 }
 
 #[tauri::command]

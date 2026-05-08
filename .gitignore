@@ -34,3 +34,6 @@ src-tauri/icons/*.icns
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright MCP debug logs (browser console capture cache)
+.playwright-mcp/
