@@ -587,7 +587,7 @@ export interface ProjectListEntry {
 
 export interface AssetCatalogEntry {
     id: string;
-    type: 'character' | 'outfit' | 'background';
+    type: 'character' | 'outfit' | 'background' | 'prop';
     name: string;
     imagePath: string;
     thumbnailPath: string;
@@ -596,6 +596,7 @@ export interface AssetCatalogEntry {
         artStyle: string | null;
         location: string | null;
         description: string | null;
+        extraTypes?: string | null;
     };
     visualDNA: {
         hair?: string;
