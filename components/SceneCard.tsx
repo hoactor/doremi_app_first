@@ -18,15 +18,17 @@ interface SceneContainerProps {
   scene: Scene;
 }
 
-const InfoField: React.FC<{ 
-    label: string; 
-    value: string; 
+const InfoField: React.FC<{
+    label: string;
+    value: string;
     onUpdate: (newValue: string) => void;
     className?: string;
     labelClassName?: string;
-}> = ({ label, value, onUpdate, className, labelClassName }) => {
+    expandable?: boolean;
+}> = ({ label, value, onUpdate, className, labelClassName, expandable }) => {
   const [localValue, setLocalValue] = useState(value);
   const [hasChanged, setHasChanged] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
       setLocalValue(value);
@@ -43,6 +45,9 @@ const InfoField: React.FC<{
     setHasChanged(false); // Assume successful initiation
   };
 
+  const baseRows = label === '장면 설명' || label === '최종 이미지 프롬프트' ? 4 : 2;
+  const rows = expandable && isExpanded ? 16 : baseRows;
+
   return (
     <div className={className}>
       <label className={`text-xs font-semibold ${labelClassName || 'text-zinc-400'}`}>{label}</label>
@@ -50,12 +55,22 @@ const InfoField: React.FC<{
         <textarea
             value={localValue}
             onChange={handleChange}
-            rows={label === '장면 설명' || label === '최종 이미지 프롬프트' ? 4 : 2}
-            className={`w-full p-3 pr-10 text-sm rounded-md transition-colors focus:outline-none focus:ring-1 focus:ring-orange-500 bg-zinc-900/50 border ${hasChanged ? 'border-amber-500 ring-1 ring-amber-500/50' : 'border-zinc-700'}`}
+            rows={rows}
+            className={`w-full p-3 pr-10 text-sm rounded-md transition-colors focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-zinc-900/50 border ${hasChanged ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-zinc-700'} ${expandable ? 'resize-y' : ''}`}
         />
-        <button 
-            onClick={handleUpdate} 
-            className={`absolute bottom-2 right-2 p-1.5 rounded-md transition-all duration-200 group ${hasChanged ? 'bg-indigo-600 text-white hover:bg-indigo-500 hover:scale-110 shadow-lg' : 'text-zinc-400 hover:text-white bg-zinc-700/50 hover:bg-zinc-600'}`} 
+        {expandable && (
+          <button
+            type="button"
+            onClick={() => setIsExpanded(p => !p)}
+            className="absolute bottom-2 left-2 px-1.5 py-0.5 text-[9px] font-mono rounded bg-zinc-800/70 hover:bg-indigo-600 text-zinc-400 hover:text-white border border-zinc-700 transition-all"
+            title={isExpanded ? '접기' : '펼쳐 보기'}
+          >
+            {isExpanded ? '▲ 접기' : '▼ 펼치기'}
+          </button>
+        )}
+        <button
+            onClick={handleUpdate}
+            className={`absolute bottom-2 right-2 p-1.5 rounded-md transition-all duration-200 group ${hasChanged ? 'bg-indigo-600 text-white hover:bg-indigo-500 hover:scale-110 shadow-lg' : 'text-zinc-400 hover:text-white bg-zinc-700/50 hover:bg-zinc-600'}`}
             title={hasChanged ? "변경 사항을 반영하여 장면 다시 쓰기" : "내용 동기화/재생성"}
         >
           {hasChanged ? <CheckIcon className="h-4 w-4" /> : <RefreshIcon className="h-4 w-4" />}
@@ -630,12 +645,13 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                 <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isDetailsExpanded ? 'max-h-[2000px] pt-3' : 'max-h-0 pt-0'}`}>
                     <div className="flex flex-col gap-3">
                         <div className="relative">
-                            <InfoField 
-                                label="Image Prompt" 
-                                value={cut.imagePrompt || ''} 
+                            <InfoField
+                                label="Image Prompt"
+                                value={cut.imagePrompt || ''}
                                 onUpdate={(val) => handleFieldUpdate('imagePrompt', val)}
                                 className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg"
                                 labelClassName="text-indigo-400 font-mono uppercase tracking-widest text-[10px]"
+                                expandable
                             />
                         </div>
 
