@@ -5,10 +5,11 @@
 
 import { callClaude } from '../claudeService';
 import { inferLocationCategory } from '../../appUtils';
+import { generateOutfitsForLocations } from './textAnalysis';
 import type {
     UniversalScriptSchema, USSCharacter, USSLocation, USSCut,
     ContiCut, CharacterBible, ScenarioAnalysis, CharacterDescription,
-    BehaviorPatterns, CutType, SceneVisualAnalysis,
+    BehaviorPatterns, CutType, SceneVisualAnalysis, SceneLayer,
 } from '../../types';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -31,6 +32,7 @@ Do NOT split into cuts yet. Focus on:
    - name: Korean name exactly as written in the script
    - canonicalName: English romanized name for this character (e.g., "Juli", "Minho"). This becomes the UNIQUE internal key for all subsequent image prompts.
    - aliases: Array of ALL Korean references to this character in the script (e.g., ["줄리", "딸", "아이", "애기"]). MUST include the name itself. Scan the entire script thoroughly.
+   - isSpeaker: Set to true for the protagonist/narrator (the character whose 1st-person perspective drives the narration). Exactly ONE character should have isSpeaker=true. If the script has no proper name for the speaker, use canonicalName="Speaker" and name="나".
    - gender: male/female
    - hair: English hair description ONLY — length, color (include hex code), style, texture, bangs, accessories. Example: "shoulder-length light brown (#B8956A) bob with wavy texture and side-swept bangs, small pink hair clip on right side"
    - face: English face description ONLY — bone structure, eye shape/color, nose, lips, skin tone, distinguishing marks. Example: "soft oval face, large expressive brown eyes, small nose, fair skin with rosy cheeks"
@@ -57,6 +59,28 @@ Do NOT split into cuts yet. Focus on:
    - Reason: Image AI generates backgrounds from location names. Same location name = same background for every scene.
    - MINIMUM: If any character lives in a house/apartment, extract at least 2-3 sub-locations (방/거실/현관 등).
 
+4. **sceneLayers**: Extract distinct narrative time/perspective layers.
+   Each layer represents a separate timeline or mental state in the script.
+   - id: short Korean identifier (e.g., "현재", "어린시절_과거", "10년전_과거", "상상_미래", "꿈")
+   - label: Korean UI label (same as id or shorter)
+   - timeDelta: optional Korean time hint ("과거 10년", "내일", "5년 후", "어린시절")
+   - isFlashback: true if this layer is past memory/recall
+   - isImagined: true if this layer is dream/imagination/hypothetical
+   - toneModifier: visual tone hint
+     - 'none' for present time (default)
+     - 'warm-vintage' or 'sepia' for flashback/childhood
+     - 'dream-blur' or 'soft-focus' for imagined/dream
+     - 'cool-blue' for distant/melancholic memories
+   ★ ALWAYS include the "현재" layer first (id="현재", label="현재", toneModifier="none"),
+     even if the script seems entirely present-tense. This is the default anchor.
+   ★ DETECT flashback markers: "어린시절", "옛날", "그때", "10년 전", "과거에", "어렸을 때",
+     "어머니가 살아계실 때", verbs in past-perfect tense suggesting deep recall.
+     → Create a separate flashback layer with isFlashback=true.
+   ★ DETECT imagined markers: "만약", "상상해보니", "꿈에서", "~한다고 생각하면",
+     "혹시 ~라면". → Create separate imagined layer with isImagined=true.
+   ★ For most casual stories, 1~2 layers is enough. Only add a layer if the script
+     explicitly transitions to that timeline.
+
 ## OUTPUT: Valid JSON only. No explanation, no markdown fences.
 {
   "meta": {
@@ -73,8 +97,9 @@ Do NOT split into cuts yet. Focus on:
       "resolutionDescription": ""
     }
   },
-  "characters": [{"name":"","canonicalName":"","aliases":[],"gender":"","hair":"","face":"","body":"","appearance":"","personality":"","defaultOutfit":"","outfitByLocation":{}}],
-  "locations": [{"name":"","visual":""}]
+  "characters": [{"name":"","canonicalName":"","aliases":[],"isSpeaker":false,"gender":"","hair":"","face":"","body":"","appearance":"","personality":"","defaultOutfit":"","outfitByLocation":{}}],
+  "locations": [{"name":"","visual":""}],
+  "sceneLayers": [{"id":"현재","label":"현재","timeDelta":"","isFlashback":false,"isImagined":false,"toneModifier":"none"}]
 }`;
 
 export async function analyzeUSSStructure(
@@ -123,26 +148,114 @@ export async function analyzeUSSStructure(
     if (!parsed.characters) parsed.characters = [];
     if (!parsed.locations) parsed.locations = [];
     const locationNames = parsed.locations.map((l: any) => l.name);
-    // hair/face 폴백 + outfitByLocation 누락 보정
+
+    // hair/face 폴백
     for (const c of parsed.characters) {
         if (!c.hair) c.hair = '';
         if (!c.face && c.appearance) c.face = 'Match facial visage exactly';
         if (!c.body) c.body = '';
-        // outfitByLocation 없으면 defaultOutfit으로 전 장소 채움
         if (!c.outfitByLocation || typeof c.outfitByLocation !== 'object') {
             c.outfitByLocation = {};
         }
-        // 누락된 장소 채우기
-        for (const locName of locationNames) {
-            if (!c.outfitByLocation[locName]) {
-                c.outfitByLocation[locName] = c.defaultOutfit || 'standard casual outfit';
-                console.warn(`[USS] outfitByLocation 누락 보정: ${c.name} → ${locName} = defaultOutfit`);
+    }
+
+    // ===== outfitByLocation 자동 LLM 보강 =====
+    // LLM이 단일 호출에서 5명 × N장소 detailed outfit을 회피하는 경향이 있음.
+    // 누락된 (캐릭터, 장소) 페어를 generateOutfitsForLocations로 캐릭터별 일괄 생성.
+    let outfitTokens = 0;
+    type MissingPair = { character: any; locations: string[] };
+    const missingPairs: MissingPair[] = [];
+    for (const c of parsed.characters) {
+        const empty = locationNames.filter((loc: string) =>
+            !c.outfitByLocation[loc] || typeof c.outfitByLocation[loc] !== 'string' || !c.outfitByLocation[loc].trim()
+        );
+        if (empty.length > 0) missingPairs.push({ character: c, locations: empty });
+    }
+
+    if (missingPairs.length > 0 && locationNames.length > 0) {
+        const totalPairs = missingPairs.reduce((s, p) => s + p.locations.length, 0);
+        console.log(`[USS] outfitByLocation 자동 보강 시작: ${missingPairs.length}명, 총 ${totalPairs}개 페어`);
+
+        // 직렬 호출 — Claude rate limit 회피, 캐릭터당 1회
+        for (const pair of missingPairs) {
+            const c = pair.character;
+            try {
+                const { locationOutfits, tokenCount } = await generateOutfitsForLocations(
+                    c.name,
+                    c.gender || 'female',
+                    c.defaultOutfit || 'standard casual outfit',
+                    pair.locations,
+                );
+                outfitTokens += tokenCount || 0;
+                let filled = 0;
+                for (const [loc, outfit] of Object.entries(locationOutfits || {})) {
+                    if (outfit && typeof outfit === 'string' && outfit.trim()) {
+                        c.outfitByLocation[loc] = outfit;
+                        filled++;
+                    }
+                }
+                console.log(`[USS] '${c.name}' outfit 보강 완료: ${filled}/${pair.locations.length}개 채움`);
+            } catch (e: any) {
+                console.warn(`[USS] '${c.name}' outfit 보강 실패 (defaultOutfit 폴백 적용): ${e?.message || e}`);
             }
         }
     }
 
-    console.log(`[USS] 구조 분석 완료: ${parsed.characters.length}명, ${parsed.locations.length}장소, 막구분 1→${parsed.meta.actBoundaries.setupEndLine}/${parsed.meta.actBoundaries.confrontationEndLine}/${lines.length}`);
-    return { structure: parsed, tokenCount: result.totalTokens || 0 };
+    // 최종 폴백 — LLM 보강 실패한 페어는 defaultOutfit으로
+    for (const c of parsed.characters) {
+        for (const locName of locationNames) {
+            if (!c.outfitByLocation[locName] || !c.outfitByLocation[locName].trim()) {
+                c.outfitByLocation[locName] = c.defaultOutfit || 'standard casual outfit';
+                console.warn(`[USS-FALLBACK] outfit 최종 폴백: ${c.name} → ${locName} = defaultOutfit`);
+            }
+        }
+    }
+
+    // ===== Speaker Presence — 자동 보정 =====
+    // (1) speakerGender 정합 검증 — 사용자 지정 성별과 isSpeaker 캐릭터 gender 불일치 시 강제 보정
+    const speakerChar = parsed.characters.find((c: any) => c.isSpeaker === true);
+    if (speakerGender && speakerChar && speakerChar.gender !== speakerGender) {
+        console.warn(
+            `[USS-FALLBACK] isSpeaker(${speakerChar.name}) gender 불일치 ` +
+            `→ 강제 보정: ${speakerChar.gender} → ${speakerGender}`
+        );
+        speakerChar.gender = speakerGender;
+    }
+
+    // (2) isSpeaker 누락 시 fallback — 첫 캐릭터를 화자로 자동 지정
+    if (!speakerChar && parsed.characters.length > 0) {
+        parsed.characters[0].isSpeaker = true;
+        console.warn(
+            `[USS-FALLBACK] isSpeaker 누락 → 첫 캐릭터(${parsed.characters[0].name})로 자동 지정`
+        );
+    }
+
+    // ===== sceneLayers — 자동 보정 =====
+    // (1) 누락 시 "현재" 단일 레이어로 폴백
+    if (!Array.isArray(parsed.sceneLayers) || parsed.sceneLayers.length === 0) {
+        parsed.sceneLayers = [{ id: '현재', label: '현재', toneModifier: 'none' }];
+        console.warn('[USS-FALLBACK] sceneLayers 누락 → "현재" 단일 레이어로 자동 폴백');
+    }
+    // (2) "현재" 레이어가 없으면 맨 앞에 자동 삽입 (다른 레이어와 함께 있어야 함)
+    if (!parsed.sceneLayers.some((sl: any) => sl.id === '현재')) {
+        parsed.sceneLayers.unshift({ id: '현재', label: '현재', toneModifier: 'none' });
+        console.warn('[USS-FALLBACK] "현재" 레이어 누락 → 맨 앞에 자동 삽입');
+    }
+    // (3) 각 레이어 필드 기본값 보장
+    parsed.sceneLayers = parsed.sceneLayers.map((sl: any) => ({
+        id: String(sl.id || '현재'),
+        label: String(sl.label || sl.id || '현재'),
+        timeDelta: sl.timeDelta ? String(sl.timeDelta) : undefined,
+        isFlashback: !!sl.isFlashback,
+        isImagined: !!sl.isImagined,
+        toneModifier: sl.toneModifier || (sl.isFlashback ? 'warm-vintage' : sl.isImagined ? 'dream-blur' : 'none'),
+        customToneText: sl.customToneText ? String(sl.customToneText) : undefined,
+    }));
+
+    const outfitNote = outfitTokens > 0 ? `, outfit 보강 ${outfitTokens.toLocaleString()} tokens` : '';
+    const layerNote = parsed.sceneLayers.length > 1 ? `, ${parsed.sceneLayers.length}개 sceneLayer` : '';
+    console.log(`[USS] 구조 분석 완료: ${parsed.characters.length}명, ${parsed.locations.length}장소${layerNote}, 막구분 1→${parsed.meta.actBoundaries.setupEndLine}/${parsed.meta.actBoundaries.confrontationEndLine}/${lines.length}${outfitNote}`);
+    return { structure: parsed, tokenCount: (result.totalTokens || 0) + outfitTokens };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -211,21 +324,88 @@ If neither happens in a cut, that cut is wasted screen time.
 10. action and pose fields MUST be written in English. The image AI cannot read Korean body descriptions. emotion field stays in Korean. narration field stays in Korean.
 
 # TECHNICAL RULES
+
 11. cutType: "dialogue" | "action" | "reaction" | "insert" | "montage"
+
 12. Characters keep their defaultOutfit unless the story explicitly changes clothes.
-13. Insert cuts (no characters, just objects/environment) are valid and powerful for pacing.
-14. originLine: The line number this cut came from.
-15. location field: Use the EXACT location NAME from the list below. Do NOT put visual descriptions here — just the short name (e.g. "주인공의 방", NOT "Dark bedroom at 2AM with phone glow..."). Visual details go in the locationDetail field only.
-    ★ If a scene clearly takes place in a different room/area than the previous cut (e.g., moving from bedroom to kitchen), use the appropriate sub-location from the list.
-    ★ If the character is OUTSIDE a building (door entrance, front steps), use the exterior location name, not the interior one.
-16. Use character names and location names EXACTLY as provided below. Do NOT invent new location names. Every cut's location MUST be one of the names listed in LOCATION CONTEXT — no exceptions.
-17. If CHARACTER CONTEXT uses English canonicalNames (e.g., "Juli", "Minho"), the characters array MUST use those English names — NEVER the Korean name. Match aliases from the narration to the correct canonicalName.
+
+13. WHY THIS MATTERS — viewer attention.
+    한국 1인칭 썰 콘텐츠에서 시청자는 나레이션을 듣자마자
+    "말하는 사람의 얼굴"을 찾는다. 빈 frame은 그 기대를 배신한다.
+    시청자가 스와이프하면 실패.
+    → 화자가 행위/감정/시선/대사의 주체인 컷에는
+       화자가 반드시 frame에 있어야 한다.
+
+14. SPEAKER PRESENCE TRIGGERS
+    Speaker is the character marked 'isSpeaker: true' in CHARACTER CONTEXT
+    (fallback: the first character listed).
+    Speaker MUST appear in 'characters' array when narration contains:
+    (a) explicit 1st-person — 나/내가/난/나는/우리/우린
+    (b) implicit subject — no pronoun but action/feeling/movement
+        e.g., "그러다 대학 갔을 때야", "한참 망설였다", "결국 일어났다"
+    (c) dialogue spoken by the speaker
+        e.g., "괜찮대"(told), "물어봤지"(asked)
+
+15. ALIAS / RELATIONSHIP MATCHING
+    Korean references like 동기/오빠/엄마/그 사람/남친/선배 must be matched
+    against each character's 'aliases' array to find the canonicalName.
+    NEVER skip a character because the canonical name isn't spelled out.
+
+16. EMPTY characters — ONLY for true environmental inserts.
+
+    ✅ Empty OK (object/landscape IS the subject):
+    - "한강이 보였다" — pure landscape
+    - "휴대폰이 울렸다" — object close-up, no actor visible
+    - "비가 내렸다" — symbolic weather insert
+
+    ❌ Empty NOT OK (include speaker):
+    - "한강을 바라봤다" — speaker observes
+    - "휴대폰을 들었다" — speaker acts
+    - "비를 맞으며 걸었다" — speaker in scene
+    - "그러다 대학 갔을 때야" — speaker exists in memory
+
+    Default: when in doubt, include the speaker.
+    Empty characters cost viewer connection.
+
+17. cutType vs characters are INDEPENDENT axes.
+    cutType = camera/edit purpose (insert/wide/close-up/POV).
+    characters = who is visible in frame.
+    A POV close-up of speaker's hands is cutType="insert" AND characters=["Speaker"].
+
+18. originLine: The line number this cut came from.
+
+19. location field: Use the EXACT location NAME from the list below. Do NOT put
+    visual descriptions here — just the short name (e.g. "주인공의 방", NOT
+    "Dark bedroom at 2AM with phone glow..."). Visual details go in the
+    locationDetail field only.
+    ★ If a scene clearly takes place in a different room/area than the previous
+      cut (e.g., moving from bedroom to kitchen), use the appropriate sub-location.
+    ★ If the character is OUTSIDE a building (door entrance, front steps), use
+      the exterior location name, not the interior one.
+
+20. Use character names and location names EXACTLY as provided. Do NOT invent
+    new location names. Every cut's location MUST be one of the names listed in
+    LOCATION CONTEXT — no exceptions.
+    ★ If CHARACTER CONTEXT uses English canonicalNames (e.g., "Juli", "Minho"),
+      the characters array MUST use those English names — NEVER the Korean name.
+      Match aliases (rule 15) to the correct canonicalName.
+
+21. sceneLayerId — INHERIT from VISUAL DIRECTOR ANALYSIS.
+    Each cut MUST have a sceneLayerId taken from the corresponding scene's lineRange.
+    - Look up which scene's lineRange contains this cut's originLine.
+    - Use that scene's sceneLayerId verbatim (e.g., "현재", "어린시절_과거").
+    - If VISUAL DIRECTOR ANALYSIS is missing or the cut falls outside any lineRange,
+      use "현재" as default.
+    - Do NOT invent new sceneLayerId values. Use only ids from SCENELAYER CONTEXT.
 
 ## CHARACTER CONTEXT:
 {CHARACTER_CONTEXT}
 
 ## LOCATION CONTEXT:
 {LOCATION_CONTEXT}
+
+## SCENELAYER CONTEXT:
+{SCENELAYER_CONTEXT}
 
 # PHASE A.5 — NATURAL-LANGUAGE FIELDS (gpt-image-2 트랙)
 In addition to the SD-style fields above, ALSO populate these natural-language fields
@@ -243,25 +423,43 @@ If a "VISUAL DIRECTOR ANALYSIS" block appears in the user message, use it as
 context (camera diversity hints, key moments, mood arc) — but it is NOT a strict rule.
 
 ## OUTPUT: Valid JSON array only. No explanation, no markdown fences.
-[{"narration":"","characters":[],"location":"","action":"","emotion":"","pose":"","cutType":"","originLine":0,"sceneNarrative":"","cameraNote":"","moodNote":"","detailsNarrative":""}]`;
+[{"narration":"","characters":[],"location":"","action":"","emotion":"","pose":"","cutType":"","originLine":0,"sceneLayerId":"현재","sceneNarrative":"","cameraNote":"","moodNote":"","detailsNarrative":""}]`;
 
 export async function convertNarrationToCutsBatch(
     lines: { lineNum: number; text: string }[],
     characters: USSCharacter[],
     locations: USSLocation[],
+    sceneLayers: SceneLayer[] | undefined,
     opts?: { onProgress?: (text: string) => void; storyBrief?: string; visualAnalysis?: SceneVisualAnalysis[] },
 ): Promise<{ cuts: USSCut[]; tokenCount: number }> {
     const hasCanonical = characters.some(c => c.canonicalName && c.canonicalName !== c.name);
-    const charContext = characters.map(c => {
+    const hasExplicitSpeaker = characters.some(c => c.isSpeaker === true);
+    const charContext = characters.map((c, idx) => {
         const id = hasCanonical ? (c.canonicalName || c.name) : c.name;
         const aliasInfo = (hasCanonical && c.aliases?.length) ? ` [aliases: ${c.aliases.join(', ')}]` : '';
-        return `- ${id} (${c.gender}${hasCanonical ? ', 한국어: ' + c.name : ''}): ${c.appearance} / outfit: ${c.defaultOutfit}${aliasInfo}`;
+        // SPEAKER 식별: isSpeaker 필드 우선, 누구도 명시 안 됐으면 첫 번째 캐릭터로 fallback
+        const isSpeakerChar = c.isSpeaker === true || (idx === 0 && !hasExplicitSpeaker);
+        const speakerTag = isSpeakerChar ? ' [SPEAKER / 화자 / 주인공]' : '';
+        return `- ${id}${speakerTag} (${c.gender}${hasCanonical ? ', 한국어: ' + c.name : ''}): ${c.appearance} / outfit: ${c.defaultOutfit}${aliasInfo}`;
     }).join('\n');
     const locContext = locations.map(l => `- ${l.name}: ${l.visual}`).join('\n');
+    // ★ SCENELAYER CONTEXT — 컷의 sceneLayerId 부여 시 사용 가능한 id 목록
+    const layerArr: SceneLayer[] = (sceneLayers && sceneLayers.length > 0)
+        ? sceneLayers
+        : [{ id: '현재', label: '현재', toneModifier: 'none' }];
+    const layerContext = layerArr.map(sl => {
+        const flags: string[] = [];
+        if (sl.isFlashback) flags.push('flashback');
+        if (sl.isImagined) flags.push('imagined');
+        const flagStr = flags.length > 0 ? ` (${flags.join(', ')})` : '';
+        const time = sl.timeDelta ? ` ${sl.timeDelta}` : '';
+        return `- ${sl.id}${flagStr}${time}`;
+    }).join('\n');
 
     const systemPrompt = CUTS_SYSTEM_PROMPT
         .replace('{CHARACTER_CONTEXT}', charContext)
-        .replace('{LOCATION_CONTEXT}', locContext);
+        .replace('{LOCATION_CONTEXT}', locContext)
+        .replace('{SCENELAYER_CONTEXT}', layerContext);
 
     const numberedLines = lines.map(l => `[${l.lineNum}] ${l.text}`).join('\n');
 
@@ -329,12 +527,86 @@ export async function convertNarrationToCutsBatch(
         cut.pose = toStr(cut.pose);
         cut.location = toStr(cut.location);
         if (!cut.originLine) cut.originLine = lines[0].lineNum;
+        // ★ sceneLayerId — string 강제 + 미등록 id는 빈 값으로 (후처리에서 직전 컷 상속)
+        cut.sceneLayerId = (cut as any).sceneLayerId ? toStr((cut as any).sceneLayerId) : undefined;
         // ★ Phase A.5: 자연어 4필드도 string 강제 (Claude array 반환 방어)
         cut.sceneNarrative = toStr((cut as any).sceneNarrative);
         cut.cameraNote = toStr((cut as any).cameraNote);
         cut.moodNote = toStr((cut as any).moodNote);
         cut.detailsNarrative = toStr((cut as any).detailsNarrative);
     }
+
+    // ===== sceneLayerId — 후처리 안전망 =====
+    // 1) 미등록 id → 빈 값으로 정리 (직전 컷 상속 후보)
+    // 2) 빈 컷 → 직전 컷의 sceneLayerId 상속
+    // 3) 첫 컷이 빈 경우 → "현재" 폴백
+    const validLayerIdsForCut = new Set(layerArr.map(sl => sl.id));
+    let sceneLayerInheritCount = 0;
+    let sceneLayerDefaultCount = 0;
+    let prevLayerId: string | undefined = undefined;
+    parsed.forEach((cut: any, i: number) => {
+        let layerId: string | undefined = cut.sceneLayerId;
+        // 미등록 id면 폐기
+        if (layerId && !validLayerIdsForCut.has(layerId)) {
+            console.warn(`[USS-FALLBACK] cut ${i + 1} sceneLayerId="${layerId}" 미등록 → 폐기 후 직전 컷 상속`);
+            layerId = undefined;
+        }
+        // 비어있으면 직전 컷 상속, 첫 컷이면 "현재"
+        if (!layerId) {
+            if (prevLayerId) {
+                layerId = prevLayerId;
+                sceneLayerInheritCount++;
+            } else {
+                layerId = '현재';
+                sceneLayerDefaultCount++;
+            }
+        }
+        cut.sceneLayerId = layerId;
+        prevLayerId = layerId;
+    });
+    if (sceneLayerInheritCount > 0 || sceneLayerDefaultCount > 0) {
+        console.warn(
+            `[USS-FALLBACK] sceneLayerId 보강: 직전 컷 상속 ${sceneLayerInheritCount}건, ` +
+            `"현재" 폴백 ${sceneLayerDefaultCount}건 (전체 ${parsed.length}컷)`
+        );
+    }
+
+    // ===== Speaker Presence — 후처리 안전망 =====
+    // LLM이 새 프롬프트(rule 13~16)를 따르지 못해 빈 characters를 출력하는 케이스 방어.
+    // 한국어는 \b가 작동하지 않으므로 [^가-힣] boundary 사용.
+    // 1) 명시 1인칭 + 조사 (나/내가/난/나는/나도/나만/우리/우린/우릴/우리가)
+    const FIRST_PERSON_EXPLICIT = /(^|[^가-힣])(나|내가|난|나는|나도|나만|우리|우린|우릴|우리가)([은는이가도만의를을과와에게로한테]|\s|[.,!?…"')\]]|$)/;
+    // 2) "내 + 공백 + 한글" — 소유격 ("내 친구", "내 동생"). "내일/내년/내성적" 차단
+    const POSSESSIVE_NAE = /(^|[^가-힣])내\s+[가-힣]/;
+    // 3) "날 + 공백 + 한글" — 목적격 ("날 좋아한대", "날 보더니"). "날씨/날개/날아" 차단
+    const OBJECT_NAL = /(^|[^가-힣])날\s+[가-힣]/;
+
+    // 화자 식별: isSpeaker 우선, fallback은 첫 번째 캐릭터
+    const speaker = characters.find(c => c.isSpeaker === true) || characters[0];
+
+    if (speaker) {
+        const speakerKey = speaker.canonicalName || speaker.name;
+
+        parsed.forEach((cut: any, i: number) => {
+            const currentChars = cut.characters || [];
+            if (currentChars.length === 0 && cut.narration) {
+                const isFirstPerson =
+                    FIRST_PERSON_EXPLICIT.test(cut.narration) ||
+                    POSSESSIVE_NAE.test(cut.narration) ||
+                    OBJECT_NAL.test(cut.narration);
+
+                if (isFirstPerson) {
+                    cut.characters = [speakerKey];
+                    console.warn(
+                        `[USS-FALLBACK] cut ${i + 1} 빈 characters + 1인칭 나레이션 ` +
+                        `→ speaker '${speakerKey}' 자동 삽입 ` +
+                        `(narration: "${String(cut.narration).slice(0, 30)}...")`
+                    );
+                }
+            }
+        });
+    }
+    // ===== End Speaker Presence 후처리 =====
 
     return { cuts: parsed, tokenCount: result.totalTokens || 0 };
 }
@@ -346,6 +618,7 @@ export async function convertAllNarrationToCuts(
     script: string,
     characters: USSCharacter[],
     locations: USSLocation[],
+    sceneLayers: SceneLayer[] | undefined,
     opts?: {
         batchSize?: number;  // 하위 호환용 (무시됨)
         storyBrief?: string;
@@ -359,7 +632,7 @@ export async function convertAllNarrationToCuts(
     opts?.onProgress?.(0, 1, `🎬 컷 변환 중... (전체 ${rawLines.length}줄 → Claude 1회 호출)`);
 
     const { cuts, tokenCount } = await convertNarrationToCutsBatch(
-        allLines, characters, locations,
+        allLines, characters, locations, sceneLayers,
         {
             onProgress: (text) => opts?.onProgress?.(0, 1, text),
             storyBrief: opts?.storyBrief,
@@ -473,6 +746,20 @@ export function ussToAppData(
     if (setupEndCut === 0) setupEndCut = Math.floor(totalCuts / 3);
     if (confrontationEndCut === 0) confrontationEndCut = Math.floor(totalCuts * 2 / 3);
 
+    // ★ sceneLayers — Step 1 LLM 추출 결과 우선, 없으면 "현재" 단일 레이어 폴백
+    const finalSceneLayers: SceneLayer[] = (structure as any).sceneLayers && (structure as any).sceneLayers.length > 0
+        ? (structure as any).sceneLayers
+        : [{ id: '현재', label: '현재', toneModifier: 'none' }];
+    const defaultLayerId = finalSceneLayers[0].id;
+    // ★ outfitSessions — sceneLayer × location 곱셈으로 의상 세션 생성 (회상/현재 분리)
+    const outfitSessions = finalSceneLayers.flatMap(sl =>
+        locations.map(l => ({
+            location: l.name,
+            layerId: sl.id,
+            lineRange: [1, totalCuts] as [number, number],
+        }))
+    );
+
     const scenarioAnalysis: ScenarioAnalysis = {
         genre: meta.genre,
         tone: meta.tone,
@@ -488,13 +775,9 @@ export function ussToAppData(
         // Phase 7: LocationEntry[]. USS 파이프라인은 이름에서 카테고리 자동 유추 (휴리스틱).
         locations: locations.map(l => ({ name: l.name, category: inferLocationCategory(l.name) })),
         locationVisualDNA,
-        // ★ Phase B v3: USS도 outfitSessions/sceneLayers를 채워서 Context 모드 + 배치 패널 활성화
-        sceneLayers: [{ id: 'current', label: '현재', toneModifier: 'none' }],
-        outfitSessions: locations.map(l => ({
-            location: l.name,
-            layerId: 'current',
-            lineRange: [1, totalCuts] as [number, number],
-        })),
+        // ★ Step 1 LLM 추출 sceneLayers를 그대로 사용 (이전 'current' 하드코딩 → 정상 흐름)
+        sceneLayers: finalSceneLayers,
+        outfitSessions,
     };
 
     // ── location 정규화 함수: 시각 묘사가 들어온 경우 가장 가까운 장소명으로 매칭 ──
@@ -557,6 +840,11 @@ export function ussToAppData(
             }).filter(Boolean).join(', ');
         }
 
+        // ★ sceneLayerId — Step 3 출력 우선, 누락 시 폴백 (이미 convertNarrationToCutsBatch 후처리에서 채워짐)
+        const cutLayerId = cut.sceneLayerId && finalSceneLayers.some(sl => sl.id === cut.sceneLayerId)
+            ? cut.sceneLayerId
+            : defaultLayerId;
+
         return {
             id: `C${String(i + 1).padStart(3, '0')}`,
             cutType: mapCutType(cut.cutType),
@@ -564,6 +852,7 @@ export function ussToAppData(
             narration: cut.narration,
             characters: cut.characters,
             location: normalizedLoc,
+            sceneLayerId: cutLayerId,
             visualDescription: cut.action,
             emotionBeat: cut.emotion,
             characterPose: cut.pose,
@@ -622,14 +911,31 @@ function recoverTruncatedJsonArray(raw: string): any[] | null {
 const VISUAL_NARRATIVE_SYSTEM_PROMPT = `You are a Korean webtoon/animation short film director.
 Analyze the given USS script and produce visual narrative analysis scene-by-scene.
 
-Use the structural metadata (characters, locations, act boundaries) provided in the
-user message as context. Identify scene boundaries using actBoundaries + your visual
-judgment (additional cuts for flashback, viewpoint shift, location change).
+Use the structural metadata (characters, locations, sceneLayers, act boundaries)
+provided in the user message as context. Identify scene boundaries using actBoundaries
++ your visual judgment (additional cuts for flashback, viewpoint shift, location change).
+
+# SCENE LAYER ASSIGNMENT (CRITICAL)
+The user message includes a 'sceneLayers' list (e.g., ["현재", "어린시절_과거", "상상_미래"]).
+For EVERY scene, you MUST assign exactly ONE sceneLayerId from this list.
+
+★ Treat sceneLayer transitions as scene boundaries.
+   Even if 3 consecutive lines are in the same physical location, if the timeline shifts
+   (e.g., "현재" → "어린시절_과거" → "현재"), split them into 3 SEPARATE scenes.
+
+★ Detect timeline transition signals:
+   - 회상 진입: "어렸을 때", "옛날에", "그때", "10년 전", "어머니가 살아계실 때",
+                past-perfect tense bursts ("~했었다", "~했더랬어")
+   - 상상 진입: "만약 ~라면", "상상해보니", "꿈에서", "혹시"
+   - 현재 복귀: "그러다 정신을 차리니", "지금은", "현재", or natural return to direct action
+
+★ Default to "현재" when ambiguous. Empty/missing sceneLayerId costs visual coherence.
 
 For each scene, produce a SceneVisualAnalysis object with:
 - sceneId: "scene-1", "scene-2", etc.
 - sceneIndex: 1-indexed
 - lineRange: [startLine, endLine] (1-indexed inclusive — line numbers from the script)
+- sceneLayerId: ONE id from the sceneLayers list (e.g., "현재", "어린시절_과거")
 - sceneNarrative: ENGLISH 2~3 sentences. Where, when, atmosphere. Visualize as if
   directing a film: lighting, time of day, weather, density of background, mood.
 - subjectDescription: ENGLISH. Which characters appear, their visual state in this
@@ -651,6 +957,7 @@ OUTPUT: Valid JSON only. No markdown fences, no explanation.
       "sceneId": "scene-1",
       "sceneIndex": 1,
       "lineRange": [1, 12],
+      "sceneLayerId": "현재",
       "sceneNarrative": "...",
       "subjectDescription": "...",
       "detailsNarrative": "...",
@@ -685,6 +992,19 @@ export async function analyzeVisualNarrative(
     const actBounds = structure.meta.actBoundaries
         ? `setupEnds @ line ${structure.meta.actBoundaries.setupEndLine}, confrontationEnds @ line ${structure.meta.actBoundaries.confrontationEndLine}, totalLines ${lines.length}`
         : `totalLines ${lines.length}`;
+    // ★ sceneLayers 컨텍스트 — Step 2의 sceneLayerId 부여 결정에 사용
+    const layerList = (structure.sceneLayers && structure.sceneLayers.length > 0)
+        ? structure.sceneLayers
+        : [{ id: '현재', label: '현재', toneModifier: 'none' as const }];
+    const layerSummary = layerList.map(sl => {
+        const flags: string[] = [];
+        if (sl.isFlashback) flags.push('flashback');
+        if (sl.isImagined) flags.push('imagined');
+        const flagStr = flags.length > 0 ? ` (${flags.join(', ')})` : '';
+        const tone = sl.toneModifier && sl.toneModifier !== 'none' ? ` [tone: ${sl.toneModifier}]` : '';
+        const time = sl.timeDelta ? ` ${sl.timeDelta}` : '';
+        return `- ${sl.id}${flagStr}${time}${tone}`;
+    }).join('\n');
 
     const userMessage = `[Title] ${structure.meta.title || '(no title)'}
 [Genre] ${structure.meta.genre || ''} / [Tone] ${structure.meta.tone || ''} / [ColorMood] ${structure.meta.colorMood || ''}
@@ -695,6 +1015,9 @@ ${charSummary}
 
 [Locations]
 ${locSummary}
+
+[SceneLayers — choose ONE per scene]
+${layerSummary}
 
 [Script — 1-indexed lines]
 ${numberedScript}`;
@@ -746,6 +1069,31 @@ ${numberedScript}`;
             : undefined,
     }));
 
-    console.log(`[Phase A.5] Visual analysis: ${valid.length} scenes`);
+    // ===== sceneLayerId 검증 + 폴백 =====
+    // 사용 가능한 layer id set
+    const validLayerIds = new Set(layerList.map(sl => sl.id));
+    let layerFallbackCount = 0;
+    for (const va of valid) {
+        // 누락 또는 등록되지 않은 layer id → "현재"로 폴백
+        if (!va.sceneLayerId || !validLayerIds.has(va.sceneLayerId)) {
+            const original = va.sceneLayerId;
+            va.sceneLayerId = '현재';
+            layerFallbackCount++;
+            if (original) {
+                console.warn(`[USS-FALLBACK] scene ${va.sceneId} sceneLayerId="${original}" 미등록 → "현재"로 폴백`);
+            }
+        }
+    }
+    if (layerFallbackCount > 0 && layerFallbackCount === valid.length && layerList.length > 1) {
+        console.warn(`[USS-FALLBACK] 모든 ${valid.length}씬이 sceneLayerId 누락 → 전부 "현재" 처리 (LLM이 layer 활용 못함)`);
+    }
+
+    const layerDist = new Map<string, number>();
+    valid.forEach(va => {
+        const k = va.sceneLayerId || '현재';
+        layerDist.set(k, (layerDist.get(k) || 0) + 1);
+    });
+    const distStr = Array.from(layerDist.entries()).map(([k, n]) => `${k}:${n}`).join(', ');
+    console.log(`[Phase A.5] Visual analysis: ${valid.length} scenes [${distStr}]`);
     return { visualAnalysis: valid, tokenCount: result.totalTokens || 0 };
 }

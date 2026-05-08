@@ -822,6 +822,7 @@ export async function runUSSPipeline(
             userInputScript,
             structure.characters,
             structure.locations,
+            (structure as any).sceneLayers,  // ★ Step 2 sceneLayers를 컷 변환에 전달 (sceneLayerId 부여용)
             {
                 batchSize: 12,
                 storyBrief: stateRef.current.storyBrief || undefined,

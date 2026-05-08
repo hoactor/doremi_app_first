@@ -90,11 +90,41 @@ export function createProjectActions(h: ProjectActionHelpers) {
                 dispatch({ type: 'START_LOADING', payload: '프로젝트 불러오는 중...' });
                 const metadata = await loadProjectMetadata(projectId);
                 const restoredState = restoreStateFromProject(metadata);
+                // ★ 진단: 복원된 state의 핵심 필드 출력
+                const sceneCount = restoredState.generatedContent?.scenes?.length || 0;
+                const cutCount = (restoredState.generatedContent?.scenes || []).reduce(
+                    (sum: number, s: any) => sum + (s.cuts?.length || 0), 0
+                );
+                console.log(
+                    `[handleOpenProject] 복원: appState=${restoredState.appState}, ` +
+                    `scenes=${sceneCount}, cuts=${cutCount}, ` +
+                    `pipelineCheckpoint=${restoredState.pipelineCheckpoint}, ` +
+                    `enrichedBeats=${restoredState.enrichedBeats ? restoredState.enrichedBeats.length : 'null'}, ` +
+                    `contiCuts=${restoredState.contiCuts ? restoredState.contiCuts.length : 'null'}, ` +
+                    `editableStoryboard=${restoredState.editableStoryboard ? 'present' : 'null'}`
+                );
+
                 dispatch({ type: 'RESTORE_STATE', payload: restoredState });
                 dispatch({ type: 'SET_CURRENT_PROJECT_ID', payload: projectId });
                 dispatch({ type: 'SET_PROJECT_SAVED', payload: true });
                 setUIState(initialUIState);
-                addNotification('프로젝트를 불러왔습니다.', 'success');
+
+                // ★ scenes 비어있으면 사용자에게 명시적 경고
+                if (sceneCount === 0) {
+                    if (restoredState.pipelineCheckpoint === 'enriched_pause' && restoredState.enrichedBeats) {
+                        addNotification('연출 대본 편집 단계에서 저장된 프로젝트입니다. 편집을 이어서 진행하세요.', 'info');
+                    } else if (restoredState.pipelineCheckpoint === 'conti_pause' && restoredState.contiCuts) {
+                        addNotification('콘티 컷 편집 단계에서 저장된 프로젝트입니다. 편집을 이어서 진행하세요.', 'info');
+                    } else {
+                        addNotification(
+                            '프로젝트는 불러왔지만 컷 데이터가 비어있습니다. ' +
+                            '분석 완료 전에 저장된 것 같습니다. 콘솔 로그에서 상세 상태 확인 가능.',
+                            'warning'
+                        );
+                    }
+                } else {
+                    addNotification(`프로젝트를 불러왔습니다. (${sceneCount}씬, ${cutCount}컷)`, 'success');
+                }
             } catch (err: any) { addNotification(`불러오기 실패: ${err.message || err}`, 'error'); }
             finally { dispatch({ type: 'STOP_LOADING' }); }
         },
