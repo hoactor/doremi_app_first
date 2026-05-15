@@ -228,7 +228,7 @@ struct ClaudeRequest {
 async fn proxy_claude(request: ClaudeRequest) -> Result<serde_json::Value, String> {
     let api_key = get_api_key("claude")?;
     let mut body = serde_json::json!({
-        "model": request.model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
+        "model": request.model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
         "max_tokens": request.max_tokens.unwrap_or(8192),
         "messages": request.messages,
     });
@@ -263,7 +263,7 @@ async fn proxy_claude_stream(
 ) -> Result<(), String> {
     let api_key = get_api_key("claude")?;
     let mut body = serde_json::json!({
-        "model": request.model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
+        "model": request.model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
         "max_tokens": request.max_tokens.unwrap_or(8192),
         "messages": request.messages,
         "stream": true,
