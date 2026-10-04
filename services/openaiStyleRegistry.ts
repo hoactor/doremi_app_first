@@ -3,7 +3,7 @@
 // Gemini/Flux 경로와는 완전히 격리 (CLAUDE.md 절대 규칙).
 
 import type { OpenAIStylePreset, OpenAIStyleRegistry } from '../types';
-import { loadOpenAIStyles, saveOpenAIStyles } from './tauriAdapter';
+import { IS_TAURI, loadOpenAIStyles, saveOpenAIStyles } from './tauriAdapter';
 
 // ─── 빌트인 시드 ────────────────────────────────────────────────────
 
@@ -52,6 +52,11 @@ let cached: OpenAIStyleRegistry | null = null;
 export async function loadStyleRegistry(): Promise<OpenAIStyleRegistry> {
     if (cached) return cached;
 
+    if (!IS_TAURI) {
+        cached = mergeWithBuiltins(null);
+        return cached;
+    }
+
     let raw: OpenAIStyleRegistry | null = null;
     try {
         raw = await loadOpenAIStyles();
@@ -66,7 +71,9 @@ export async function loadStyleRegistry(): Promise<OpenAIStyleRegistry> {
 /** 사용자 변경사항 저장 후 캐시 갱신. */
 export async function saveStyleRegistry(reg: OpenAIStyleRegistry): Promise<void> {
     const merged = mergeWithBuiltins(reg);
-    await saveOpenAIStyles(merged);
+    if (IS_TAURI) {
+        await saveOpenAIStyles(merged);
+    }
     cached = merged;
 }
 

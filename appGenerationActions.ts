@@ -192,11 +192,11 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                         }
                         return undefined;
                     })();
-                    const modelName = stateRef.current.selectedImageEngine === 'flux' ? (stateRef.current.selectedFluxModel || 'flux-pro') : stateRef.current.selectedNanoModel;
+                    const modelName = stateRef.current.selectedImageEngine === 'flux' ? (stateRef.current.selectedFluxModel || 'flux-2-flex') : stateRef.current.selectedNanoModel;
                     const newImage = createGeneratedImage({ id: imgId, imageUrl: resultImageUrl, localPath, sourceCutNumber: cut.cutNumber, prompt, model: modelName, artStyleLabel });
                     dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImage, cutNumber: cut.cutNumber } });
                     if (stateRef.current.selectedImageEngine === 'flux') {
-                        dispatch({ type: 'ADD_FAL_USAGE', payload: { images: 1, model: stateRef.current.selectedFluxModel || 'flux-pro' } });
+                        dispatch({ type: 'ADD_FAL_USAGE', payload: { images: 1, model: stateRef.current.selectedFluxModel || 'flux-2-flex' } });
                     } else {
                         handleAddUsage(tokenCountUsed, 'gemini');
                     }
@@ -455,7 +455,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 imageUrl = r.imageUrl; tokenCount = r.tokenCount;
             }
             if (stateRef.current.selectedImageEngine === 'flux') {
-                dispatch({ type: 'ADD_FAL_USAGE', payload: { images: 1, model: stateRef.current.selectedFluxModel || 'flux-pro' } });
+                dispatch({ type: 'ADD_FAL_USAGE', payload: { images: 1, model: stateRef.current.selectedFluxModel || 'flux-2-flex' } });
             } else if (tokenCount > 0) {
                 handleAddUsage(tokenCount, 'gemini');
             }
@@ -472,7 +472,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
                 }
                 return undefined;
             })();
-            const modelName2 = s.selectedImageEngine === 'flux' ? (s.selectedFluxModel || 'flux-pro') : s.selectedNanoModel;
+            const modelName2 = s.selectedImageEngine === 'flux' ? (s.selectedFluxModel || 'flux-2-flex') : s.selectedNanoModel;
             const newImage = createGeneratedImage({ id: imgId, imageUrl, localPath, sourceCutNumber: cutNumber, prompt, model: modelName2, tag: mode === 'rough' ? 'rough' : 'normal', artStyleLabel: artStyleLabel2 });
             dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImage, cutNumber } });
         } catch (err: any) { addNotification(`#${cutNumber} ${mode === 'rough' ? '러프' : '일반'} 실패: ${err.message?.slice(0, 50)}`, 'error', { label: '재시도', callback: () => handleGenerateForCut(cutNumber, mode) }); }
@@ -505,6 +505,72 @@ export function createGenerationActions(h: GenerationActionHelpers) {
         }
     };
 
+    const applyRefinedFieldChanges = async (cut: Cut, fieldChanges: Record<string, any>, state: any) => {
+        const merged: any = { ...cut };
+        const characters = fieldChanges.characters || [...cut.characters];
+        merged.characters = characters;
+        for (const [key, value] of Object.entries(fieldChanges)) {
+            if (key !== 'characters' && value !== undefined) merged[key] = value;
+        }
+
+        // 인물 구성이 바뀌면 의상과 최종 프롬프트를 항상 함께 재조립한다.
+        if (fieldChanges.characters) {
+            merged.characterOutfit = buildMechanicalOutfit(
+                characters,
+                state.characterDescriptions,
+                merged.location,
+                { sceneLayerId: merged.sceneLayerId },
+            );
+        }
+
+        const promptCtx: PromptContext = {
+            characterDescriptions: state.characterDescriptions,
+            locationVisualDNA: state.locationVisualDNA || {},
+            cinematographyPlan: state.cinematographyPlan || null,
+            imageRatio: state.imageRatio || '1:1',
+            artStyle: state.artStyle,
+        };
+        const customStyleBlock = (state.selectedImageEngine === 'openai' && state.selectedDalleStyleId)
+            ? await getStyleBlockById(state.selectedDalleStyleId)
+            : undefined;
+        let imagePrompt: string;
+        if (state.selectedImageEngine === 'openai') {
+            imagePrompt = sanitizeChildSafety(buildGptImage2Prompt({
+                cut: merged,
+                characterDescriptions: state.characterDescriptions,
+                scenarioAnalysis: state.scenarioAnalysis,
+                cinematographyPlan: state.cinematographyPlan,
+                artStyle: state.artStyle || 'normal',
+                customArtStyle: state.customArtStyle || '',
+                imageRatio: state.imageRatio || '1:1',
+                hasReference: (merged.characters || []).some((key: string) => {
+                    const character = state.characterDescriptions[key];
+                    return character && !!pickBestCharacterReferenceUrl(character, merged.sceneLayerId);
+                }),
+                customStyleBlock,
+            }));
+        } else if (state.selectedImageEngine === 'flux') {
+            const fluxContext: FluxPromptContext = {
+                ...promptCtx,
+                loraRegistry: loraRegistryRef.current,
+                styleLoraId: state.styleLoraId,
+                fluxModel: state.selectedFluxModel || 'flux-2-flex',
+            };
+            // 프롬프트 수정 자체에서 이미 AI를 호출했으므로 숨은 추가 과금 없이
+            // Flux 전용 자연어 빌더로만 재조립한다.
+            imagePrompt = await buildFluxPromptSmart(merged, fluxContext, { useClaude: false });
+        } else {
+            imagePrompt = sanitizeChildSafety(buildFinalPrompt(merged, promptCtx));
+        }
+
+        const update: Partial<Cut> = { ...fieldChanges, imagePrompt };
+        if (fieldChanges.characters) {
+            update.characters = characters;
+            update.characterOutfit = merged.characterOutfit;
+        }
+        dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: cut.cutNumber, data: update } });
+    };
+
     const handleRefinePrompt = async (cutNumber: string, request: string) => {
         if (!request.trim()) return;
         const s = stateRef.current;
@@ -520,42 +586,7 @@ export function createGenerationActions(h: GenerationActionHelpers) {
             });
             handleAddUsage(tokenCount, 'claude');
             if (!Object.keys(fieldChanges).length) { addNotification(`#${cutNumber}: 수정 사항 없음`, 'info'); return; }
-
-            const merged: any = { ...cut };
-            const chars = fieldChanges.characters || [...cut.characters];
-            merged.characters = chars;
-            for (const [k, v] of Object.entries(fieldChanges)) { if (k !== 'characters' && v !== undefined) merged[k] = v; }
-
-            // characters 변경 시 characterOutfit 재조립
-            if (fieldChanges.characters) {
-                merged.characterOutfit = buildMechanicalOutfit(chars, s.characterDescriptions, cut.location, { sceneLayerId: cut.sceneLayerId });
-            }
-            const promptCtx: PromptContext = { characterDescriptions: s.characterDescriptions, locationVisualDNA: s.locationVisualDNA || {}, cinematographyPlan: s.cinematographyPlan || null, imageRatio: s.imageRatio || '1:1', artStyle: s.artStyle };
-            // ★ Phase B: OpenAI 엔진이면 자연어 프롬프트로 빌드, 그 외는 Gemini SD 프롬프트
-            const customStyleBlockRefine = (s.selectedImageEngine === 'openai' && s.selectedDalleStyleId)
-                ? await getStyleBlockById(s.selectedDalleStyleId)
-                : undefined;
-            const newPrompt = s.selectedImageEngine === 'openai'
-                ? sanitizeChildSafety(buildGptImage2Prompt({
-                    cut: merged,
-                    characterDescriptions: s.characterDescriptions,
-                    scenarioAnalysis: s.scenarioAnalysis,
-                    cinematographyPlan: s.cinematographyPlan,
-                    artStyle: s.artStyle || 'normal',
-                    customArtStyle: s.customArtStyle || '',
-                    imageRatio: s.imageRatio || '1:1',
-                    hasReference: (merged.characters || []).some((k: string) => {
-                        const c = s.characterDescriptions[k];
-                        return c && !!pickBestCharacterReferenceUrl(c, merged.sceneLayerId);
-                    }),
-                    customStyleBlock: customStyleBlockRefine,
-                }))
-                : sanitizeChildSafety(buildFinalPrompt(merged, promptCtx));
-            const upd: Partial<Cut> = { ...fieldChanges, imagePrompt: newPrompt };
-            if (fieldChanges.characters) upd.characterOutfit = merged.characterOutfit;
-            delete (upd as any).characters;
-            dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: upd } });
-            if (fieldChanges.characters) dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { characters: chars } } });
+            await applyRefinedFieldChanges(cut, fieldChanges, s);
             addNotification(`#${cutNumber} 수정 완료`, 'success');
         } catch (err: any) { addNotification(`수정 실패: ${err.message?.slice(0, 50)}`, 'error', { label: '재시도', callback: () => handleRefinePrompt(cutNumber, request) }); }
         finally { dispatch({ type: 'UPDATE_CUT', payload: { cutNumber, data: { imageLoading: false } } }); }
@@ -567,11 +598,34 @@ export function createGenerationActions(h: GenerationActionHelpers) {
         // 전체 화면 로딩 대신 각 컷에 imageLoading 표시
         allCuts.forEach((c: Cut) => dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: c.cutNumber, data: { imageLoading: true } } }));
         try {
-            const data = allCuts.map((c: Cut) => ({ cutNumber: c.cutNumber, prompt: c.imagePrompt || '', scene: c.location, narration: c.narration }));
+            const data = allCuts.map((c: Cut) => ({
+                cutNumber: c.cutNumber,
+                prompt: c.imagePrompt || '',
+                scene: c.location,
+                narration: c.narration,
+                characters: [...c.characters],
+                cutFields: {
+                    characterPose: c.characterPose,
+                    characterEmotionAndExpression: c.characterEmotionAndExpression,
+                    characterOutfit: c.characterOutfit,
+                    sceneDescription: c.sceneDescription,
+                    location: c.location,
+                    locationDescription: c.locationDescription,
+                    directorialIntent: c.directorialIntent,
+                    otherNotes: c.otherNotes,
+                    cameraAngle: c.cameraAngle,
+                },
+            }));
             const { refinedCuts, tokenCount } = await refineAllPromptsWithAI(data, request);
             handleAddUsage(tokenCount, 'claude');
             let cnt = 0;
-            refinedCuts.forEach((r: any) => { if (r.changed) { dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: r.cutNumber, data: { imagePrompt: r.refinedPrompt } } }); cnt++; } });
+            for (const refined of refinedCuts) {
+                if (!refined.changed) continue;
+                const cut = allCuts.find((candidate: Cut) => candidate.cutNumber === refined.cutNumber);
+                if (!cut) continue;
+                await applyRefinedFieldChanges(cut, refined.fieldChanges, stateRef.current);
+                cnt++;
+            }
             addNotification(`${cnt}개 컷 수정 완료`, 'success');
         } catch { addNotification('일괄 수정 실패', 'error', { label: '재시도', callback: () => handleBatchRefine(request) }); }
         finally { allCuts.forEach((c: Cut) => dispatch({ type: 'UPDATE_CUT', payload: { cutNumber: c.cutNumber, data: { imageLoading: false } } })); }

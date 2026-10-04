@@ -91,8 +91,10 @@ export const UnifiedImageStudio: React.FC = () => {
 
     // ── 메인 앱 → 스튜디오 IPC 수신 ──
     useEffect(() => {
+        let disposed = false;
         let unlistenInit: (() => void) | null = null;
         listen('image-studio-init', (payload: ImageStudioInitPayload) => {
+            if (disposed) return;
             setInitContext(payload);
             if (payload.mode) setMode(payload.mode);
             if (payload.initialAssetType) setAssetType(payload.initialAssetType);
@@ -100,12 +102,16 @@ export const UnifiedImageStudio: React.FC = () => {
                 setCurrentImage(payload.initialImageUrl);
                 if (payload.mode === undefined) setMode('edit');
             }
-        }).then(u => { unlistenInit = u; });
+        }).then(u => {
+            if (disposed) u();
+            else unlistenInit = u;
+        }).catch(error => console.warn('[UnifiedImageStudio] init listener 실패', error));
 
         const handleBeforeUnload = () => { emit('image-studio-window-closed').catch(() => {}); };
         window.addEventListener('beforeunload', handleBeforeUnload);
 
         return () => {
+            disposed = true;
             unlistenInit?.();
             window.removeEventListener('beforeunload', handleBeforeUnload);
         };
@@ -134,10 +140,14 @@ export const UnifiedImageStudio: React.FC = () => {
 
     useEffect(() => {
         reloadStyles();
+        let disposed = false;
         let unlisten: (() => void) | null = null;
         listen('openai-styles-updated', () => reloadStyles())
-            .then(u => { unlisten = u; }).catch(() => {});
-        return () => { unlisten?.(); };
+            .then(u => {
+                if (disposed) u();
+                else unlisten = u;
+            }).catch(() => {});
+        return () => { disposed = true; unlisten?.(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -273,11 +283,21 @@ export const UnifiedImageStudio: React.FC = () => {
     // ── 컷에 적용 ──
     const handleApplyToCut = async () => {
         if (!currentImage || !initContext?.sourceCutNumber) return;
+        const sourceEngine = history.find(item => item.imageUrl === currentImage)?.engine || engine;
+        const imageMetadata = sourceEngine === 'gemini'
+            ? { engine: 'nano-v3' as const, model: 'nano-3.1' }
+            : sourceEngine === 'flux'
+                ? { engine: 'flux' as const, model: 'flux-2-flex' }
+                : sourceEngine === 'openai-dalle3'
+                    ? { engine: 'dalle3' as const, model: 'dall-e-3' }
+                    : { engine: 'gpt-image-2' as const, model: 'gpt-image-2' };
         try {
             await emit('image-studio-apply-to-cut', {
                 cutNumber: initContext.sourceCutNumber,
                 imageUrl: currentImage,
                 prompt: prompt.trim(),
+                ...imageMetadata,
+                tag: 'normal',
             });
             setStatusMessage(`컷 ${initContext.sourceCutNumber}에 적용됨`);
             setTimeout(() => setStatusMessage(null), 3000);

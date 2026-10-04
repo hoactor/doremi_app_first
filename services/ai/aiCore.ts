@@ -8,7 +8,7 @@ import { IS_TAURI, getGeminiApiKey } from '../tauriAdapter';
 import { CharacterDescription, GeneratedScript, ImageRatio, Scene, Cut, SceneDirectionTheme, CharacterLocationStyle, CharacterImage, ComicPanelPlan, LibraryAsset, MasterStyleGuide, Gender, EditableScene, EditableCut, CostumeSuggestion, TextEditingTarget, ScenarioAnalysis, CharacterBible, ContiCut, CinematographyCut, CinematographyPlan, CutType } from '../../types';
 
 /**
- * Gemini AI 인스턴스 생성 — Tauri: Store에서 키 로드, 브라우저: process.env
+ * Gemini AI 인스턴스 생성 — API 키는 Tauri/Keychain에서만 읽는다.
  */
 let _cachedGeminiKey: string | null = null;
 export async function getGeminiAI(): Promise<GoogleGenAI> {
@@ -18,7 +18,7 @@ export async function getGeminiAI(): Promise<GoogleGenAI> {
         }
         return new GoogleGenAI({ apiKey: _cachedGeminiKey });
     }
-    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+    throw new Error('Gemini 기능은 로컬 Tauri 앱에서만 사용할 수 있습니다.');
 }
 /** 키 변경 시 캐시 초기화 (설정 저장 후 호출) */
 export function clearGeminiKeyCache() { _cachedGeminiKey = null; }
@@ -109,7 +109,7 @@ export async function callTextModelStream(
 }
 
 /**
- * ★ Phase 12+: base64 이미지 리사이즈 (Claude Vision 5MB 한도)
+ * ★ Phase 12+: base64 이미지 리사이즈
  */
 /**
  * ★ Phase 12+: base64 매직 바이트로 실제 MIME 감지 (확장자 불일치 대응)
@@ -122,7 +122,7 @@ function detectActualMimeType(base64: string, declaredMime: string): string {
     return declaredMime;
 }
 
-async function resizeBase64IfNeeded(base64: string, mimeType: string, maxBytes: number = 4 * 1024 * 1024): Promise<{ base64: string; mimeType: string }> {
+async function resizeBase64IfNeeded(base64: string, mimeType: string, maxBytes: number = 12 * 1024 * 1024): Promise<{ base64: string; mimeType: string }> {
     const byteSize = Math.ceil(base64.length * 3 / 4);
     if (byteSize <= maxBytes) return { base64, mimeType };
     console.log(`[Vision] 이미지 리사이즈: ${(byteSize / 1024 / 1024).toFixed(1)}MB → ~${(maxBytes / 1024 / 1024).toFixed(0)}MB`);
@@ -153,7 +153,7 @@ export async function callVisionTextModel(
     mimeType: string,
     options?: { seed?: number; responseMimeType?: string }
 ): Promise<{ text: string; tokenCount: number }> {
-    // ★ 확장자-내용 불일치 MIME 보정 + 5MB 초과 이미지 자동 리사이즈
+    // ★ 확장자-내용 불일치 MIME 보정 + 12MB 초과 이미지 자동 리사이즈
     const correctedMime = detectActualMimeType(imageBase64, mimeType);
     if (correctedMime !== mimeType) console.log(`[Vision] MIME 보정: ${mimeType} → ${correctedMime}`);
     const resized = await resizeBase64IfNeeded(imageBase64, correctedMime);

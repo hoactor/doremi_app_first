@@ -120,9 +120,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     // 멀티윈도우 동기화: 다른 창에서 화풍 변경 시 reload
     useEffect(() => {
+        let disposed = false;
         let unlisten: (() => void) | null = null;
-        listen('openai-styles-updated', () => { refreshDalleStyles(); }).then(u => { unlisten = u; }).catch(() => {});
-        return () => { unlisten?.(); };
+        listen('openai-styles-updated', () => { if (!disposed) refreshDalleStyles(); }).then(u => {
+            if (disposed) u();
+            else unlisten = u;
+        }).catch(() => {});
+        return () => { disposed = true; unlisten?.(); };
     }, [refreshDalleStyles]);
 
     const effectiveDalleStyleId = selectedDalleStyleId || dalleDefaultId;
@@ -430,10 +434,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 ) : (
                                 <>
                                 <div className="grid grid-cols-3 gap-1.5">
-                                    {([['flux-pro','Pro'],['flux-flex','Flex'],['flux-lora','LoRA']] as const).map(([val,label]) => (
+                                    {([['flux-pro','Pro'],['flux-2-flex','Flex'],['flux-lora','LoRA']] as const).map(([val,label]) => (
                                         <button key={val} onClick={() => dispatch({ type: 'SET_FLUX_MODEL', payload: val as any })}
                                             className={`py-2 text-xs font-bold rounded-xl border transition-all text-center ${
-                                                selectedFluxModel === val
+                                                (selectedFluxModel === val || (val === 'flux-2-flex' && selectedFluxModel === 'flux-flex'))
                                                     ? 'bg-transparent border-teal-500/60 text-teal-400'
                                                     : 'bg-transparent border-zinc-700/50 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'
                                             }`}

@@ -155,6 +155,80 @@ export interface CutFieldChanges {
     cameraAngle?: string;
 }
 
+const CUT_FIELD_KEYS = [
+    'characters',
+    'characterPose',
+    'characterEmotionAndExpression',
+    'characterOutfit',
+    'sceneDescription',
+    'location',
+    'locationDescription',
+    'directorialIntent',
+    'otherNotes',
+    'cameraAngle',
+] as const;
+
+type CutFieldKey = typeof CUT_FIELD_KEYS[number];
+
+/**
+ * 모델 응답을 그대로 신뢰하지 않고 사용자 요청에 명시된 범주의 필드만 남긴다.
+ * 특히 장소·의상·카메라는 요청에 관련 단어가 없으면 절대 적용하지 않는다.
+ */
+export function filterCutFieldChangesForRequest(
+    userRequest: string,
+    candidate: unknown,
+): CutFieldChanges {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return {};
+
+    const request = userRequest.toLowerCase();
+    const mentionsCharacters = /(인물|등장인물|캐릭터|사람|남주|여주|주인공|남자|여자|character|person|people)/i.test(request);
+    const mentionsOutfit = /(옷|의상|복장|교복|정장|드레스|원피스|코트|재킷|셔츠|바지|치마|신발|모자|outfit|clothes|clothing|wear|costume)/i.test(request);
+    const mentionsLocation = /(배경|장소|공간|실내|실외|학교|교실|집|거실|침실|숙소|카페|거리|공원|바다|산|사무실|회사|식당|병원|밤|낮|아침|저녁|location|background|setting)/i.test(request);
+    const mentionsCamera = /(카메라|앵글|구도|시점|샷|클로즈업|바스트샷|미디엄샷|풀샷|롱샷|로우앵글|하이앵글|줌|camera|angle|shot|composition|close.?up)/i.test(request);
+    const mentionsPose = /(포즈|자세|동작|행동|제스처|손을|팔을|앉|서 있|일어서|걷|뛰|안고|잡고|고개|pose|action|gesture)/i.test(request);
+    const mentionsEmotion = /(표정|감정|기분|웃|미소|울|화나|분노|슬프|놀라|당황|무서|행복|emotion|expression|smil|cry|angry)/i.test(request);
+    const mentionsMood = /(분위기|무드|색감|색조|톤|조명|밝게|어둡게|긴장|로맨틱|귀엽|드라마틱|mood|tone|lighting|color)/i.test(request);
+    const mentionsScene = /(장면|상황|연출|묘사|scene|description)/i.test(request);
+    const mentionsNotes = /(기타|노트|추가 설명|주의사항|other notes?)/i.test(request);
+
+    const allowed = new Set<CutFieldKey>();
+    if (mentionsCharacters) allowed.add('characters');
+    if (mentionsOutfit) allowed.add('characterOutfit');
+    if (mentionsLocation) {
+        allowed.add('location');
+        allowed.add('locationDescription');
+    }
+    if (mentionsCamera) {
+        allowed.add('cameraAngle');
+        allowed.add('otherNotes');
+    }
+    if (mentionsPose) {
+        allowed.add('characterPose');
+        allowed.add('sceneDescription');
+    }
+    if (mentionsEmotion) allowed.add('characterEmotionAndExpression');
+    if (mentionsMood) allowed.add('directorialIntent');
+    if (mentionsScene) allowed.add('sceneDescription');
+    if (mentionsNotes) allowed.add('otherNotes');
+
+    const source = candidate as Record<string, unknown>;
+    const filtered: CutFieldChanges = {};
+    for (const key of CUT_FIELD_KEYS) {
+        if (!allowed.has(key) || !(key in source)) continue;
+        const value = source[key];
+        if (key === 'characters') {
+            if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+                filtered.characters = value.map(item => item.trim()).filter(Boolean);
+            }
+            continue;
+        }
+        if (typeof value === 'string') {
+            (filtered as Record<string, unknown>)[key] = value.trim();
+        }
+    }
+    return filtered;
+}
+
 export async function refinePromptWithAI(
     currentPrompt: string,
     userRequest: string,
@@ -228,7 +302,10 @@ ${userRequest}
 
     try {
         const parsed = JSON.parse(result.text.replace(/```json|```/g, '').trim());
-        return { fieldChanges: parsed as CutFieldChanges, tokenCount: result.tokenCount };
+        return {
+            fieldChanges: filterCutFieldChangesForRequest(userRequest, parsed),
+            tokenCount: result.tokenCount,
+        };
     } catch {
         return { fieldChanges: {}, tokenCount: result.tokenCount };
     }
@@ -236,17 +313,32 @@ ${userRequest}
 
 /** 전체 컷 프롬프트 일괄 수정 (변경 필요 없는 컷은 changed=false) */
 export async function refineAllPromptsWithAI(
-    cuts: { cutNumber: string; prompt: string; scene: string; narration: string }[],
+    cuts: {
+        cutNumber: string;
+        prompt: string;
+        scene: string;
+        narration: string;
+        characters: string[];
+        cutFields: Omit<CutFieldChanges, 'characters'>;
+    }[],
     userRequest: string
-): Promise<{ refinedCuts: { cutNumber: string; refinedPrompt: string; changed: boolean }[]; tokenCount: number }> {
+): Promise<{ refinedCuts: { cutNumber: string; fieldChanges: CutFieldChanges; changed: boolean }[]; tokenCount: number }> {
     const systemPrompt = `You are an expert storyboard prompt editor. Apply a batch modification to multiple image generation prompts.
-Preserve each prompt's layer structure. Only modify what's needed for the user's request.
+Return structured field changes only. Never rewrite the complete prompt.
+Only include fields directly requested by the user.
+Never change location/locationDescription, characterOutfit, or cameraAngle unless explicitly requested.
 
-Return a JSON array. Set changed=false and keep refinedPrompt identical for cuts that don't need modification.
+Allowed fieldChanges keys: characters, characterPose, characterEmotionAndExpression, characterOutfit, sceneDescription, location, locationDescription, directorialIntent, otherNotes, cameraAngle.
+Set changed=false and return an empty fieldChanges object for cuts that do not need modification.
 Output format (JSON only, no markdown fences):
-[{"cutNumber":"1-1","refinedPrompt":"...","changed":true},{"cutNumber":"1-2","refinedPrompt":"...","changed":false}]`;
+[{"cutNumber":"1-1","fieldChanges":{"characterEmotionAndExpression":"angry expression"},"changed":true},{"cutNumber":"1-2","fieldChanges":{},"changed":false}]`;
 
-    const cutList = cuts.map(c => `[Cut ${c.cutNumber}] Scene: ${c.scene} | Narration: ${c.narration}\nPrompt: ${c.prompt}`).join('\n---\n');
+    const cutList = cuts.map(c => `[Cut ${c.cutNumber}]
+Scene: ${c.scene}
+Characters: ${c.characters.join(', ')}
+Narration: ${c.narration}
+Current fields: ${JSON.stringify(c.cutFields)}
+Full prompt (read-only): ${c.prompt}`).join('\n---\n');
 
     const prompt = `## All Cuts\n${cutList}\n\n## Batch Modification Request (Korean)\n${userRequest}\n\n## Output (JSON array):`;
 
@@ -257,12 +349,23 @@ Output format (JSON only, no markdown fences):
 
     try {
         const parsed = JSON.parse(result.text.replace(/```json|```/g, '').trim());
-        return { refinedCuts: parsed, tokenCount: result.tokenCount };
+        if (!Array.isArray(parsed)) throw new Error('Batch response is not an array');
+        const validCutNumbers = new Set(cuts.map(cut => cut.cutNumber));
+        const refinedCuts = parsed
+            .filter(item => item && typeof item.cutNumber === 'string' && validCutNumbers.has(item.cutNumber))
+            .map(item => {
+                const fieldChanges = filterCutFieldChangesForRequest(userRequest, item.fieldChanges);
+                return {
+                    cutNumber: item.cutNumber as string,
+                    fieldChanges,
+                    changed: item.changed === true && Object.keys(fieldChanges).length > 0,
+                };
+            });
+        return { refinedCuts, tokenCount: result.tokenCount };
     } catch {
         return {
-            refinedCuts: cuts.map(c => ({ cutNumber: c.cutNumber, refinedPrompt: c.prompt, changed: false })),
+            refinedCuts: cuts.map(c => ({ cutNumber: c.cutNumber, fieldChanges: {}, changed: false })),
             tokenCount: result.tokenCount
         };
     }
 }
-

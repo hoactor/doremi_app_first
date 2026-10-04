@@ -155,6 +155,35 @@ export function getFluxImageSize(imageRatio: string): { width: number; height: n
 
 // ─── 유틸: endpoint 경로 결정 ────────────────────────────────────
 
+const DEFAULT_FLUX_ENDPOINT = 'fal-ai/flux-2-flex';
+
+/** UI 모델 값 또는 이미 완성된 fal endpoint를 실제 API endpoint로 정규화. */
+export function getFluxEndpoint(modelOrEndpoint?: string): string {
+    const value = modelOrEndpoint?.trim();
+    if (!value) return DEFAULT_FLUX_ENDPOINT;
+
+    switch (value) {
+        case 'flux-pro':
+        case 'flux-2-pro':
+        case 'fal-ai/flux-pro':
+            return 'fal-ai/flux-2-pro';
+        case 'flux-flex':
+        case 'flux-2-flex':
+        case 'fal-ai/flux-flex':
+            return 'fal-ai/flux-2-flex';
+        case 'flux-lora':
+        case 'flux-2-lora':
+        case 'flux-2/lora':
+        case 'fal-ai/flux-lora':
+        case 'fal-ai/flux-2-lora':
+            return 'fal-ai/flux-2/lora';
+        default:
+            if (value.startsWith('fal-ai/')) return value;
+            console.warn(`[falService] 알 수 없는 Flux 모델 "${value}" — Flex로 폴백`);
+            return DEFAULT_FLUX_ENDPOINT;
+    }
+}
+
 /** 베이스 모델명 → 편집용 엔드포인트 자동 결정 */
 function resolveEditEndpoint(baseEndpoint: string): string {
     // 이미 /edit 또는 /image-to-image가 포함되어 있으면 그대로
@@ -175,6 +204,11 @@ function isFluxLoraEndpoint(endpoint: string): boolean {
     return endpoint.includes('flux-2/lora');
 }
 
+/** fal.ai FLUX.2 image_urls 제한: Pro/LoRA 4장, Flex 10장. */
+function getFluxReferenceLimit(endpoint: string): number {
+    return endpoint.includes('flux-2-flex') ? 10 : 4;
+}
+
 // ─── 핵심: img2img 편집 ─────────────────────────────────────────
 
 export async function editImageWithFlux(
@@ -193,7 +227,7 @@ export async function editImageWithFlux(
 ): Promise<{ imageUrl: string; textResponse: string; tokenCount: number }> {
     await initFalClient();
 
-    const baseEndpoint = options?.endpoint || 'fal-ai/flux-2-pro';
+    const baseEndpoint = getFluxEndpoint(options?.endpoint);
     const isFlux2 = isFlux2Endpoint(baseEndpoint);
     const isLora = isFluxLoraEndpoint(baseEndpoint);
     const endpoint = resolveEditEndpoint(baseEndpoint);
@@ -203,9 +237,21 @@ export async function editImageWithFlux(
 
     if (isFlux2) {
         // ★ FLUX.2 Pro/Flex/LoRA: zero-config, image_urls (배열)
+        // base는 항상 1번 슬롯, 추가 레퍼런스는 전달 순서를 유지한다.
+        const maxImages = getFluxReferenceLimit(baseEndpoint);
+        const referenceUrls = options?.referenceImageUrls || [];
+        const limitedReferences = referenceUrls.slice(0, Math.max(0, maxImages - 1));
+        if (referenceUrls.length > limitedReferences.length) {
+            console.warn(`[falService] 추가 레퍼런스 ${referenceUrls.length}장 → ${limitedReferences.length}장으로 제한 (${baseEndpoint})`);
+        }
+        const uploadedReferences: string[] = [];
+        for (const referenceUrl of limitedReferences) {
+            uploadedReferences.push(await prepareImageUrl(referenceUrl));
+        }
+
         input = {
             prompt,
-            image_urls: [uploadedBaseUrl],
+            image_urls: [uploadedBaseUrl, ...uploadedReferences],
             image_size: options?.imageSize ?? { width: 768, height: 1344 },
             output_format: "png",
             safety_tolerance: "5",
@@ -276,7 +322,7 @@ export async function generateImageWithFlux(
 ): Promise<{ imageUrl: string; textResponse: string; tokenCount: number }> {
     await initFalClient();
 
-    const endpoint = options?.endpoint || 'fal-ai/flux-2-pro';
+    const endpoint = getFluxEndpoint(options?.endpoint);
     const isFlux2 = isFlux2Endpoint(endpoint);
     const isLora = isFluxLoraEndpoint(endpoint);
 
@@ -342,7 +388,7 @@ export async function generateMultiCharWithFlux(
 ): Promise<{ imageUrl: string; textResponse: string; tokenCount: number }> {
     await initFalClient();
 
-    const endpoint = options?.endpoint || 'fal-ai/flux-2-flex';
+    const endpoint = getFluxEndpoint(options?.endpoint);
     const isFlux2 = isFlux2Endpoint(endpoint);
     const isLora = isFluxLoraEndpoint(endpoint);
 
@@ -351,11 +397,11 @@ export async function generateMultiCharWithFlux(
     if (isFlux2) {
         // ★ FLUX.2: 참조 이미지를 /edit의 image_urls로 전달
         const editEndpoint = resolveEditEndpoint(endpoint);
-        // fal.ai API 제한: Pro ≤ 4장, Flex ≤ 10장 — 안전 마진으로 4장 통일
-        const MAX_REFS = 4;
-        const limitedRefs = referenceImageUrls.slice(0, MAX_REFS);
-        if (referenceImageUrls.length > MAX_REFS) {
-            console.warn(`[falService] 레퍼런스 ${referenceImageUrls.length}장 → ${MAX_REFS}장으로 제한`);
+        // fal.ai API 제한: Pro/LoRA ≤ 4장, Flex ≤ 10장
+        const maxRefs = getFluxReferenceLimit(endpoint);
+        const limitedRefs = referenceImageUrls.slice(0, maxRefs);
+        if (referenceImageUrls.length > maxRefs) {
+            console.warn(`[falService] 레퍼런스 ${referenceImageUrls.length}장 → ${maxRefs}장으로 제한 (${endpoint})`);
         }
         const uploadedRefs: string[] = [];
         for (const url of limitedRefs) {

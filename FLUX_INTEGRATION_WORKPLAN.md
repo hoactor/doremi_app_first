@@ -72,9 +72,11 @@ export async function getFalApiKey(): Promise<string> {
         const keys = await loadApiKeys();
         return keys.fal || '';
     }
-    return (import.meta as any).env?.VITE_FAL_KEY || '';
+    throw new Error('fal.ai는 macOS Keychain을 사용하는 Tauri 앱에서만 지원됩니다.');
 }
 ```
+
+> 보안 결정(2026-07-15): 과거 `VITE_FAL_KEY`/`.env` 폴백은 폐기했다. 다시 도입하지 않는다.
 
 ### 1-4. src-tauri/src/main.rs — Rust 백엔드
 

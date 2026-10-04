@@ -13,10 +13,10 @@ import {
 } from './types';
 import { editImageWithFlux, generateImageWithFlux, getFluxImageSize } from './services/falService';
 import { buildFluxPrompt, buildFluxPromptSmart } from './appFluxPromptEngine';
-import { loadOpenAiApiKey } from './utils/settingsStorage';
 import { AudioSplitterModal } from './components/AudioSplitterModal';
-import { get, set, del } from 'idb-keyval';
-import { IS_TAURI, ensureDirectories, saveImageFile, resolveImageUrl, createProject as createProjectLocal, saveProjectMetadata, listen, loadLoraRegistry, cleanupOldProjects } from './services/tauriAdapter';
+import { get, del } from 'idb-keyval';
+import { IS_TAURI, ensureDirectories, saveImageFile, saveAudioFile, resolveImageUrl, createProject as createProjectLocal, saveProjectMetadata, listen, loadLoraRegistry } from './services/tauriAdapter';
+import { persistProjectAudio } from './appAudioPersistence';
 import type { LoRAEntry } from './types';
 import { setGlobalRetryHandler } from './services/claudeService';
 import type { ProjectListEntry as TauriProjectListEntry } from './services/tauriAdapter';
@@ -46,7 +46,7 @@ interface AppContextType {
         handleListProjects: () => Promise<TauriProjectListEntry[]>;
         handleOpenProject: (projectId: string) => Promise<void>;
         handleDeleteProject: (projectId: string) => Promise<void>;
-        handleSaveProjectNow: () => Promise<void>;
+        handleSaveProjectNow: () => Promise<boolean>;
         // Phase 5: 에셋
         handleSaveCharacterAsset: (characterKey: string) => Promise<void>;
         handleSaveOutfitAsset: (characterKey: string, location: string) => Promise<void>;
@@ -261,12 +261,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     useEffect(() => {
         if (IS_TAURI) {
             ensureDirectories().catch(err => console.error('디렉토리 초기화 실패:', err));
-            // 30일 지난 프로젝트 자동 정리
-            cleanupOldProjects(30).then(result => {
-                if (result.deleted.length > 0) {
-                    console.log(`[cleanup] ${result.deleted.length}개 오래된 프로젝트 자동 삭제:`, result.deleted);
-                }
-            }).catch(err => console.warn('프로젝트 정리 실패:', err));
+            // 프로젝트는 사용자 확인 없이 자동 삭제하지 않는다.
+            // 오래된 프로젝트 정리가 필요하면 명시적인 백업/확인 UI에서만 실행한다.
         }
     }, []);
 
@@ -285,6 +281,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // ─── Phase 5: 프로젝트 로드 후 localPath → imageUrl 복원 ────────
     useEffect(() => {
         if (!IS_TAURI) return;
+        const projectId = appState.currentProjectId;
+        let disposed = false;
         const unresolvedImages = appState.generatedImageHistory.filter(
             img => img.localPath && !img.imageUrl
         );
@@ -298,6 +296,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 if (img.localPath && !img.imageUrl) {
                     try {
                         const dataUrl = await resolveImageUrl(img.localPath);
+                        if (disposed || stateRef.current.currentProjectId !== projectId) return;
                         updates[i] = { ...img, imageUrl: dataUrl };
                         changed = true;
                     } catch (err) {
@@ -305,12 +304,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     }
                 }
             }
-            if (changed) {
+            if (changed && !disposed && stateRef.current.currentProjectId === projectId) {
                 // 이미지 히스토리 업데이트 + 컷 imageUrls 갱신
                 dispatch({ type: 'RESTORE_IMAGE_URLS', payload: updates } as any);
             }
         };
-        resolveAll();
+        void resolveAll();
+        return () => { disposed = true; };
     }, [appState.currentProjectId]); // 프로젝트 전환 시에만 실행
 
     // ─── Phase 5: 이미지 디스크 저장 헬퍼 ──────────────────────────
@@ -337,73 +337,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
     }, []);
 
-    // ─── Phase 5: 프로젝트 자동저장 헬퍼 ───────────────────────────
-    const autoSaveProject = useCallback(async () => {
-        const s = stateRef.current;
-        if (!IS_TAURI || !s.currentProjectId) return;
-        try {
-            const metadata = buildProjectMetadata(s);
-            await saveProjectMetadata(s.currentProjectId, metadata);
-            dispatch({ type: 'SET_PROJECT_SAVED', payload: true });
-        } catch (err) {
-            console.error('프로젝트 자동저장 실패:', err);
-        }
-    }, []);
-
     // Auto-Restore on mount + v1→v2 마이그레이션
     useEffect(() => {
         const loadSavedState = async () => {
             try {
-                const savedState = await get('wvs_auto_save_state');
+                let savedState = await get('wvs_auto_save_state');
                 if (savedState) {
-                    // v1→v2 마이그레이션: IndexedDB에 base64 이미지가 있고 Tauri 환경이면
-                    if (IS_TAURI && savedState.generatedImageHistory?.length > 0) {
-                        const hasBase64Images = savedState.generatedImageHistory.some(
-                            (img: GeneratedImage) => img.imageUrl?.startsWith('data:') && !img.localPath
-                        );
-                        if (hasBase64Images) {
-                            console.log('v1→v2 마이그레이션 감지: base64 이미지를 로컬 파일로 변환합니다...');
-                            try {
-                                // 프로젝트 없으면 생성
-                                let projectId = savedState.currentProjectId;
-                                if (!projectId) {
-                                    projectId = await createProjectLocal(savedState.storyTitle || '마이그레이션 프로젝트');
-                                }
-                                // base64 이미지 → 파일 변환
+                    try {
+                        if (IS_TAURI) {
+                            // 디스크의 기존 프로젝트를 절대 덮지 않고 별도 복구본으로 이관한다.
+                            const originalTitle = savedState.storyTitle || '이전 세션';
+                            const recoveryTitle = `${originalTitle} (IndexedDB 복구)`;
+                            const projectId = await createProjectLocal(recoveryTitle);
+
+                            if (savedState.generatedImageHistory?.length > 0) {
                                 const migratedHistory: GeneratedImage[] = [];
-                                for (const img of savedState.generatedImageHistory) {
-                                    if (img.imageUrl?.startsWith('data:') && !img.localPath) {
+                                for (const img of savedState.generatedImageHistory as GeneratedImage[]) {
+                                    let imageData = img.imageUrl?.startsWith('data:') ? img.imageUrl : null;
+                                    if (!imageData && img.localPath) {
                                         try {
-                                            const filename = `cut_${(img.sourceCutNumber || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_')}_img_${img.id.slice(0, 8)}.png`;
-                                            const localPath = await saveImageFile('project', `${projectId}/images`, filename, img.imageUrl);
-                                            migratedHistory.push({ ...img, localPath });
+                                            imageData = await resolveImageUrl(img.localPath);
                                         } catch {
-                                            migratedHistory.push(img); // 실패 시 그대로 유지
+                                            imageData = null;
                                         }
-                                    } else {
+                                    }
+                                    if (!imageData) {
                                         migratedHistory.push(img);
+                                        continue;
+                                    }
+                                    const filename = `cut_${(img.sourceCutNumber || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_')}_img_${img.id.slice(0, 8)}.png`;
+                                    try {
+                                        const localPath = await saveImageFile(
+                                            'project',
+                                            `${projectId}/images`,
+                                            filename,
+                                            imageData,
+                                        );
+                                        migratedHistory.push({ ...img, imageUrl: imageData, localPath });
+                                    } catch {
+                                        // 한 이미지 실패로 전체 복구를 버리지 않는다. data URL이 있으면 JSON에라도 보존한다.
+                                        migratedHistory.push({ ...img, imageUrl: imageData });
                                     }
                                 }
                                 savedState.generatedImageHistory = migratedHistory;
-                                savedState.currentProjectId = projectId;
-                                console.log(`v1→v2 마이그레이션 완료: ${migratedHistory.filter(i => i.localPath).length}개 이미지 변환`);
-                            } catch (err) {
-                                console.error('v1→v2 마이그레이션 실패:', err);
                             }
+
+                            savedState = {
+                                ...savedState,
+                                storyTitle: recoveryTitle,
+                                currentProjectId: projectId,
+                            };
+
+                            // 레거시 사본은 이미지·오디오·project.json이 모두 안전하게 저장된 뒤에만 삭제한다.
+                            const sanitizedLegacyState = sanitizeState(savedState as AppDataState);
+                            const persisted = await persistProjectAudio(
+                                sanitizedLegacyState,
+                                projectId,
+                                saveAudioFile,
+                            );
+                            await saveProjectMetadata(projectId, buildProjectMetadata(persisted.state));
+                            savedState = persisted.state;
                         }
-                    }
-                    try {
+
                         dispatch({ type: 'RESTORE_STATE', payload: savedState });
                         console.log("Auto-restored previous session from IndexedDB.");
+                        if (IS_TAURI) {
+                            // 디스크 저장과 복원이 모두 끝난 뒤 평문/대용량 레거시 사본을 제거한다.
+                            await del('wvs_auto_save_state');
+                        }
                     } catch (restoreErr) {
-                        // ★ 복원 실패 시 손상된 IndexedDB 상태 제거 → 다음 재시작 시 깨끗하게
-                        console.warn('IndexedDB 상태 복원 실패 — 손상 데이터 제거:', restoreErr);
-                        try { await del('wvs_auto_save_state'); } catch {}
+                        // 자동 삭제하지 않는다. 실패한 사본도 수동 복구에 쓸 수 있으므로 보존한다.
+                        console.warn('IndexedDB 상태 복원/이관 실패 — 원본은 보존합니다:', restoreErr);
                     }
                 }
             } catch (error) {
                 console.error("Failed to restore state from IndexedDB:", error);
-                try { await del('wvs_auto_save_state'); } catch {}
             } finally {
                 isInitializedRef.current = true;
             }
@@ -411,24 +419,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadSavedState();
     }, []);
 
-    // ★ 자동 저장 제거 (2026-04-28) — 깜빡임/딜레이 원인.
-    //   사용자는 Save 버튼(또는 ⌘S)으로 명시적으로 저장.
-    //   브라우저 환경에서만 IndexedDB 폴백 자동 저장 유지 (Tauri 외에서는 다른 저장 수단 없음).
-    useEffect(() => {
-        if (!isInitializedRef.current) return;
-        if (IS_TAURI) return; // Tauri는 사용자 명시 저장만
-        const timeoutId = setTimeout(() => {
-            set('wvs_auto_save_state', appState).catch(err => {
-                console.error("Failed to auto-save state to IndexedDB:", err);
-            });
-        }, 2000);
-        return () => clearTimeout(timeoutId);
-    }, [appState]);
-
-    useEffect(() => {
-        const apiKey = loadOpenAiApiKey();
-        if (apiKey) dispatch({ type: 'SET_OPENAI_API_KEY', payload: apiKey });
-    }, []);
+    // 이 앱은 Tauri 로컬 저장만 지원한다. 브라우저 IndexedDB에는 프로젝트나 API 키를 쓰지 않는다.
 
     const updateUIState = useCallback((update: Partial<UIState>) => {
         setUIState(prev => ({ ...prev, ...update }));
@@ -445,11 +436,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // ─── Phase 10 C-2: 에셋 카탈로그 독립 창 ↔ 메인 앱 동기화 ──────
     useEffect(() => {
         if (!IS_TAURI) return;
+        let disposed = false;
         let unlisten: (() => void) | null = null;
         listen('asset-catalog-updated', (_payload: any) => {
+            if (disposed) return;
             console.log('[MainApp] 에셋 카탈로그 변경 감지:', _payload);
-        }).then(fn => { unlisten = fn; });
-        return () => { if (unlisten) unlisten(); };
+        }).then(fn => {
+            if (disposed) fn();
+            else unlisten = fn;
+        }).catch(error => console.warn('[asset-catalog-updated] listener 실패', error));
+        return () => { disposed = true; if (unlisten) unlisten(); };
     }, []);
 
     // Phase A.7: send-to-studio 이벤트는 deprecated — 통합 스튜디오는 자체 IPC 사용
@@ -527,9 +523,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const getFluxModelName = useCallback(() => {
         switch (stateRef.current.selectedFluxModel) {
             case 'flux-pro': return 'fal-ai/flux-2-pro';
+            case 'flux-2-flex':
             case 'flux-flex': return 'fal-ai/flux-2-flex';
             case 'flux-lora': return 'fal-ai/flux-2/lora';
-            default: return 'fal-ai/flux-2-pro';
+            default: return 'fal-ai/flux-2-flex';
         }
     }, []);
 
@@ -564,7 +561,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 imageSize,
                 endpoint,
             });
-            dispatch({ type: 'ADD_FAL_USAGE', payload: { images: 1, model: stateRef.current.selectedFluxModel || 'flux-pro' } });
+            dispatch({ type: 'ADD_FAL_USAGE', payload: { images: 1, model: stateRef.current.selectedFluxModel || 'flux-2-flex' } });
             return res;
         } else {
             // 기존 Gemini 경로 (수정 없음)
@@ -687,7 +684,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     // ── 프로젝트/에셋 액션 (appProjectActions.ts에서 생성) ──
-    const projectHelpers = { dispatch, stateRef, addNotification, autoSaveProject, setUIState: (u: any) => setUIState(u) };
+    const projectHelpers = { dispatch, stateRef, addNotification, setUIState: (u: any) => setUIState(u) };
     const projectActions = createProjectActions(projectHelpers);
     const assetActions = createAssetActions(projectHelpers);
 
@@ -942,16 +939,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         handleOpenGuestSelection: (cutNumber: string) => dispatch({ type: 'START_GUEST_SELECTION', payload: cutNumber }),
         handleOpenAudioSplitter: () => updateUIState({ isAudioSplitterOpen: true }),
         handleConfirmAudioSplit,
-        handleUploadProjectFile: (file: File): Promise<void> => new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                try { const parsed = JSON.parse(ev.target?.result as string); dispatch({ type: 'RESTORE_STATE', payload: parsed }); }
-                catch (e) { addNotification('실패', 'error'); }
-                finally { resolve(); }
-            };
-            reader.onerror = () => { addNotification('파일 읽기 실패', 'error'); resolve(); };
-            reader.readAsText(file);
-        }),
+        handleUploadProjectFile: projectActions.handleUploadProjectFile,
         handleThirdCharacterEdit: cutEditActions.handleThirdCharacterEdit,
         triggerConfetti,
         handleEditImageWithNanoWithRetry,

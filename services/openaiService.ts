@@ -3,7 +3,7 @@
 //      (썰쇼츠 본편은 Gemini/Flux. DALL-E는 치비/치밀도가 원탑이라 참조용으로 최적)
 
 import { ImageRatio } from '../types';
-import { loadApiKeys } from './tauriAdapter';
+import { callOpenAiChatTauri, callOpenAiDalleTauri, testStoredOpenAiKey } from './tauriAdapter';
 
 export type DalleAssetType = 'character' | 'background' | 'outfit' | 'prop';
 
@@ -57,13 +57,28 @@ export class DalleError extends Error {
     }
 }
 
-async function getOpenAiKey(): Promise<string> {
-    const keys = await loadApiKeys();
-    const key = keys.openai?.trim();
-    if (!key) {
-        throw new DalleError('missing-key', 'OpenAI API 키가 설정되지 않았습니다. 설정 → API 키에서 등록해주세요.');
+function classifyOpenAiProxyError(error: unknown): DalleError {
+    if (error instanceof DalleError) return error;
+    const raw = String((error as any)?.message || error || '');
+    if (raw.includes('OPENAI_MISSING_KEY')) {
+        return new DalleError('missing-key', 'OpenAI API 키가 설정되지 않았거나 유효하지 않습니다. 설정 → API 키에서 확인해주세요.');
     }
-    return key;
+    if (raw.includes('OPENAI_CONTENT_POLICY')) {
+        return new DalleError('content-policy', 'OpenAI 콘텐츠 정책에 의해 거부됐습니다. 프롬프트를 다듬어 다시 시도해주세요.');
+    }
+    if (raw.includes('OPENAI_RATE_LIMIT')) {
+        return new DalleError('rate-limit', 'OpenAI 요청 한도에 걸렸습니다. 잠시 후 다시 시도해주세요.');
+    }
+    if (raw.includes('OPENAI_SERVER')) {
+        return new DalleError('server', 'OpenAI 서버 오류입니다. 잠시 후 다시 시도해주세요.');
+    }
+    if (raw.includes('OPENAI_NETWORK')) {
+        return new DalleError('network', '네트워크 오류. 연결 확인 후 다시 시도해주세요.');
+    }
+    if (raw.includes('OPENAI_INVALID_RESPONSE')) {
+        return new DalleError('invalid-response', 'OpenAI 응답을 해석할 수 없습니다.');
+    }
+    return new DalleError('unknown', `OpenAI 오류: ${raw || '알 수 없는 오류'}`);
 }
 
 /**
@@ -74,80 +89,27 @@ export async function generateImageWithDalle(
     options: DalleGenerateOptions,
 ): Promise<DalleGenerateResult> {
     const { prompt, assetType, ratio = '1:1', style = 'vivid', quality = 'hd' } = options;
-    const apiKey = await getOpenAiKey();
     const size = pickDalleSize(assetType, ratio);
-
-    let response: Response;
     try {
-        response = await fetch('https://api.openai.com/v1/images/generations', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model: 'dall-e-3',
-                prompt,
-                n: 1,
-                size,
-                quality,
-                style,
-                response_format: 'b64_json',
-            }),
+        const result = await callOpenAiDalleTauri({
+            prompt,
+            size,
+            quality,
+            style,
         });
-    } catch (err) {
-        throw new DalleError('network', '네트워크 오류. 연결 확인 후 다시 시도해주세요.');
-    }
-
-    if (!response.ok) {
-        let body: any = null;
-        try { body = await response.json(); } catch { /* ignore */ }
-        const apiMessage: string = body?.error?.message || response.statusText;
-        const code: string | undefined = body?.error?.code;
-        const type: string | undefined = body?.error?.type;
-
-        // 콘텐츠 정책 거부 — 여러 형태로 올 수 있음
-        if (
-            code === 'content_policy_violation' ||
-            /content[_\s-]?policy/i.test(apiMessage) ||
-            /safety[_\s-]?system/i.test(apiMessage) ||
-            /content filter/i.test(apiMessage)
-        ) {
-            throw new DalleError(
-                'content-policy',
-                'OpenAI 콘텐츠 정책에 의해 거부됐습니다. 프롬프트를 다듬어 다시 시도해주세요.',
-            );
+        if (!result.image_base64) {
+            throw new DalleError('invalid-response', 'DALL-E 응답에 이미지 데이터가 없습니다.');
         }
-
-        if (response.status === 401) {
-            throw new DalleError('missing-key', 'OpenAI API 키가 유효하지 않습니다. 설정에서 다시 확인해주세요.');
-        }
-        if (response.status === 429 || type === 'rate_limit_exceeded') {
-            throw new DalleError('rate-limit', 'OpenAI 요청 한도에 걸렸습니다. 잠시 후 다시 시도해주세요.');
-        }
-        if (response.status >= 500) {
-            throw new DalleError('server', `OpenAI 서버 오류 (${response.status}). 잠시 후 다시 시도해주세요.`);
-        }
-        throw new DalleError('unknown', `DALL-E 3 오류: ${apiMessage}`);
+        return {
+            imageUrl: `data:image/png;base64,${result.image_base64}`,
+            revisedPrompt: result.revised_prompt || prompt,
+            size,
+            quality,
+            style,
+        };
+    } catch (error) {
+        throw classifyOpenAiProxyError(error);
     }
-
-    let result: any;
-    try { result = await response.json(); } catch {
-        throw new DalleError('invalid-response', 'DALL-E 응답을 해석할 수 없습니다.');
-    }
-
-    const first = result?.data?.[0];
-    if (!first?.b64_json) {
-        throw new DalleError('invalid-response', 'DALL-E 응답에 이미지 데이터가 없습니다.');
-    }
-
-    return {
-        imageUrl: `data:image/png;base64,${first.b64_json}`,
-        revisedPrompt: first.revised_prompt || prompt,
-        size,
-        quality,
-        style,
-    };
 }
 
 // ─── OpenAI Chat API (프롬프트 생성/수정 전용) ────────────────────────
@@ -190,58 +152,30 @@ export interface OpenAiChatPromptOptions {
 export async function generateDallePromptViaOpenAI(
     opts: OpenAiChatPromptOptions,
 ): Promise<{ prompt: string }> {
-    const apiKey = await getOpenAiKey();
     const model = opts.model || DEFAULT_CHAT_MODEL;
+    if (model !== 'gpt-4o' && model !== 'gpt-4o-mini') {
+        throw new DalleError('invalid-response', '지원하지 않는 OpenAI 모델입니다.');
+    }
 
     const hasExisting = !!opts.currentPrompt?.trim();
     const userMessage = hasExisting
         ? `Asset type: ${opts.assetType}\n\nCurrent prompt:\n"""\n${opts.currentPrompt}\n"""\n\nUser request (modify the current prompt accordingly): "${opts.request}"\n\nOutput the revised DALL-E 3 prompt only.`
         : `Asset type: ${opts.assetType}\n\nUser request (create a new prompt): "${opts.request}"\n\nOutput the DALL-E 3 prompt only.`;
 
-    let response: Response;
+    let content: string;
     try {
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model,
-                messages: [
-                    { role: 'system', content: CHAT_SYSTEM_PROMPT },
-                    { role: 'user', content: userMessage },
-                ],
-                temperature: 0.4,
-                max_tokens: 600,
-            }),
+        const response = await callOpenAiChatTauri({
+            model,
+            system: CHAT_SYSTEM_PROMPT,
+            user: userMessage,
+            temperature: 0.4,
+            max_tokens: 600,
         });
-    } catch {
-        throw new DalleError('network', '네트워크 오류. 연결 확인 후 다시 시도해주세요.');
+        content = response.content;
+    } catch (error) {
+        throw classifyOpenAiProxyError(error);
     }
 
-    if (!response.ok) {
-        let body: any = null;
-        try { body = await response.json(); } catch { /* ignore */ }
-        const msg: string = body?.error?.message || response.statusText;
-        if (response.status === 401) {
-            throw new DalleError('missing-key', 'OpenAI API 키가 유효하지 않습니다. 설정에서 다시 확인해주세요.');
-        }
-        if (response.status === 429) {
-            throw new DalleError('rate-limit', 'OpenAI 요청 한도에 걸렸습니다. 잠시 후 다시 시도해주세요.');
-        }
-        if (response.status >= 500) {
-            throw new DalleError('server', `OpenAI 서버 오류 (${response.status}). 잠시 후 다시 시도해주세요.`);
-        }
-        throw new DalleError('unknown', `OpenAI Chat 오류: ${msg}`);
-    }
-
-    let result: any;
-    try { result = await response.json(); } catch {
-        throw new DalleError('invalid-response', 'OpenAI Chat 응답을 해석할 수 없습니다.');
-    }
-
-    const content: string | undefined = result?.choices?.[0]?.message?.content;
     if (!content || !content.trim()) {
         throw new DalleError('invalid-response', 'OpenAI Chat 응답이 비어있습니다.');
     }
@@ -260,26 +194,14 @@ export async function suggestAssetNameViaOpenAI(
 ): Promise<string> {
     const typeLabel = { character: '캐릭터', background: '배경', outfit: '의상', prop: '소품' }[assetType];
     try {
-        const apiKey = await getOpenAiKey();
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: [
-                    { role: 'system', content: 'You name assets for a Korean chibi creation tool. Output ONLY the Korean name, under 20 characters, no quotes, no explanation.' },
-                    { role: 'user', content: `Asset type: ${typeLabel}\nPrompt: "${dallePrompt.slice(0, 400)}"\n\nGenerate a short memorable Korean name.` },
-                ],
-                temperature: 0.7,
-                max_tokens: 30,
-            }),
+        const result = await callOpenAiChatTauri({
+            model: 'gpt-4o-mini',
+            system: 'You name assets for a Korean chibi creation tool. Output ONLY the Korean name, under 20 characters, no quotes, no explanation.',
+            user: `Asset type: ${typeLabel}\nPrompt: "${dallePrompt.slice(0, 400)}"\n\nGenerate a short memorable Korean name.`,
+            temperature: 0.7,
+            max_tokens: 30,
         });
-        if (!response.ok) return `새 ${typeLabel}`;
-        const result = await response.json();
-        const name: string | undefined = result?.choices?.[0]?.message?.content;
+        const name = result.content;
         return name?.trim().replace(/^["'`]+|["'`]+$/g, '').slice(0, 30) || `새 ${typeLabel}`;
     } catch {
         return `새 ${typeLabel}`;
@@ -314,47 +236,23 @@ export async function generateStyleBlockFromKorean(
 ): Promise<string> {
     const desc = koreanDescription.trim();
     if (!desc) throw new DalleError('invalid-response', '한글 묘사가 비어있습니다.');
-
-    const apiKey = await getOpenAiKey();
-
-    let response: Response;
+    if (model !== 'gpt-4o' && model !== 'gpt-4o-mini') {
+        throw new DalleError('invalid-response', '지원하지 않는 OpenAI 모델입니다.');
+    }
+    let content: string;
     try {
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model,
-                messages: [
-                    { role: 'system', content: STYLE_BLOCK_CONVERTER_PROMPT },
-                    { role: 'user', content: `Korean description: "${desc}"\n\nOutput the style block (single line, English keywords only):` },
-                ],
-                temperature: 0.5,
-                max_tokens: 220,
-            }),
+        const response = await callOpenAiChatTauri({
+            model,
+            system: STYLE_BLOCK_CONVERTER_PROMPT,
+            user: `Korean description: "${desc}"\n\nOutput the style block (single line, English keywords only):`,
+            temperature: 0.5,
+            max_tokens: 220,
         });
-    } catch {
-        throw new DalleError('network', '네트워크 오류. 연결 확인 후 다시 시도해주세요.');
+        content = response.content;
+    } catch (error) {
+        throw classifyOpenAiProxyError(error);
     }
 
-    if (!response.ok) {
-        let body: any = null;
-        try { body = await response.json(); } catch { /* ignore */ }
-        const msg: string = body?.error?.message || response.statusText;
-        if (response.status === 401) throw new DalleError('missing-key', 'OpenAI API 키가 유효하지 않습니다.');
-        if (response.status === 429) throw new DalleError('rate-limit', '요청 한도 초과. 잠시 후 다시 시도해주세요.');
-        if (response.status >= 500) throw new DalleError('server', `OpenAI 서버 오류 (${response.status})`);
-        throw new DalleError('unknown', `변환 실패: ${msg}`);
-    }
-
-    let result: any;
-    try { result = await response.json(); } catch {
-        throw new DalleError('invalid-response', '응답을 해석할 수 없습니다.');
-    }
-
-    const content: string | undefined = result?.choices?.[0]?.message?.content;
     if (!content || !content.trim()) {
         throw new DalleError('invalid-response', '응답이 비어있습니다.');
     }
@@ -372,19 +270,8 @@ export async function generateStyleBlockFromKorean(
 /** 키 유효성 간단 테스트 (models 엔드포인트 호출) */
 export async function testOpenAiApiKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
     if (!apiKey?.trim()) return { ok: false, message: 'API 키를 입력해주세요.' };
-
     try {
-        const response = await fetch('https://api.openai.com/v1/models', {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${apiKey.trim()}` },
-        });
-
-        if (response.ok) return { ok: true, message: 'API 키가 유효합니다.' };
-
-        const body = await response.json().catch(() => null);
-        const msg = body?.error?.message || response.statusText;
-        if (response.status === 401) return { ok: false, message: 'API 키가 유효하지 않습니다.' };
-        return { ok: false, message: `API 테스트 실패: ${msg}` };
+        return await testStoredOpenAiKey();
     } catch {
         return { ok: false, message: '네트워크 오류 또는 API 엔드포인트에 연결할 수 없습니다.' };
     }

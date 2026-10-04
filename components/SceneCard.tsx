@@ -3,10 +3,10 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Cut, Scene, GeneratedImage, ArtStyle } from '../types';
 import { SparklesIcon, CheckIcon, SpeakerWaveIcon, TrashIcon, PhotoIcon, ChevronDownIcon, XIcon, PencilIcon, ScissorsIcon, UploadIcon, SpinnerIcon, RefreshIcon, UserIcon, PlusIcon, BookmarkSquareIcon, DownloadIcon, UndoIcon, ZoomInIcon } from './icons';
 import { useAppContext } from '../AppContext';
-import { IS_TAURI, saveAsset, resolveImageUrl } from '../services/tauriAdapter';
+import { IS_TAURI, saveAsset, resolveImageUrl, downloadFile } from '../services/tauriAdapter';
 import { AssetTagPopup, AssetCatalogModal } from './AssetCatalogModal';
 // buildArtStylePrompt import 제거됨 (2026-05-08) — FULL 모달 제거로 미사용
-import { createGeneratedImage, isFirstCutInBatch, deriveOutfitSessionsFromCuts } from '../appUtils';
+import { createGeneratedImage, isFirstCutInBatch, deriveOutfitSessionsFromCuts, shouldSubmitPromptRefinement } from '../appUtils';
 import type { AssetCatalogEntry } from '../services/tauriAdapter';
 
 interface CutCardProps {
@@ -276,6 +276,21 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
         } catch (err) { console.error('Edit failed:', err); }
     };
 
+    const handleDownloadSelectedImage = async () => {
+        if (!selectedImage?.imageUrl) return;
+        try {
+            const response = await fetch(selectedImage.imageUrl);
+            if (!response.ok) throw new Error(`이미지 읽기 실패 (${response.status})`);
+            await downloadFile(
+                await response.blob(),
+                `cut_${cut.cutNumber}.png`,
+                [{ name: 'PNG Image', extensions: ['png'] }],
+            );
+        } catch (error: any) {
+            actions.addNotification(`다운로드 실패: ${error?.message || error}`, 'error');
+        }
+    };
+
     // ─── 참조 이미지 핸들러 ───
     const handleRefFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -493,7 +508,7 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                                 <button onClick={() => actions.handleSelectImageForCut(cut.cutNumber, null)} className="absolute top-1 right-1 p-1 bg-red-500/80 text-white rounded-md opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm" title="대표 이미지 선택 해제"><XIcon className="w-3 h-3" /></button>
                                 {IS_TAURI && <button onClick={(e) => { e.stopPropagation(); setShowAssetTagPopup(true); }} className="absolute top-1 left-1 p-1 bg-amber-600/80 text-white rounded-md opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm" title="에셋으로 저장"><BookmarkSquareIcon className="w-3 h-3" /></button>}
                                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent pt-4 pb-1.5 px-1.5 flex justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={(e) => { e.stopPropagation(); fetch(selectedImage.imageUrl).then(r => r.blob()).then(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `cut_${cut.cutNumber}.png`; a.click(); URL.revokeObjectURL(a.href); }).catch(() => { const a = document.createElement('a'); a.href = selectedImage.imageUrl; a.download = `cut_${cut.cutNumber}.png`; a.click(); }); }} className="p-1.5 bg-purple-600/90 text-white rounded-md hover:bg-purple-500 backdrop-blur-sm" title="다운로드"><DownloadIcon className="w-3 h-3" /></button>
+                                    <button onClick={(e) => { e.stopPropagation(); void handleDownloadSelectedImage(); }} className="p-1.5 bg-purple-600/90 text-white rounded-md hover:bg-purple-500 backdrop-blur-sm" title="다운로드"><DownloadIcon className="w-3 h-3" /></button>
                                     <button onClick={(e) => { e.stopPropagation(); handleUndo(); }} disabled={undoStack.length <= 1} className="p-1.5 bg-zinc-600/90 text-white rounded-md hover:bg-zinc-500 backdrop-blur-sm disabled:opacity-30" title="Undo"><UndoIcon className="w-3 h-3" /></button>
                                     <button onClick={(e) => { e.stopPropagation(); handleUpscale(e.shiftKey ? 4 : 2); }} className="p-1.5 bg-orange-600/90 text-white rounded-md hover:bg-orange-500 backdrop-blur-sm" title="HQ Upscale (Shift=4x)"><ZoomInIcon className="w-3 h-3" /></button>
                                 </div>
@@ -588,13 +603,11 @@ export const CutCard: React.FC<CutCardProps> = ({ cut, scene }) => {
                     <button onClick={() => actions.handleToggleIntenseEmotion(cut.cutNumber)} disabled={cut.isIntensifying} className={`flex-1 px-2 py-1.5 text-[10px] font-bold rounded-md flex items-center justify-center gap-1 transition-all duration-200 ${cut.isIntensifying ? 'bg-rose-900/50 text-rose-300 border border-rose-700/40 animate-pulse' : cut.useIntenseEmotion ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.4)]' : 'bg-gradient-to-br from-rose-500/15 to-rose-600/5 hover:from-rose-500/25 hover:to-rose-600/10 text-rose-300 hover:text-rose-200 border border-rose-500/50 shadow-[0_0_10px_rgba(244,63,94,0.1)] hover:shadow-[0_0_14px_rgba(244,63,94,0.25)]'}`}>{cut.isIntensifying ? '⏳ 생성중' : cut.useIntenseEmotion ? '🔥 강화됨' : '🔥 강화'}</button>
                 </div>
                 <div className="flex gap-1.5">
-                    <input type="text" value={refineInput} onChange={e => setRefineInput(e.target.value)}
+                    <textarea rows={2} value={refineInput} onChange={e => setRefineInput(e.target.value)}
                         onKeyDown={e => {
-                            if (e.nativeEvent.isComposing) return;
-                            if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && refineInput.trim()) { e.preventDefault(); handleEditImage(); }
-                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && refineInput.trim()) { e.preventDefault(); actions.handleRefinePrompt(cut.cutNumber, refineInput); /* ★ 텍스트 보존 */ }
+                            if (shouldSubmitPromptRefinement(e.nativeEvent, refineInput)) { e.preventDefault(); actions.handleRefinePrompt(cut.cutNumber, refineInput); /* ★ 텍스트 보존 */ }
                         }}
-                        placeholder="Enter=편집 / ⌘Enter=프롬프트수정" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-[10px] text-white placeholder-zinc-600 focus:border-orange-500 focus:outline-none" />
+                        placeholder="Enter=줄바꿈 / ⌘Enter=프롬프트 수정" className="flex-1 resize-y bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-[10px] text-white placeholder-zinc-600 focus:border-orange-500 focus:outline-none" />
                     <button onClick={() => { if (refineInput.trim()) { actions.handleRefinePrompt(cut.cutNumber, refineInput); /* ★ 텍스트 보존 */ } }} disabled={!refineInput.trim() || cut.imageLoading}
                         className="px-2 py-1.5 bg-transparent hover:bg-orange-500/10 disabled:bg-zinc-700 text-orange-400 text-[10px] font-bold rounded-md border border-orange-500/50 flex items-center gap-0.5 transition-colors">Refine</button>
                     <button onClick={handleEditImage} disabled={!refineInput.trim() || !selectedImage || cut.imageLoading}

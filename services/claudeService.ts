@@ -236,114 +236,38 @@ async function withRetryOn429<T>(fn: () => Promise<T>, label: string, onRetrySta
 
 // ─── Unified Exports (auto-selects Tauri vs Browser + 429 retry) ─
 
-// ─── Direct fetch (Rust proxy 우회 — localStorage에서 API 키 로드) ──────
-
-async function _getClaudeKey(): Promise<string> {
-    const { loadApiKeys } = await import('./tauriAdapter');
-    const keys = await loadApiKeys();
-    if (!keys.claude) throw new Error('Claude API 키가 설정되지 않았습니다. 설정에서 입력해주세요.');
-    return keys.claude;
-}
-
-async function callClaudeDirect(
-    systemPrompt: string, userPrompt: string,
-    options?: { temperature?: number; maxTokens?: number; responseFormat?: 'text' | 'json' }
-): Promise<ClaudeResponse> {
-    const apiKey = await _getClaudeKey();
-    const body: any = {
-        model: getClaudeModel(), max_tokens: options?.maxTokens || 8192,
-        system: systemPrompt, messages: [{ role: 'user', content: userPrompt }],
-    };
-    if (options?.temperature !== undefined) body.temperature = options.temperature;
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify(body),
-    });
-    if (!res.ok) { const e = await res.text(); throw new Error(`Claude API 오류 (${res.status}): ${e}`); }
-    const data = await res.json();
-    const txt = data.content?.find((c: any) => c.type === 'text');
-    return { text: txt?.text?.trim() || '', inputTokens: data.usage?.input_tokens || 0, outputTokens: data.usage?.output_tokens || 0, totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
-}
-
-async function callClaudeStreamDirect(
-    systemPrompt: string, userPrompt: string, onProgress?: (len: number) => void,
-    options?: { temperature?: number; maxTokens?: number }
-): Promise<ClaudeResponse> {
-    const apiKey = await _getClaudeKey();
-    const body: any = {
-        model: getClaudeModel(), max_tokens: options?.maxTokens || 8192, stream: true,
-        system: systemPrompt, messages: [{ role: 'user', content: userPrompt }],
-    };
-    if (options?.temperature !== undefined) body.temperature = options.temperature;
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify(body),
-    });
-    if (!res.ok) { const e = await res.text(); throw new Error(`Claude 스트리밍 오류 (${res.status}): ${e}`); }
-    const reader = res.body!.getReader(); const decoder = new TextDecoder();
-    let fullText = '', inputTokens = 0, outputTokens = 0, buf = '';
-    while (true) {
-        const { done, value } = await reader.read(); if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n'); buf = lines.pop() || '';
-        for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const j = line.slice(6); if (j === '[DONE]') continue;
-            try {
-                const ev = JSON.parse(j);
-                if (ev.type === 'content_block_delta' && ev.delta?.text) { fullText += ev.delta.text; onProgress?.(fullText.length); }
-                else if (ev.type === 'message_delta' && ev.usage) { outputTokens = ev.usage.output_tokens || 0; }
-                else if (ev.type === 'message_start' && ev.message?.usage) { inputTokens = ev.message.usage.input_tokens || 0; }
-            } catch { /* skip */ }
-        }
-    }
-    return { text: fullText.trim(), inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
-}
-
-async function callClaudeVisionDirect(
-    systemPrompt: string, userPrompt: string, imageBase64: string, mimeType: string = 'image/png',
-    options?: { temperature?: number; maxTokens?: number }
-): Promise<ClaudeResponse> {
-    const apiKey = await _getClaudeKey();
-    const b64 = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-    const body: any = {
-        model: getClaudeModel(), max_tokens: options?.maxTokens || 8192, system: systemPrompt,
-        messages: [{ role: 'user', content: [
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: b64 } },
-            { type: 'text', text: userPrompt },
-        ]}],
-    };
-    if (options?.temperature !== undefined) body.temperature = options.temperature;
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify(body),
-    });
-    if (!res.ok) { const e = await res.text(); throw new Error(`Claude Vision 오류 (${res.status}): ${e}`); }
-    const data = await res.json();
-    const txt = data.content?.find((c: any) => c.type === 'text');
-    return { text: txt?.text?.trim() || '', inputTokens: data.usage?.input_tokens || 0, outputTokens: data.usage?.output_tokens || 0, totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0) };
-}
-
 export async function callClaude(
     systemPrompt: string, userPrompt: string,
     options?: { temperature?: number; maxTokens?: number; responseFormat?: 'text' | 'json'; onRetryStatus?: RetryStatusCallback }
 ): Promise<ClaudeResponse> {
-    return withRetryOn429(() => callClaudeDirect(systemPrompt, userPrompt, options), 'callClaude', options?.onRetryStatus);
+    if (!IS_TAURI) throw new Error('Claude는 데스크톱 앱에서만 사용할 수 있습니다.');
+    return withRetryOn429(
+        () => callClaudeTauri(systemPrompt, userPrompt, { ...options, model: getClaudeModel() }),
+        'callClaude',
+        options?.onRetryStatus,
+    );
 }
 
 export async function callClaudeStream(
     systemPrompt: string, userPrompt: string, onProgress?: (len: number) => void,
     options?: { temperature?: number; maxTokens?: number; onRetryStatus?: RetryStatusCallback }
 ): Promise<ClaudeResponse> {
-    return withRetryOn429(() => callClaudeStreamDirect(systemPrompt, userPrompt, onProgress, options), 'callClaudeStream', options?.onRetryStatus);
+    if (!IS_TAURI) throw new Error('Claude는 데스크톱 앱에서만 사용할 수 있습니다.');
+    return withRetryOn429(
+        () => callClaudeStreamTauri(systemPrompt, userPrompt, onProgress, { ...options, model: getClaudeModel() }),
+        'callClaudeStream',
+        options?.onRetryStatus,
+    );
 }
 
 export async function callClaudeVision(
     systemPrompt: string, userPrompt: string, imageBase64: string, mimeType: string = 'image/png',
     options?: { temperature?: number; maxTokens?: number; onRetryStatus?: RetryStatusCallback }
 ): Promise<ClaudeResponse> {
-    return withRetryOn429(() => callClaudeVisionDirect(systemPrompt, userPrompt, imageBase64, mimeType, options), 'callClaudeVision', options?.onRetryStatus);
+    if (!IS_TAURI) throw new Error('Claude는 데스크톱 앱에서만 사용할 수 있습니다.');
+    return withRetryOn429(
+        () => callClaudeVisionTauri(systemPrompt, userPrompt, imageBase64, mimeType, { ...options, model: getClaudeModel() }),
+        'callClaudeVision',
+        options?.onRetryStatus,
+    );
 }

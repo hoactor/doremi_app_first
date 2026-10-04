@@ -22,7 +22,8 @@ export type ArtStyle = 'normal' | 'moe' | 'dalle-chibi' | 'custom' | 'vibrant' |
 export type ContentFormat = 'ssul-shorts' | 'webtoon' | 'anime';
 export type AIModelTier = 'sonnet' | 'opus' | 'gemini';
 export type ImageEngine = 'gemini' | 'flux' | 'openai';
-export type FluxModel = 'flux-pro' | 'flux-flex' | 'flux-lora';
+/** `flux-2-flex`는 저장된 구 프로젝트의 호환 키로 유지한다. */
+export type FluxModel = 'flux-pro' | 'flux-flex' | 'flux-lora' | 'flux-2-flex';
 export type OpenAIImageQuality = 'low' | 'medium' | 'high';
 export type ScriptInputMode = 'auto' | 'narration' | 'msf' | 'uss';
 
@@ -56,7 +57,7 @@ export interface GeneratedImage {
     localPath?: string;
     sourceCutNumber: string;
     prompt: string;
-    engine: 'dalle3' | 'nano' | 'nano-v3' | 'imagen-rough' | 'gpt-image-2';
+    engine: 'dalle3' | 'nano' | 'nano-v3' | 'imagen-rough' | 'gpt-image-2' | 'flux';
     /** Phase B: OpenAI gpt-image-2 quality (engine === 'gpt-image-2'일 때만) */
     openaiQuality?: OpenAIImageQuality;
     createdAt: string;
@@ -177,6 +178,9 @@ export interface Cut {
     imageUrls: string[];
     suggestedEffect?: { name: string; prompt: string; } | null;
     imageLoading: boolean;
+    /** 디스크에 영속화된 오디오 상대 경로. 레거시 단일 audioPath도 함께 지원한다. */
+    audioPaths?: string[];
+    audioPath?: string | null;
     audioDataUrls?: string[];
     audioDuration?: number;
     selectedImageId: string | null;
@@ -212,6 +216,8 @@ export interface Cut {
      * anchor 여부 자체는 런타임 계산(isFirstCutInBatch)으로 결정.
      */
     staleByAnchor?: boolean;
+    /** 파이프라인에서 전달되는 레거시/확장 컷 종류. */
+    cutType?: string;
 }
 
 export interface Scene {
@@ -344,7 +350,6 @@ export interface AppDataState {
     isZipping: boolean;
     zippingProgress: { current: number, total: number, isCancelling: boolean } | null;
     notifications: Notification[];
-    openAiApiKey: string | null;
     geminiTokenCount: number;
     claudeTokenCount: number;
     dalleImageCount: number;
@@ -404,6 +409,8 @@ export interface AppDataState {
     styleLoraId?: string;
     styleLoraScaleOverride?: number;
     currentProjectId: string | null;
+    /** 최초 생성 시각. 저장할 때마다 createdAt이 바뀌지 않도록 프로젝트와 함께 복원한다. */
+    projectCreatedAt?: string;
     isProjectSaved: boolean;
     /**
      * Phase A.6: Context 모드 씬 디자인. outfitSession별 1개.
@@ -430,6 +437,8 @@ export type AppAction =
     | { type: 'SET_EDITABLE_STORYBOARD'; payload: EditableScene[] | null }
     | { type: 'SET_STORYBOARD_SEED'; payload: number | null }
     | { type: 'UPDATE_CUT'; payload: { cutNumber: string; data: Partial<Cut> } }
+    | { type: 'UPDATE_IMAGE_LOCAL_PATHS'; payload: Array<{ id: string; localPath: string }> }
+    | { type: 'REMAP_CUT_IMAGE_URLS'; payload: Array<{ cutNumber: string; from: string; to: string }> }
     | { type: 'DELETE_CUT'; payload: string }
     | { type: 'UPDATE_SCENES'; payload: Scene[] }
     | { type: 'UPDATE_SCENE'; payload: { sceneNumber: number; data: Partial<Scene> } }
@@ -438,7 +447,6 @@ export type AppAction =
     | { type: 'SET_ZIPPING_PROGRESS'; payload: { current: number, total: number, isCancelling: boolean } | null }
     | { type: 'ADD_NOTIFICATION'; payload: Notification }
     | { type: 'REMOVE_NOTIFICATION'; payload: number }
-    | { type: 'SET_OPENAI_API_KEY'; payload: string | null }
     | { type: 'SET_CONTEXT_SUMMARY'; payload: string | null }
     | { type: 'ADD_USAGE'; payload: { tokens: number; source: ApiSource } }
     | { type: 'ADD_FAL_USAGE'; payload: { images: number; model: FluxModel } }
@@ -536,7 +544,7 @@ export type AppAction =
 // ─── Phase 5: 로컬 스토리지 타입 ─────────────────────────────────
 
 export interface ProjectMetadata {
-    version: 2;
+    version: 3;
     id: string;
     title: string;
     createdAt: string;
@@ -558,22 +566,84 @@ export interface ProjectMetadata {
     logline?: string;
     contentFormat?: ContentFormat;
     aiModelTier?: AIModelTier;
+    pipelineCheckpoint?: PipelineCheckpoint;
+    storyBrief?: string;
+    storyboardSeed?: number | null;
+    customArtStyle?: string;
+    selectedNanoModel?: NanoModel;
+    selectedImageEngine?: ImageEngine;
+    selectedFluxModel?: FluxModel;
+    imageEngineMode?: ImageEngineMode;
+    openaiImageQuality?: OpenAIImageQuality;
+    selectedDalleStyleId?: string;
+    scriptInputMode?: ScriptInputMode;
+    styleLoraId?: string | null;
+    styleLoraScaleOverride?: number;
+    editableStoryboard?: EditableScene[] | null;
+    generatedImageHistory?: GeneratedImage[];
+    scriptMetadata?: AppDataState['scriptMetadata'];
+    contextSummary?: string | null;
+    contextSceneDesigns?: AppDataState['contextSceneDesigns'];
+    backgroundMusicUrl?: string | null;
+    backgroundMusicName?: string | null;
+    animationStyle?: AppDataState['animationStyle'];
+    falUsage?: AppDataState['falUsage'];
+    openaiUsage?: AppDataState['openaiUsage'];
 }
 
 export interface ProjectScene {
     sceneNumber: number;
     title: string;
+    settingPrompt?: string;
     cuts: ProjectCut[];
 }
 
 export interface ProjectCut {
+    id?: string;
     cutNumber: string;
     narration: string;
     imagePaths: string[];
     selectedImagePath: string | null;
-    audioPath: string | null;
+    selectedImageId?: string | null;
+    /** v1/v2 단일 오디오 경로. */
+    audioPath?: string | null;
+    /** v3 다중 오디오 경로. */
+    audioPaths?: string[];
+    /** v1/v2 읽기 호환 전용. v3 writer는 data/blob URL을 project.json에 기록하지 않는다. */
+    audioDataUrls?: string[];
+    audioDuration?: number;
     imagePrompt: string;
     cutType?: string;
+    imageUrls?: string[];
+    characters?: string[];
+    location?: string;
+    cameraAngle?: string;
+    sceneDescription?: string;
+    characterEmotionAndExpression?: string;
+    characterPose?: string;
+    characterOutfit?: string;
+    characterIdentityDNA?: string;
+    locationDescription?: string;
+    otherNotes?: string;
+    suggestedEffect?: Cut['suggestedEffect'];
+    directorialIntent?: string;
+    dialogueSpeaker?: string;
+    guestCharacterUrl?: string | null;
+    guestCharacterName?: string | null;
+    voiceEmotion?: string;
+    voicePitch?: number;
+    voiceSpeed?: number;
+    artStyleOverride?: ArtStyle;
+    useIntenseEmotion?: boolean;
+    characterEmotionAndExpressionIntense?: string;
+    sceneDescriptionIntense?: string;
+    characterPoseIntense?: string;
+    sceneLayerId?: string;
+    sceneNarrative?: string;
+    cameraNote?: string;
+    moodNote?: string;
+    detailsNarrative?: string;
+    staleByAnchor?: boolean;
 }
 
 export interface ProjectListEntry {

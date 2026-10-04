@@ -68,43 +68,143 @@ export interface ApiKeys {
     openai: string | null;
 }
 
-// API 키: localStorage 전용 (dev 빌드 코드서명이 매번 달라 Keychain 접근 거부됨)
-const _KEYS_STORE = 'doremissul_api_keys';
-function _readKeys(): ApiKeys {
-    const s = JSON.parse(localStorage.getItem(_KEYS_STORE) || '{}');
-    return {
-        claude: s.claude || null,
-        gemini: s.gemini || null,
-        supertone: s.supertone || null,
-        fal: s.fal || null,
-        openai: s.openai || null,
-    };
+export type ApiKeyStatus = Record<keyof ApiKeys, boolean>;
+
+const EMPTY_KEYS: ApiKeys = {
+    claude: null,
+    gemini: null,
+    supertone: null,
+    fal: null,
+    openai: null,
+};
+
+const LEGACY_KEYS_STORES = ['doremi_api_keys', 'doremi_first_api_keys', 'doremissul_api_keys'] as const;
+const LEGACY_OPENAI_STORE = 'openai_api_key_v2';
+let legacyMigration: Promise<void> | null = null;
+
+export function mergeLegacyApiKeyStores(
+    stores: Array<Record<string, unknown>>,
+    legacyOpenAi?: string | null,
+): Partial<ApiKeys> {
+    const result: Partial<ApiKeys> = {};
+    for (const store of stores) {
+        for (const key of Object.keys(EMPTY_KEYS) as (keyof ApiKeys)[]) {
+            const value = store[key];
+            // 빈 값/null은 다른 store에서 찾은 유효 키를 절대 덮지 않는다.
+            if (typeof value === 'string' && value.trim()) result[key] = value.trim();
+        }
+    }
+    if (typeof legacyOpenAi === 'string' && legacyOpenAi.trim()) {
+        result.openai = legacyOpenAi.trim();
+    }
+    return result;
+}
+
+interface LegacyKeyReadResult {
+    keys: Partial<ApiKeys>;
+    deletableStores: string[];
+    deleteOpenAiStore: boolean;
+}
+
+export function selectMissingLegacyApiKeys(
+    keys: Partial<ApiKeys>,
+    status: ApiKeyStatus,
+): Partial<ApiKeys> {
+    return Object.fromEntries(
+        Object.entries(keys).filter(([key, value]) => Boolean(value) && !status[key as keyof ApiKeys])
+    ) as Partial<ApiKeys>;
+}
+
+function readLegacyKeys(): LegacyKeyReadResult {
+    const empty: LegacyKeyReadResult = { keys: {}, deletableStores: [], deleteOpenAiStore: false };
+    try {
+        const stores: Array<Record<string, unknown>> = [];
+        const deletableStores: string[] = [];
+        for (const storageKey of LEGACY_KEYS_STORES) {
+            const raw = localStorage.getItem(storageKey);
+            if (raw === null) continue;
+            try {
+                const parsed = JSON.parse(raw);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+                stores.push(parsed as Record<string, unknown>);
+                deletableStores.push(storageKey);
+            } catch {
+                // 파싱하지 못한 원본은 삭제하지 않는다.
+            }
+        }
+        const legacyOpenAi = localStorage.getItem(LEGACY_OPENAI_STORE);
+        return {
+            keys: mergeLegacyApiKeyStores(stores, legacyOpenAi),
+            deletableStores,
+            deleteOpenAiStore: typeof legacyOpenAi === 'string' && legacyOpenAi.trim().length > 0,
+        };
+    } catch {
+        return empty;
+    }
+}
+
+/**
+ * 과거 localStorage 키를 Keychain으로 한 번만 옮긴다.
+ * Rust 저장과 상태 재확인이 모두 성공한 뒤에만 브라우저 사본을 지운다.
+ */
+async function migrateLegacyApiKeys(): Promise<void> {
+    if (!IS_TAURI) return;
+    if (!legacyMigration) {
+        legacyMigration = (async () => {
+            const legacy = readLegacyKeys();
+            const entries = Object.entries(legacy.keys).filter(([, value]) => !!value) as [keyof ApiKeys, string][];
+            if (entries.length === 0) return;
+            // Keychain에 이미 있는 최신 값은 오래된 localStorage 값으로 덮지 않는다.
+            const beforeStatus = await invoke<ApiKeyStatus>('check_api_keys');
+            const missingKeys = selectMissingLegacyApiKeys(legacy.keys, beforeStatus);
+            if (Object.keys(missingKeys).length > 0) {
+                await invoke<void>('save_api_keys', { keys: missingKeys });
+            }
+            const status = await invoke<ApiKeyStatus>('check_api_keys');
+            if (!entries.every(([key]) => status[key])) {
+                throw new Error('API 키를 Keychain으로 옮긴 뒤 확인하지 못했습니다. 기존 키는 삭제하지 않았습니다.');
+            }
+            for (const storageKey of legacy.deletableStores) localStorage.removeItem(storageKey);
+            if (legacy.deleteOpenAiStore) localStorage.removeItem(LEGACY_OPENAI_STORE);
+        })().catch((error) => {
+            legacyMigration = null;
+            throw error;
+        });
+    }
+    return legacyMigration;
 }
 
 export async function saveApiKeys(keys: Partial<ApiKeys>): Promise<void> {
-    localStorage.setItem(_KEYS_STORE, JSON.stringify({ ..._readKeys(), ...keys }));
+    if (!IS_TAURI) throw new Error('API 키는 데스크톱 앱의 macOS Keychain에서만 저장할 수 있습니다.');
+    const changed = Object.fromEntries(
+        Object.entries(keys)
+            .filter(([, value]) => typeof value === 'string' && value.trim())
+            .map(([key, value]) => [key, (value as string).trim()]),
+    );
+    if (Object.keys(changed).length === 0) return;
+    await invoke<void>('save_api_keys', { keys: changed });
 }
 
 export async function loadApiKeys(): Promise<ApiKeys> {
-    return _readKeys();
+    if (!IS_TAURI) return { ...EMPTY_KEYS };
+    await migrateLegacyApiKeys();
+    return invoke<ApiKeys>('load_api_keys');
 }
 
-export async function checkApiKeys(): Promise<{ claude: boolean; gemini: boolean; supertone: boolean; fal: boolean; openai: boolean }> {
-    const k = _readKeys();
-    return { claude: !!k.claude, gemini: !!k.gemini, supertone: !!k.supertone, fal: !!k.fal, openai: !!k.openai };
+export async function checkApiKeys(): Promise<ApiKeyStatus> {
+    if (!IS_TAURI) {
+        return { claude: false, gemini: false, supertone: false, fal: false, openai: false };
+    }
+    await migrateLegacyApiKeys();
+    return invoke<ApiKeyStatus>('check_api_keys');
 }
 
 /** fal.ai API key를 가져오기 (falService 초기화용) */
 export async function getFalApiKey(): Promise<string> {
-    if (IS_TAURI) {
-        const keys = await loadApiKeys();
-        if (!keys.fal) throw new Error('fal.ai API 키가 설정되지 않았습니다.');
-        return keys.fal;
-    } else {
-        const key = (import.meta as any).env?.VITE_FAL_KEY;
-        if (!key) throw new Error('VITE_FAL_KEY 환경변수가 설정되지 않았습니다.');
-        return key;
-    }
+    if (!IS_TAURI) throw new Error('fal.ai는 데스크톱 앱에서만 사용할 수 있습니다.');
+    const keys = await loadApiKeys();
+    if (!keys.fal) throw new Error('fal.ai API 키가 설정되지 않았습니다.');
+    return keys.fal;
 }
 
 // ─── Claude API ─────────────────────────────────────────────────
@@ -129,13 +229,14 @@ interface ClaudeResponse {
 export async function callClaudeTauri(
     systemPrompt: string,
     userPrompt: string,
-    options?: { temperature?: number; maxTokens?: number }
+    options?: { temperature?: number; maxTokens?: number; model?: string }
 ): Promise<ClaudeResponse> {
     const request: ClaudeRequest = {
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         max_tokens: options?.maxTokens || 8192,
         temperature: options?.temperature,
+        model: options?.model,
     };
 
     const data = await invoke<any>('proxy_claude', { request });
@@ -154,51 +255,55 @@ export async function callClaudeStreamTauri(
     systemPrompt: string,
     userPrompt: string,
     onProgress?: (textLength: number) => void,
-    options?: { temperature?: number; maxTokens?: number }
+    options?: { temperature?: number; maxTokens?: number; model?: string }
 ): Promise<ClaudeResponse> {
     const eventId = `claude-stream-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let fullText = '';
     let inputTokens = 0;
     let outputTokens = 0;
 
-    return new Promise<ClaudeResponse>(async (resolve, reject) => {
-        const unlisten = await listen(eventId, (event: any) => {
-            if (event.done) {
-                unlisten();
-                resolve({
-                    text: fullText.trim(),
-                    inputTokens,
-                    outputTokens,
-                    totalTokens: inputTokens + outputTokens,
+    return new Promise<ClaudeResponse>((resolve, reject) => {
+        let unlisten: (() => void) | undefined;
+        void (async () => {
+            try {
+                unlisten = await listen(eventId, (event: any) => {
+                    if (event.done) {
+                        unlisten?.();
+                        resolve({
+                            text: fullText.trim(),
+                            inputTokens,
+                            outputTokens,
+                            totalTokens: inputTokens + outputTokens,
+                        });
+                        return;
+                    }
+
+                    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+                        fullText += event.delta.text;
+                        if (onProgress) onProgress(fullText.length);
+                    }
+                    if (event.type === 'message_delta' && event.usage) {
+                        outputTokens = event.usage.output_tokens || 0;
+                    }
+                    if (event.type === 'message_start' && event.message?.usage) {
+                        inputTokens = event.message.usage.input_tokens || 0;
+                    }
                 });
-                return;
-            }
 
-            if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-                fullText += event.delta.text;
-                if (onProgress) onProgress(fullText.length);
+                const request: ClaudeRequest = {
+                    system: systemPrompt,
+                    messages: [{ role: 'user', content: userPrompt }],
+                    max_tokens: options?.maxTokens || 8192,
+                    temperature: options?.temperature,
+                    model: options?.model,
+                    stream: true,
+                };
+                await invoke('proxy_claude_stream', { request, eventId });
+            } catch (err) {
+                unlisten?.();
+                reject(err);
             }
-            if (event.type === 'message_delta' && event.usage) {
-                outputTokens = event.usage.output_tokens || 0;
-            }
-            if (event.type === 'message_start' && event.message?.usage) {
-                inputTokens = event.message.usage.input_tokens || 0;
-            }
-        });
-
-        try {
-            const request: ClaudeRequest = {
-                system: systemPrompt,
-                messages: [{ role: 'user', content: userPrompt }],
-                max_tokens: options?.maxTokens || 8192,
-                temperature: options?.temperature,
-                stream: true,
-            };
-            await invoke('proxy_claude_stream', { request, eventId });
-        } catch (err) {
-            unlisten();
-            reject(err);
-        }
+        })();
     });
 }
 
@@ -208,19 +313,23 @@ export async function callClaudeVisionTauri(
     userPrompt: string,
     imageBase64: string,
     mimeType: string = 'image/png',
-    options?: { temperature?: number; maxTokens?: number }
+    options?: { temperature?: number; maxTokens?: number; model?: string }
 ): Promise<ClaudeResponse> {
+    const normalizedImageBase64 = imageBase64.includes(',')
+        ? imageBase64.slice(imageBase64.indexOf(',') + 1)
+        : imageBase64;
     const request: ClaudeRequest = {
         system: systemPrompt,
         messages: [{
             role: 'user',
             content: [
-                { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
+                { type: 'image', source: { type: 'base64', media_type: mimeType, data: normalizedImageBase64 } },
                 { type: 'text', text: userPrompt },
             ],
         }],
-        max_tokens: options?.maxTokens || 4096,
+        max_tokens: options?.maxTokens || 8192,
         temperature: options?.temperature,
+        model: options?.model,
     };
 
     const data = await invoke<any>('proxy_claude', { request });
@@ -257,14 +366,18 @@ export async function callSupertoneTauri(
     voiceId: string,
     text: string,
     language?: string,
-    styleLabel?: string
+    styleLabel?: string,
+    speed?: number,
+    pitch?: number,
 ): Promise<Blob> {
     const bytes = await invoke<number[]>('proxy_supertone', {
         request: {
             voice_id: voiceId,
             text,
             language: language || 'ko',
-            style_label: styleLabel || 'default',
+            style_label: styleLabel || 'neutral',
+            speed: speed ?? 1.0,
+            pitch: pitch ?? 0,
         },
     });
     return new Blob([new Uint8Array(bytes)], { type: 'audio/wav' });
@@ -272,22 +385,32 @@ export async function callSupertoneTauri(
 
 // ─── Generic Fetch (CORS-free) ──────────────────────────────────
 
-export async function fetchViaTauri(
-    url: string,
-    options?: {
-        method?: string;
-        headers?: Record<string, string>;
-        body?: any;
-    }
-): Promise<{ status: number; data: any }> {
-    return invoke('proxy_fetch', {
-        request: {
-            url,
-            method: options?.method,
-            headers: options?.headers,
-            body: options?.body,
-        },
-    });
+export interface OpenAiDalleProxyResult {
+    image_base64: string;
+    revised_prompt: string;
+}
+
+export async function callOpenAiDalleTauri(request: {
+    prompt: string;
+    size: string;
+    quality: 'standard' | 'hd';
+    style: 'vivid' | 'natural';
+}): Promise<OpenAiDalleProxyResult> {
+    return invoke<OpenAiDalleProxyResult>('proxy_openai_dalle_generate', { request });
+}
+
+export async function callOpenAiChatTauri(request: {
+    model: 'gpt-4o' | 'gpt-4o-mini';
+    system: string;
+    user: string;
+    temperature?: number;
+    max_tokens?: number;
+}): Promise<{ content: string }> {
+    return invoke<{ content: string }>('proxy_openai_chat', { request });
+}
+
+export async function testStoredOpenAiKey(): Promise<{ ok: boolean; message: string }> {
+    return invoke<{ ok: boolean; message: string }>('test_openai_api_key');
 }
 
 // ─── File Download Helper (Tauri + Browser) ─────────────────────
@@ -337,6 +460,7 @@ export async function downloadFile(
 /** 앱 시작 시 필수 디렉토리 구조 생성 */
 export async function ensureDirectories(): Promise<void> {
     if (!IS_TAURI) return;
+    await migrateLegacyApiKeys();
     return invoke('ensure_directories');
 }
 
@@ -371,6 +495,11 @@ export async function saveAudioFile(
         filename,
         base64Data: base64Data,
     });
+}
+
+/** 프로젝트 하위 로컬 오디오 파일을 data: URL로 읽는다. */
+export async function readAudioBase64(relativePath: string): Promise<string> {
+    return invoke<string>('read_audio_base64', { relativePath });
 }
 
 /** 로컬 파일 → data:image/... base64 URL 반환 */
@@ -463,12 +592,6 @@ export async function deleteProject(projectId: string): Promise<void> {
     return invoke('delete_project', { projectId });
 }
 
-/** 30일 이상 업데이트 안 된 프로젝트 자동 삭제 */
-export async function cleanupOldProjects(maxAgeDays: number = 30): Promise<{ deleted: string[] }> {
-    const result: string = await invoke('cleanup_old_projects', { maxAgeDays });
-    return JSON.parse(result);
-}
-
 // ─── 로컬 스토리지: 에셋 ────────────────────────────────────────────
 
 export interface AssetCatalogEntry {
@@ -498,11 +621,21 @@ export async function saveAsset(
     base64Data: string,
     metadata: Partial<AssetCatalogEntry>
 ): Promise<string> {
+    const normalizedMetadata = {
+        ...metadata,
+        tags: {
+            character: metadata.tags?.character ?? null,
+            artStyle: metadata.tags?.artStyle || 'dalle-chibi',
+            location: metadata.tags?.location ?? null,
+            description: metadata.tags?.description ?? null,
+            ...(metadata.tags?.extraTypes !== undefined && { extraTypes: metadata.tags.extraTypes }),
+        },
+    };
     return invoke<string>('save_asset', {
         assetType,
         filename,
         base64Data: base64Data,
-        metadataJson: JSON.stringify(metadata),
+        metadataJson: JSON.stringify(normalizedMetadata),
     });
 }
 

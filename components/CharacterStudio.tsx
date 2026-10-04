@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import { CharacterDescription, AssetCatalogEntry, ArtStyle, LoRAEntry } from '../types';
-import { IS_TAURI, resolveImageUrl, loadAssetCatalog, saveAsset, updateAssetMetadata, deleteAsset, loadLoraRegistry } from '../services/tauriAdapter';
+import { IS_TAURI, resolveImageUrl, loadAssetCatalog, saveAsset, updateAssetMetadata, deleteAsset, loadLoraRegistry, downloadFile } from '../services/tauriAdapter';
 import { LoraRegistryModal } from './LoraRegistryModal';
 import { analyzeHairStyle } from '../services/geminiService';
 import { AssetTagPopup, analyzeAssetWithVision } from './AssetCatalogModal';
@@ -707,7 +707,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({
                                                 {/* ★ 호버 메뉴: 다운로드 + 삭제 */}
                                                 <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-zinc-900/90 rounded-md p-0.5 backdrop-blur-sm border border-zinc-700/50">
                                                     <button onClick={(e) => { e.stopPropagation(); setEditingAsset(asset); }} className="p-1 text-zinc-300 hover:text-orange-300 hover:bg-zinc-700 rounded transition-colors" title="태그 편집"><PencilIcon className="w-3 h-3" /></button>
-                                                    <button onClick={async (e) => { e.stopPropagation(); try { const url = await resolveImageUrl(asset.imagePath); const a = document.createElement('a'); a.href = url; a.download = `${asset.name}.png`; a.click(); } catch {} }} className="p-1 text-zinc-300 hover:text-white hover:bg-zinc-700 rounded transition-colors" title="다운로드"><DownloadIcon className="w-3 h-3" /></button>
+                                                    <button onClick={async (e) => { e.stopPropagation(); try { const url = await resolveImageUrl(asset.imagePath); const response = await fetch(url); if (!response.ok) throw new Error(`이미지 읽기 실패 (${response.status})`); await downloadFile(await response.blob(), `${asset.name}.png`, [{ name: 'PNG Image', extensions: ['png'] }]); } catch (error) { console.error('에셋 다운로드 실패:', error); } }} className="p-1 text-zinc-300 hover:text-white hover:bg-zinc-700 rounded transition-colors" title="다운로드"><DownloadIcon className="w-3 h-3" /></button>
                                                     <button onClick={async (e) => { e.stopPropagation(); if (!window.confirm(`"${asset.name}" 에셋을 삭제하시겠습니까?`)) return; try { await deleteAsset(asset.id); setAssets(prev => prev.filter(a => a.id !== asset.id)); } catch (err) { console.error('에셋 삭제 실패:', err); } }} className="p-1 text-red-400 hover:text-red-300 hover:bg-red-900/50 rounded transition-colors" title="삭제"><TrashIcon className="w-3 h-3" /></button>
                                                 </div>
                                             </div>

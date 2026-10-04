@@ -137,10 +137,9 @@ npm run tauri:build
 
 ### 브라우저 개발 모드 (기존 방식 — Tauri 없이)
 ```bash
-cp .env.example .env
-# .env에 API 키 입력
 npm run dev
 # → http://localhost:3000
+# 현재 브라우저 모드는 UI 확인 전용입니다. API 키는 넣지 않으며 유료 AI 호출은 차단됩니다.
 ```
 
 ---

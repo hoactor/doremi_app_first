@@ -10,7 +10,7 @@ import { Sidebar } from './components/Sidebar';
 import { AppModals } from './components/AppModals';
 import { SparklesIcon, SpinnerIcon, ChevronRightIcon, ChevronDownIcon, XIcon } from './components/icons';
 import { useAppContext } from './AppContext';
-import { Notification } from './types';
+import { Notification, GeneratedImage } from './types';
 import { IS_TAURI, openAssetCatalog, listen, resetWindowSize } from './services/tauriAdapter';
 
 const NotificationToast: React.FC<{ notification: Notification, onDismiss: (id: number) => void }> = ({ notification, onDismiss }) => {
@@ -82,30 +82,58 @@ export const App: React.FC = () => {
     const collapseInitDoneRef = useRef(false);
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const saveRequestRef = useRef(0);
+    const actionsRef = useRef(actions);
+    actionsRef.current = actions;
     
     // Phase 10 C-3: 에셋 독립 창 닫힘 감지
     useEffect(() => {
         if (!IS_TAURI) return;
+        let disposed = false;
         let unlisten: (() => void) | null = null;
         listen('asset-window-closed', () => {
+            if (disposed) return;
             setIsAssetWindowOpen(false);
-        }).then(fn => { unlisten = fn; });
-        return () => { if (unlisten) unlisten(); };
+        }).then(fn => {
+            if (disposed) fn();
+            else unlisten = fn;
+        }).catch(error => console.warn('[asset-window-closed] listener 실패', error));
+        return () => { disposed = true; if (unlisten) unlisten(); };
     }, []);
 
     // Phase A.7: 통합 이미지 스튜디오 → 메인 앱 이벤트 리스너
     useEffect(() => {
         if (!IS_TAURI) return;
+        let disposed = false;
         const unlisteners: (() => void)[] = [];
 
+        const register = async (event: string, handler: (payload: any) => void | Promise<void>) => {
+            try {
+                const unlisten = await listen(event, handler);
+                if (disposed) unlisten();
+                else unlisteners.push(unlisten);
+            } catch (error) {
+                console.warn(`[${event}] listener 실패`, error);
+            }
+        };
+
         // 카탈로그에 새 에셋 저장됨 → 카탈로그 갱신 신호
-        listen('image-studio-asset-saved', () => {
+        void register('image-studio-asset-saved', () => {
+            if (disposed) return;
             import('./services/tauriAdapter').then(m => m.emit?.('asset-catalog-updated', null).catch(() => {}));
-            actions.addNotification('이미지 스튜디오: 카탈로그에 저장됨', 'success');
-        }).then(fn => { unlisteners.push(fn); });
+            actionsRef.current.addNotification('이미지 스튜디오: 카탈로그에 저장됨', 'success');
+        });
 
         // 컷에 이미지 적용 요청 → ADD_IMAGE_TO_CUT
-        listen('image-studio-apply-to-cut', async (payload: { cutNumber: string; imageUrl: string; prompt?: string }) => {
+        void register('image-studio-apply-to-cut', async (payload: {
+            cutNumber: string;
+            imageUrl: string;
+            prompt?: string;
+            engine?: GeneratedImage['engine'];
+            model?: string;
+            tag?: GeneratedImage['tag'];
+        }) => {
+            if (disposed) return;
             if (!payload?.cutNumber || !payload?.imageUrl) return;
             try {
                 const { createGeneratedImage } = await import('./appUtils');
@@ -113,22 +141,23 @@ export const App: React.FC = () => {
                     imageUrl: payload.imageUrl,
                     sourceCutNumber: payload.cutNumber,
                     prompt: payload.prompt || '',
-                    engine: 'gpt-image-2',
-                    tag: 'normal',
+                    engine: payload.engine || 'gpt-image-2',
+                    model: payload.model,
+                    tag: payload.tag || 'normal',
                 });
                 dispatch({ type: 'ADD_IMAGE_TO_CUT', payload: { image: newImage, cutNumber: payload.cutNumber } });
-                actions.addNotification(`컷 ${payload.cutNumber}에 이미지 추가됨`, 'success');
+                actionsRef.current.addNotification(`컷 ${payload.cutNumber}에 이미지 추가됨`, 'success');
             } catch (e: any) {
                 console.error('[image-studio-apply-to-cut]', e);
-                actions.addNotification(`컷 적용 실패: ${e?.message ?? e}`, 'error');
+                actionsRef.current.addNotification(`컷 적용 실패: ${e?.message ?? e}`, 'error');
             }
-        }).then(fn => { unlisteners.push(fn); });
+        });
 
         // 스튜디오 창 닫힘 (현재 UI 정리할 게 없지만 향후 확장용)
-        listen('image-studio-window-closed', () => { /* no-op */ }).then(fn => { unlisteners.push(fn); });
+        void register('image-studio-window-closed', () => { /* no-op */ });
 
-        return () => { unlisteners.forEach(u => u()); };
-    }, [actions, dispatch]);
+        return () => { disposed = true; unlisteners.forEach(unlisten => unlisten()); };
+    }, [dispatch]);
 
     useLayoutEffect(() => {
         const updateHeaderHeight = () => { if (headerRef.current) actions.setUIState({ headerHeight: headerRef.current.offsetHeight }); };
@@ -184,9 +213,15 @@ export const App: React.FC = () => {
 
     // ★ Save 버튼 상태 표시: idle → saving → saved → idle
     const handleSaveWithStatus = useCallback(async () => {
+        const requestId = ++saveRequestRef.current;
         setSaveStatus('saving');
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        await actions.handleSaveProjectNow();
+        const saved = await actions.handleSaveProjectNow();
+        if (requestId !== saveRequestRef.current) return;
+        if (!saved) {
+            setSaveStatus('idle');
+            return;
+        }
         setSaveStatus('saved');
         saveTimerRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
     }, [actions]);
@@ -231,7 +266,7 @@ export const App: React.FC = () => {
     const engine = state.selectedImageEngine || 'gemini';
     const { borderStyle, badgeLabel, badgeColor } = (() => {
         if (engine === 'flux') {
-            const fm = state.selectedFluxModel || 'flux-pro';
+            const fm = state.selectedFluxModel || 'flux-2-flex';
             if (fm === 'flux-lora') return {
                 borderStyle: 'border-[6px] border-emerald-500 shadow-[inset_0_0_50px_rgba(16,185,129,0.5)]',
                 badgeLabel: 'FLUX LORA', badgeColor: 'bg-emerald-600 text-white',
@@ -279,7 +314,7 @@ export const App: React.FC = () => {
                 isDownloadDropdownOpen={isDownloadDropdownOpen}
                 selectedImageEngine={state.selectedImageEngine || 'gemini'}
                 selectedNanoModel={state.selectedNanoModel}
-                selectedFluxModel={state.selectedFluxModel || 'flux-pro'}
+                selectedFluxModel={state.selectedFluxModel || 'flux-2-flex'}
                 zippingProgress={zippingProgress}
                 saveStatus={saveStatus}
                 falUsage={falUsage}

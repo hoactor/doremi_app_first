@@ -5,7 +5,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { IS_TAURI, saveApiKeys, loadApiKeys, checkApiKeys, getStoragePath, setStoragePath, pickStorageFolder, type ApiKeys } from '../services/tauriAdapter';
+import { IS_TAURI, saveApiKeys, checkApiKeys, getStoragePath, setStoragePath, pickStorageFolder, type ApiKeys } from '../services/tauriAdapter';
+import { clearGeminiKeyCache } from '../services/ai/aiCore';
+import { resetFalClient } from '../services/falService';
 
 interface ApiKeySettingsProps {
     isOpen: boolean;
@@ -37,6 +39,8 @@ export function ApiKeySettings({ isOpen, onClose }: ApiKeySettingsProps) {
         setMessage('');
         try {
             await saveApiKeys(keys);
+            clearGeminiKeyCache();
+            resetFalClient();
             const newStatus = await checkApiKeys();
             setStatus(newStatus);
             setKeys({ claude: null, gemini: null, supertone: null, fal: null, openai: null });

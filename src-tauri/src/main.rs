@@ -1,11 +1,13 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::Emitter;
-use tauri::Manager;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::sync::{OnceLock, Mutex};
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use tauri::Emitter;
+use tauri::Manager;
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 
@@ -26,21 +28,24 @@ const UNIFIED_KEY: &str = "API_KEYS_JSON";
 fn keychain_set(key_name: &str, value: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(SERVICE_NAME, key_name)
         .map_err(|e| format!("Keychain entry error: {e}"))?;
-    entry.set_password(value)
+    entry
+        .set_password(value)
         .map_err(|e| format!("Keychain set error: {e}"))
 }
 
 fn keychain_get(key_name: &str) -> Result<String, String> {
     let entry = keyring::Entry::new(SERVICE_NAME, key_name)
         .map_err(|e| format!("Keychain entry error: {e}"))?;
-    entry.get_password()
+    entry
+        .get_password()
         .map_err(|e| format!("{key_name} not found in Keychain: {e}"))
 }
 
 fn keychain_delete(key_name: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(SERVICE_NAME, key_name)
         .map_err(|e| format!("Keychain entry error: {e}"))?;
-    entry.delete_credential()
+    entry
+        .delete_credential()
         .map_err(|e| format!("Keychain delete error: {e}"))
 }
 
@@ -100,11 +105,22 @@ fn migrate_legacy_keys() {
     let fal = keychain_get("FAL_API_KEY").ok();
     let openai = keychain_get("OPENAI_API_KEY").ok();
 
-    if claude.is_none() && gemini.is_none() && supertone.is_none() && fal.is_none() && openai.is_none() {
+    if claude.is_none()
+        && gemini.is_none()
+        && supertone.is_none()
+        && fal.is_none()
+        && openai.is_none()
+    {
         return; // 아무 키도 없음 → 신규 설치
     }
 
-    let keys = ApiKeys { claude, gemini, supertone, fal, openai };
+    let keys = ApiKeys {
+        claude,
+        gemini,
+        supertone,
+        fal,
+        openai,
+    };
     if let Ok(json) = serde_json::to_string(&keys) {
         if keychain_set(UNIFIED_KEY, &json).is_ok() {
             // 마이그레이션 성공 → 기존 개별 키 삭제 (실패해도 무시)
@@ -118,30 +134,31 @@ fn migrate_legacy_keys() {
     }
 }
 
-/// 통합 JSON에서 특정 키 꺼내기 (proxy 함수용) — 캐시 사용 + 환경변수 fallback
-/// dev 빌드에서 매번 macOS Keychain 권한 다이얼로그가 뜨는 문제 회피용 fallback.
-/// 환경변수가 있으면 keychain보다 우선 사용 → 권한 다이얼로그 안 뜸.
+/// 통합 JSON에서 특정 키 꺼내기 (proxy 함수용).
+/// API 키는 macOS Keychain만 신뢰하며 renderer/localStorage/env fallback은 사용하지 않는다.
 fn get_api_key(field: &str) -> Result<String, String> {
-    // 1순위: 환경변수 (dev 편의)
-    let env_var = match field {
-        "claude" => "CLAUDE_API_KEY",
-        "gemini" => "GEMINI_API_KEY",
-        "supertone" => "SUPERTONE_API_KEY",
-        "fal" => "FAL_API_KEY",
-        "openai" => "OPENAI_API_KEY",
-        _ => return Err(format!("Unknown key field: {field}")),
-    };
-    if let Ok(v) = std::env::var(env_var) {
-        if !v.is_empty() { return Ok(v); }
-    }
-    // 2순위: keychain 통합 JSON 캐시
     let keys = cached_keys();
     match field {
-        "claude" => keys.claude.filter(|s| !s.is_empty()).ok_or_else(|| "CLAUDE_API_KEY not found".to_string()),
-        "gemini" => keys.gemini.filter(|s| !s.is_empty()).ok_or_else(|| "GEMINI_API_KEY not found".to_string()),
-        "supertone" => keys.supertone.filter(|s| !s.is_empty()).ok_or_else(|| "SUPERTONE_API_KEY not found".to_string()),
-        "fal" => keys.fal.filter(|s| !s.is_empty()).ok_or_else(|| "FAL_API_KEY not found".to_string()),
-        "openai" => keys.openai.filter(|s| !s.is_empty()).ok_or_else(|| "OPENAI_API_KEY not found".to_string()),
+        "claude" => keys
+            .claude
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "CLAUDE_API_KEY not found".to_string()),
+        "gemini" => keys
+            .gemini
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "GEMINI_API_KEY not found".to_string()),
+        "supertone" => keys
+            .supertone
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "SUPERTONE_API_KEY not found".to_string()),
+        "fal" => keys
+            .fal
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "FAL_API_KEY not found".to_string()),
+        "openai" => keys
+            .openai
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "OPENAI_API_KEY not found".to_string()),
         _ => Err(format!("Unknown key field: {field}")),
     }
 }
@@ -153,8 +170,7 @@ fn load_unified_keys() -> ApiKeys {
 
 /// 통합 JSON에 키 저장 (Keychain 접근 1회)
 fn save_unified_keys(keys: &ApiKeys) -> Result<(), String> {
-    let json = serde_json::to_string(keys)
-        .map_err(|e| format!("JSON 직렬화 실패: {e}"))?;
+    let json = serde_json::to_string(keys).map_err(|e| format!("JSON 직렬화 실패: {e}"))?;
     let result = keychain_set(UNIFIED_KEY, &json);
     invalidate_keys_cache(); // 저장 후 캐시 갱신
     result
@@ -164,38 +180,62 @@ fn save_unified_keys(keys: &ApiKeys) -> Result<(), String> {
 fn save_api_keys(keys: ApiKeys) -> Result<(), String> {
     // 기존 값 로드 → 변경된 필드만 머지
     let mut current = load_unified_keys();
-    if let Some(k) = &keys.claude {
-        if !k.is_empty() { current.claude = Some(k.clone()); }
+    if let Some(k) = keys.claude {
+        let trimmed = k.trim();
+        if !trimmed.is_empty() {
+            current.claude = Some(trimmed.to_string());
+        }
     }
-    if let Some(k) = &keys.gemini {
-        if !k.is_empty() { current.gemini = Some(k.clone()); }
+    if let Some(k) = keys.gemini {
+        let trimmed = k.trim();
+        if !trimmed.is_empty() {
+            current.gemini = Some(trimmed.to_string());
+        }
     }
-    if let Some(k) = &keys.supertone {
-        if !k.is_empty() { current.supertone = Some(k.clone()); }
+    if let Some(k) = keys.supertone {
+        let trimmed = k.trim();
+        if !trimmed.is_empty() {
+            current.supertone = Some(trimmed.to_string());
+        }
     }
-    if let Some(k) = &keys.fal {
-        if !k.is_empty() { current.fal = Some(k.clone()); }
+    if let Some(k) = keys.fal {
+        let trimmed = k.trim();
+        if !trimmed.is_empty() {
+            current.fal = Some(trimmed.to_string());
+        }
     }
-    if let Some(k) = &keys.openai {
-        if !k.is_empty() { current.openai = Some(k.clone()); }
+    if let Some(k) = keys.openai {
+        let trimmed = k.trim();
+        if !trimmed.is_empty() {
+            current.openai = Some(trimmed.to_string());
+        }
     }
     save_unified_keys(&current)
 }
 
 #[tauri::command]
 fn load_api_keys() -> Result<ApiKeys, String> {
-    Ok(load_unified_keys())
+    // Gemini/fal SDK는 현재 renderer에서 실행되므로 두 키만 일시적으로 전달한다.
+    // Claude/Supertone/OpenAI 키는 전용 Rust proxy 밖으로 절대 내보내지 않는다.
+    let keys = load_unified_keys();
+    Ok(ApiKeys {
+        claude: None,
+        gemini: keys.gemini,
+        supertone: None,
+        fal: keys.fal,
+        openai: None,
+    })
 }
 
 #[tauri::command]
 fn check_api_keys() -> Result<serde_json::Value, String> {
     let keys = load_unified_keys();
     Ok(serde_json::json!({
-        "claude": keys.claude.as_ref().map_or(false, |k| !k.is_empty()),
-        "gemini": keys.gemini.as_ref().map_or(false, |k| !k.is_empty()),
-        "supertone": keys.supertone.as_ref().map_or(false, |k| !k.is_empty()),
-        "fal": keys.fal.as_ref().map_or(false, |k| !k.is_empty()),
-        "openai": keys.openai.as_ref().map_or(false, |k| !k.is_empty()),
+        "claude": keys.claude.as_ref().is_some_and(|k| !k.is_empty()),
+        "gemini": keys.gemini.as_ref().is_some_and(|k| !k.is_empty()),
+        "supertone": keys.supertone.as_ref().is_some_and(|k| !k.is_empty()),
+        "fal": keys.fal.as_ref().is_some_and(|k| !k.is_empty()),
+        "openai": keys.openai.as_ref().is_some_and(|k| !k.is_empty()),
     }))
 }
 
@@ -248,7 +288,8 @@ async fn proxy_claude(request: ClaudeRequest) -> Result<serde_json::Value, Strin
         .await
         .map_err(|e| format!("Claude request failed: {e}"))?;
     let status = resp.status().as_u16();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| format!("Parse error: {e}"))?;
+    let resp_body: serde_json::Value =
+        resp.json().await.map_err(|e| format!("Parse error: {e}"))?;
     if status != 200 {
         return Err(format!("Claude API error ({}): {}", status, resp_body));
     }
@@ -319,23 +360,37 @@ struct GeminiProxyRequest {
     body: serde_json::Value,
 }
 
+fn validate_gemini_url_path(path: &str) -> Result<(), String> {
+    let valid_prefix = path.starts_with("v1/models/") || path.starts_with("v1beta/models/");
+    let valid_chars = path
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | ':' | '-' | '_' | '.'));
+    if path.is_empty() || path.len() > 512 || !valid_prefix || !valid_chars || path.contains("..") {
+        return Err("허용되지 않은 Gemini API 경로입니다.".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn proxy_gemini(request: GeminiProxyRequest) -> Result<serde_json::Value, String> {
+    validate_gemini_url_path(&request.url_path)?;
     let api_key = get_api_key("gemini")?;
     let url = format!(
-        "https://generativelanguage.googleapis.com/{}?key={}",
-        request.url_path, api_key
+        "https://generativelanguage.googleapis.com/{}",
+        request.url_path
     );
     let resp = client()
         .post(&url)
+        .header("x-goog-api-key", &api_key)
         .header("content-type", "application/json")
         .json(&request.body)
         .send()
         .await
         .map_err(|e| format!("Gemini request failed: {e}"))?;
     let status = resp.status().as_u16();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| format!("Parse error: {e}"))?;
-    if status != 200 {
+    let resp_body: serde_json::Value =
+        resp.json().await.map_err(|e| format!("Parse error: {e}"))?;
+    if !(200..300).contains(&status) {
         return Err(format!("Gemini API error ({}): {}", status, resp_body));
     }
     Ok(resp_body)
@@ -347,20 +402,42 @@ struct SupertoneRequest {
     text: String,
     language: Option<String>,
     style_label: Option<String>,
+    speed: Option<f64>,
+    pitch: Option<f64>,
+}
+
+fn validate_supertone_voice_id(voice_id: &str) -> Result<(), String> {
+    if voice_id.is_empty()
+        || voice_id.len() > 128
+        || !voice_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err("Supertone Voice ID 형식이 올바르지 않습니다.".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
 async fn proxy_supertone(request: SupertoneRequest) -> Result<Vec<u8>, String> {
     let api_key = get_api_key("supertone")?;
+    let voice_id = request.voice_id.trim();
+    validate_supertone_voice_id(voice_id)?;
     let body = serde_json::json!({
-        "voice_id": request.voice_id,
         "text": request.text,
         "language": request.language.unwrap_or_else(|| "ko".to_string()),
-        "style_label": request.style_label.unwrap_or_else(|| "default".to_string()),
+        "style": request.style_label.unwrap_or_else(|| "neutral".to_string()),
+        "model": "sona_speech_1",
+        "voice_settings": {
+            "speed": request.speed.unwrap_or(1.0).clamp(0.5, 2.0),
+            "pitch_shift": request.pitch.unwrap_or(0.0).clamp(-12.0, 12.0),
+            "pitch_variance": 1.0,
+        },
     });
+    let url = format!("https://supertoneapi.com/v1/text-to-speech/{voice_id}");
     let resp = client()
-        .post("https://supertoneapi.com/v1/text-to-speech")
-        .header("x-api-key", &api_key)
+        .post(url)
+        .header("x-sup-api-key", &api_key)
         .header("content-type", "application/json")
         .json(&body)
         .send()
@@ -375,41 +452,6 @@ async fn proxy_supertone(request: SupertoneRequest) -> Result<Vec<u8>, String> {
         .await
         .map(|b| b.to_vec())
         .map_err(|e| format!("Supertone response read error: {e}"))
-}
-
-#[derive(Deserialize)]
-struct GenericFetchRequest {
-    url: String,
-    method: Option<String>,
-    headers: Option<std::collections::HashMap<String, String>>,
-    body: Option<serde_json::Value>,
-}
-
-#[tauri::command]
-async fn proxy_fetch(request: GenericFetchRequest) -> Result<serde_json::Value, String> {
-    let method = request.method.unwrap_or_else(|| "GET".to_string());
-    let mut req = match method.to_uppercase().as_str() {
-        "POST" => client().post(&request.url),
-        "PUT" => client().put(&request.url),
-        "DELETE" => client().delete(&request.url),
-        "PATCH" => client().patch(&request.url),
-        _ => client().get(&request.url),
-    };
-    if let Some(headers) = request.headers {
-        for (k, v) in headers {
-            req = req.header(&k, &v);
-        }
-    }
-    if let Some(body) = request.body {
-        req = req.json(&body);
-    }
-    let resp = req.send().await.map_err(|e| format!("Fetch error: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
-    match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(json) => Ok(serde_json::json!({"status": status, "data": json})),
-        Err(_) => Ok(serde_json::json!({"status": status, "data": text})),
-    }
 }
 
 // ─── Phase B: OpenAI gpt-image-2 ───────────────────────────────────
@@ -448,10 +490,13 @@ fn map_openai_error(status: u16, body: &serde_json::Value) -> String {
         return format!("OpenAI moderation blocked: {}", body_str);
     }
     if status == 401 {
-        return format!("OpenAI 401: API key invalid or expired");
+        return "OpenAI 401: API key invalid or expired".to_string();
     }
     if status == 403 {
-        return format!("OpenAI 403: organization not verified — 콘솔에서 verify 필요. {}", body_str);
+        return format!(
+            "OpenAI 403: organization not verified — 콘솔에서 verify 필요. {}",
+            body_str
+        );
     }
     if status == 429 {
         let retry = body["retry_after"].as_u64().unwrap_or(30);
@@ -483,12 +528,15 @@ async fn proxy_openai_image_generate(
         .await
         .map_err(|e| format!("OpenAI request failed: {e}"))?;
     let status = resp.status().as_u16();
-    let resp_body: serde_json::Value = resp.json().await
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| format!("OpenAI parse error: {e}"))?;
     if status != 200 {
         return Err(map_openai_error(status, &resp_body));
     }
-    let images: Vec<String> = resp_body["data"].as_array()
+    let images: Vec<String> = resp_body["data"]
+        .as_array()
         .ok_or_else(|| "OpenAI: no data array".to_string())?
         .iter()
         .filter_map(|d| d["b64_json"].as_str().map(String::from))
@@ -505,7 +553,7 @@ async fn proxy_openai_image_generate(
 async fn proxy_openai_image_edit(
     request: OpenAiImageEditRequest,
 ) -> Result<OpenAiImageResponse, String> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     let api_key = get_api_key("openai")?;
 
     let mut form = reqwest::multipart::Form::new()
@@ -520,7 +568,8 @@ async fn proxy_openai_image_edit(
     }
 
     for (idx, b64) in request.images_base64.iter().enumerate() {
-        let bytes = B64.decode(b64.as_bytes())
+        let bytes = B64
+            .decode(b64.as_bytes())
             .map_err(|e| format!("Image {} base64 decode failed: {}", idx, e))?;
         form = form.part(
             "image[]",
@@ -532,7 +581,8 @@ async fn proxy_openai_image_edit(
     }
 
     if let Some(mask_b64) = request.mask_base64 {
-        let bytes = B64.decode(mask_b64.as_bytes())
+        let bytes = B64
+            .decode(mask_b64.as_bytes())
             .map_err(|e| format!("Mask base64 decode failed: {}", e))?;
         form = form.part(
             "mask",
@@ -552,13 +602,16 @@ async fn proxy_openai_image_edit(
         .map_err(|e| format!("OpenAI edit request failed: {e}"))?;
 
     let status = resp.status().as_u16();
-    let resp_body: serde_json::Value = resp.json().await
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| format!("OpenAI edit parse error: {e}"))?;
     if status != 200 {
         return Err(map_openai_error(status, &resp_body));
     }
 
-    let images: Vec<String> = resp_body["data"].as_array()
+    let images: Vec<String> = resp_body["data"]
+        .as_array()
         .ok_or_else(|| "OpenAI: no data array".to_string())?
         .iter()
         .filter_map(|d| d["b64_json"].as_str().map(String::from))
@@ -573,36 +626,383 @@ async fn proxy_openai_image_edit(
 
 // ─── 로컬 스토리지: 공용 유틸 ──────────────────────────────────────
 
-/// 앱 설정 파일 위치 (항상 고정) — 저장 경로 등 앱 설정 보관
-fn app_config_path() -> Result<std::path::PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME 환경변수 없음".to_string())?;
-    Ok(std::path::PathBuf::from(home)
-        .join("Library/Application Support/com.doremissul.studio/config.json"))
+#[derive(Deserialize)]
+struct OpenAiDalleRequest {
+    prompt: String,
+    size: String,
+    quality: String,
+    style: String,
 }
 
-/// 기본 데이터 루트 (config 없을 때 폴백)
-fn default_data_root() -> Result<std::path::PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME 환경변수 없음".to_string())?;
-    Ok(std::path::PathBuf::from(home)
-        .join("Library/Application Support/com.doremissul.studio"))
+#[derive(Serialize)]
+struct OpenAiDalleResponse {
+    image_base64: String,
+    revised_prompt: String,
 }
 
-/// 앱 데이터 루트: config.json의 storage_path 우선, 없으면 기본값
-fn app_data_root() -> Result<std::path::PathBuf, String> {
-    if let Ok(config_path) = app_config_path() {
-        if config_path.exists() {
-            if let Ok(raw) = std::fs::read_to_string(&config_path) {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                    if let Some(p) = val.get("storage_path").and_then(|v| v.as_str()) {
-                        if !p.is_empty() {
-                            return Ok(std::path::PathBuf::from(p));
-                        }
-                    }
-                }
+#[derive(Deserialize)]
+struct OpenAiChatRequest {
+    model: String,
+    system: String,
+    user: String,
+    temperature: Option<f64>,
+    max_tokens: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct OpenAiChatResponse {
+    content: String,
+}
+
+#[derive(Serialize)]
+struct OpenAiKeyTestResponse {
+    ok: bool,
+    message: String,
+}
+
+fn openai_proxy_error(status: u16, body: &serde_json::Value) -> String {
+    let message = body["error"]["message"]
+        .as_str()
+        .unwrap_or("OpenAI API 요청에 실패했습니다.");
+    let code = body["error"]["code"].as_str().unwrap_or("");
+    let lower = message.to_ascii_lowercase();
+    let kind = if status == 401 {
+        "MISSING_KEY"
+    } else if status == 429 {
+        "RATE_LIMIT"
+    } else if status >= 500 {
+        "SERVER"
+    } else if code == "content_policy_violation"
+        || lower.contains("content policy")
+        || lower.contains("safety system")
+        || lower.contains("content filter")
+    {
+        "CONTENT_POLICY"
+    } else {
+        "UNKNOWN"
+    };
+    format!("OPENAI_{kind}:{message}")
+}
+
+async fn openai_response_json(resp: reqwest::Response) -> Result<(u16, serde_json::Value), String> {
+    let status = resp.status().as_u16();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("OPENAI_NETWORK:응답 읽기 실패: {e}"))?;
+    let body = serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|_| "OPENAI_INVALID_RESPONSE:OpenAI 응답을 해석할 수 없습니다.".to_string())?;
+    Ok((status, body))
+}
+
+#[tauri::command]
+async fn proxy_openai_dalle_generate(
+    request: OpenAiDalleRequest,
+) -> Result<OpenAiDalleResponse, String> {
+    let api_key = get_api_key("openai")
+        .map_err(|_| "OPENAI_MISSING_KEY:OpenAI API 키가 설정되지 않았습니다.".to_string())?;
+    let prompt = request.prompt.trim();
+    if prompt.is_empty() || prompt.chars().count() > 4_000 {
+        return Err("OPENAI_INVALID_RESPONSE:프롬프트 길이가 올바르지 않습니다.".to_string());
+    }
+    if !matches!(
+        request.size.as_str(),
+        "1024x1024" | "1792x1024" | "1024x1792"
+    ) {
+        return Err("OPENAI_INVALID_RESPONSE:지원하지 않는 이미지 크기입니다.".to_string());
+    }
+    if !matches!(request.quality.as_str(), "standard" | "hd") {
+        return Err("OPENAI_INVALID_RESPONSE:지원하지 않는 이미지 품질입니다.".to_string());
+    }
+    if !matches!(request.style.as_str(), "vivid" | "natural") {
+        return Err("OPENAI_INVALID_RESPONSE:지원하지 않는 이미지 스타일입니다.".to_string());
+    }
+
+    let body = serde_json::json!({
+        "model": "dall-e-3",
+        "prompt": prompt,
+        "n": 1,
+        "size": request.size,
+        "quality": request.quality,
+        "style": request.style,
+        "response_format": "b64_json",
+    });
+    let resp = client()
+        .post("https://api.openai.com/v1/images/generations")
+        .bearer_auth(api_key)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("OPENAI_NETWORK:OpenAI 연결 실패: {e}"))?;
+    let (status, body) = openai_response_json(resp).await?;
+    if status != 200 {
+        return Err(openai_proxy_error(status, &body));
+    }
+    let first = body["data"]
+        .as_array()
+        .and_then(|items| items.first())
+        .ok_or_else(|| "OPENAI_INVALID_RESPONSE:이미지 데이터가 없습니다.".to_string())?;
+    let image_base64 = first["b64_json"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "OPENAI_INVALID_RESPONSE:이미지 데이터가 없습니다.".to_string())?
+        .to_string();
+    let revised_prompt = first["revised_prompt"]
+        .as_str()
+        .unwrap_or(prompt)
+        .to_string();
+    Ok(OpenAiDalleResponse {
+        image_base64,
+        revised_prompt,
+    })
+}
+
+#[tauri::command]
+async fn proxy_openai_chat(request: OpenAiChatRequest) -> Result<OpenAiChatResponse, String> {
+    let api_key = get_api_key("openai")
+        .map_err(|_| "OPENAI_MISSING_KEY:OpenAI API 키가 설정되지 않았습니다.".to_string())?;
+    if !matches!(request.model.as_str(), "gpt-4o" | "gpt-4o-mini") {
+        return Err("OPENAI_INVALID_RESPONSE:허용되지 않은 OpenAI 모델입니다.".to_string());
+    }
+    if request.system.chars().count() > 12_000 || request.user.chars().count() > 20_000 {
+        return Err("OPENAI_INVALID_RESPONSE:요청이 너무 깁니다.".to_string());
+    }
+    let body = serde_json::json!({
+        "model": request.model,
+        "messages": [
+            {"role": "system", "content": request.system},
+            {"role": "user", "content": request.user},
+        ],
+        "temperature": request.temperature.unwrap_or(0.4).clamp(0.0, 2.0),
+        "max_tokens": request.max_tokens.unwrap_or(600).min(2_000),
+    });
+    let resp = client()
+        .post("https://api.openai.com/v1/chat/completions")
+        .bearer_auth(api_key)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("OPENAI_NETWORK:OpenAI 연결 실패: {e}"))?;
+    let (status, body) = openai_response_json(resp).await?;
+    if status != 200 {
+        return Err(openai_proxy_error(status, &body));
+    }
+    let content = body["choices"][0]["message"]["content"]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "OPENAI_INVALID_RESPONSE:OpenAI 응답이 비어있습니다.".to_string())?
+        .trim()
+        .to_string();
+    Ok(OpenAiChatResponse { content })
+}
+
+#[tauri::command]
+async fn test_openai_api_key() -> Result<OpenAiKeyTestResponse, String> {
+    let api_key = match get_api_key("openai") {
+        Ok(key) => key,
+        Err(_) => {
+            return Ok(OpenAiKeyTestResponse {
+                ok: false,
+                message: "OpenAI API 키가 설정되지 않았습니다.".to_string(),
+            })
+        }
+    };
+    let resp = client()
+        .get("https://api.openai.com/v1/models")
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("OPENAI_NETWORK:OpenAI 연결 실패: {e}"))?;
+    let status = resp.status().as_u16();
+    Ok(OpenAiKeyTestResponse {
+        ok: status == 200,
+        message: if status == 200 {
+            "API 키가 유효합니다.".to_string()
+        } else if status == 401 {
+            "API 키가 유효하지 않습니다.".to_string()
+        } else {
+            format!("API 테스트 실패 ({status})")
+        },
+    })
+}
+
+fn validate_leaf(value: &str, label: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > 255 || value.contains('\0') {
+        return Err(format!("{label}이(가) 올바르지 않습니다."));
+    }
+    let mut components = Path::new(value).components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err(format!(
+            "{label}에는 폴더 구분자나 상위 경로를 사용할 수 없습니다."
+        ));
+    }
+    Ok(())
+}
+
+fn validate_project_id(project_id: &str) -> Result<(), String> {
+    validate_leaf(project_id, "프로젝트 ID")?;
+    let suffix = project_id
+        .strip_prefix("proj_")
+        .ok_or_else(|| "프로젝트 ID 형식이 올바르지 않습니다.".to_string())?;
+    if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return Err("프로젝트 ID 형식이 올바르지 않습니다.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_asset_id(asset_id: &str) -> Result<(), String> {
+    validate_leaf(asset_id, "에셋 ID")?;
+    if !asset_id.starts_with("asset_")
+        || !asset_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err("에셋 ID 형식이 올바르지 않습니다.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_relative_path(relative: &str, label: &str) -> Result<(), String> {
+    if relative.is_empty() || relative.len() > 2_048 || relative.contains('\0') {
+        return Err(format!("{label}이(가) 올바르지 않습니다."));
+    }
+    for component in Path::new(relative).components() {
+        if !matches!(component, Component::Normal(_)) {
+            return Err(format!("{label}에는 절대/상위 경로를 사용할 수 없습니다."));
+        }
+    }
+    Ok(())
+}
+
+/// 검증된 상대 경로만 root 아래에 결합하고, 중간 symlink를 통한 root 이탈을 차단한다.
+fn safe_join(root: &Path, relative: &str, label: &str) -> Result<PathBuf, String> {
+    validate_relative_path(relative, label)?;
+    if let Ok(meta) = std::fs::symlink_metadata(root) {
+        if meta.file_type().is_symlink() {
+            return Err(format!(
+                "{label}의 기준 폴더에 심볼릭 링크를 사용할 수 없습니다."
+            ));
+        }
+    }
+    let mut current = root.to_path_buf();
+    for component in Path::new(relative).components() {
+        let Component::Normal(part) = component else {
+            return Err(format!("{label}이(가) 올바르지 않습니다."));
+        };
+        current.push(part);
+        if let Ok(meta) = std::fs::symlink_metadata(&current) {
+            if meta.file_type().is_symlink() {
+                return Err(format!("{label}에 심볼릭 링크를 사용할 수 없습니다."));
             }
         }
     }
-    default_data_root()
+    Ok(current)
+}
+
+fn safe_join_leaf(root: &Path, leaf: &str, label: &str) -> Result<PathBuf, String> {
+    validate_leaf(leaf, label)?;
+    safe_join(root, leaf, label)
+}
+
+fn validate_extension(filename: &str, allowed: &[&str], label: &str) -> Result<(), String> {
+    let extension = Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !allowed.contains(&extension.as_str()) {
+        return Err(format!("지원하지 않는 {label} 형식입니다."));
+    }
+    Ok(())
+}
+
+/// 같은 폴더에 임시 파일을 완전히 기록한 뒤 rename하여 JSON/메타데이터 손상을 막는다.
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "저장할 상위 폴더가 없습니다.".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("저장 폴더 생성 실패: {e}"))?;
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "저장 파일명이 올바르지 않습니다.".to_string())?;
+    let temp_path = parent.join(format!(".{filename}.{}.tmp", uuid::Uuid::new_v4()));
+    let write_result = (|| -> Result<(), String> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|e| format!("임시 파일 생성 실패: {e}"))?;
+        file.write_all(bytes)
+            .map_err(|e| format!("임시 파일 저장 실패: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("임시 파일 동기화 실패: {e}"))?;
+        std::fs::rename(&temp_path, path).map_err(|e| format!("파일 교체 실패: {e}"))?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+fn atomic_write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e| format!("JSON 직렬화 실패: {e}"))?;
+    atomic_write(path, &bytes)
+}
+
+/// 앱 설정 파일 위치 (항상 고정) — 저장 경로 등 앱 설정 보관
+fn app_config_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME 환경변수 없음".to_string())?;
+    Ok(PathBuf::from(home).join("Library/Application Support/com.doremissul.studio/config.json"))
+}
+
+/// 기본 데이터 루트 (config 없을 때 폴백)
+fn default_data_root() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME 환경변수 없음".to_string())?;
+    Ok(PathBuf::from(home).join("Library/Application Support/com.doremissul.studio"))
+}
+
+fn parse_storage_path_config(raw: &str) -> Result<PathBuf, String> {
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|e| format!("저장 경로 설정 JSON이 손상되었습니다: {e}"))?;
+    let path = value
+        .get("storage_path")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "저장 경로 설정에 storage_path가 없습니다.".to_string())?;
+    let configured = PathBuf::from(path);
+    if !configured.is_absolute() {
+        return Err("저장 경로 설정은 절대 경로여야 합니다.".to_string());
+    }
+    Ok(configured)
+}
+
+/// 앱 데이터 루트: config.json이 없을 때만 기본값을 사용한다.
+/// 설정이 있는데 읽을 수 없거나 대상 폴더가 사라졌다면 다른 루트에 새 데이터를 만들지 않고 중단한다.
+fn app_data_root() -> Result<PathBuf, String> {
+    let config_path = app_config_path()?;
+    if !config_path.exists() {
+        return default_data_root();
+    }
+    let raw = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("저장 경로 설정을 읽지 못했습니다: {e}"))?;
+    let configured = parse_storage_path_config(&raw)?;
+    let canonical = configured.canonicalize().map_err(|e| {
+        format!(
+            "설정된 저장 폴더를 찾지 못했습니다 ({}): {e}",
+            configured.display()
+        )
+    })?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "설정된 저장 경로가 폴더가 아닙니다: {}",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
 }
 
 /// 현재 저장 경로 반환
@@ -614,27 +1014,29 @@ fn get_storage_path() -> Result<String, String> {
 /// 저장 경로 변경 — config.json에 기록
 #[tauri::command]
 fn set_storage_path(path: String) -> Result<(), String> {
+    let requested = PathBuf::from(path.trim());
+    if !requested.is_absolute() {
+        return Err("저장 경로는 절대 경로여야 합니다.".to_string());
+    }
     let config_path = app_config_path()?;
     // config 디렉토리 보장 (기본 경로)
     if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("config 디렉토리 생성 실패: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("config 디렉토리 생성 실패: {e}"))?;
     }
     // 새 경로 디렉토리 미리 생성
-    std::fs::create_dir_all(&path)
-        .map_err(|e| format!("저장 경로 생성 실패: {e}"))?;
-    let config = serde_json::json!({ "storage_path": path });
-    std::fs::write(&config_path, config.to_string())
-        .map_err(|e| format!("config 저장 실패: {e}"))?;
-    Ok(())
+    std::fs::create_dir_all(&requested).map_err(|e| format!("저장 경로 생성 실패: {e}"))?;
+    let canonical = requested
+        .canonicalize()
+        .map_err(|e| format!("저장 경로 확인 실패: {e}"))?;
+    if !canonical.is_dir() {
+        return Err("저장 경로가 폴더가 아닙니다.".to_string());
+    }
+    let config = serde_json::json!({ "storage_path": canonical.to_string_lossy() });
+    atomic_write_json(&config_path, &config).map_err(|e| format!("config 저장 실패: {e}"))
 }
 
 /// base64 → PNG 파일 저장 + 200×200 썸네일 자동 생성
-fn save_image_internal(
-    dir: &std::path::Path,
-    filename: &str,
-    base64_data: &str,
-) -> Result<(), String> {
+fn save_image_internal(dir: &Path, filename: &str, base64_data: &str) -> Result<(), String> {
     // base64 디코딩 (data:image/...;base64, 접두사 제거)
     let raw = if let Some(pos) = base64_data.find(",") {
         &base64_data[pos + 1..]
@@ -648,20 +1050,22 @@ fn save_image_internal(
 
     // 원본 저장
     std::fs::create_dir_all(dir).map_err(|e| format!("디렉토리 생성 실패: {e}"))?;
-    let file_path = dir.join(filename);
-    std::fs::write(&file_path, &bytes).map_err(|e| format!("파일 저장 실패: {e}"))?;
+    let file_path = safe_join_leaf(dir, filename, "이미지 파일명")?;
+    atomic_write(&file_path, &bytes).map_err(|e| format!("파일 저장 실패: {e}"))?;
 
     // 썸네일 생성 (200×200)
     let root = app_data_root()?;
-    let thumb_dir = root.join("thumbnails");
+    let thumb_dir = safe_join(&root, "thumbnails", "썸네일 폴더")?;
     std::fs::create_dir_all(&thumb_dir).map_err(|e| format!("썸네일 디렉토리 생성 실패: {e}"))?;
 
     let thumb_name = format!("thumb_{}", filename);
-    let thumb_path = thumb_dir.join(&thumb_name);
+    let thumb_path = safe_join_leaf(&thumb_dir, &thumb_name, "썸네일 파일명")?;
 
     if let Ok(img) = image::load_from_memory(&bytes) {
         let thumb = img.thumbnail(200, 200);
-        thumb.save(&thumb_path).map_err(|e| format!("썸네일 저장 실패: {e}"))?;
+        thumb
+            .save(&thumb_path)
+            .map_err(|e| format!("썸네일 저장 실패: {e}"))?;
     }
 
     Ok(())
@@ -673,15 +1077,16 @@ fn save_image_internal(
 fn ensure_directories() -> Result<(), String> {
     let root = app_data_root()?;
     let dirs = [
-        root.join("projects"),
-        root.join("assets/characters"),
-        root.join("assets/outfits"),
-        root.join("assets/backgrounds"),
-        root.join("thumbnails"),
+        "projects",
+        "assets/characters",
+        "assets/outfits",
+        "assets/backgrounds",
+        "assets/props",
+        "thumbnails",
     ];
-    for d in &dirs {
-        std::fs::create_dir_all(d)
-            .map_err(|e| format!("디렉토리 생성 실패 {:?}: {e}", d))?;
+    for relative in dirs {
+        let d = safe_join(&root, relative, "앱 데이터 폴더")?;
+        std::fs::create_dir_all(&d).map_err(|e| format!("디렉토리 생성 실패 {:?}: {e}", d))?;
     }
     Ok(())
 }
@@ -690,40 +1095,48 @@ fn ensure_directories() -> Result<(), String> {
 
 #[tauri::command]
 fn save_image_file(
-    target: String,     // "project" | "asset"
-    sub_path: String,   // e.g. "proj_abc/images" 또는 "characters"
+    target: String,   // "project" | "asset"
+    sub_path: String, // e.g. "proj_abc/images" 또는 "characters"
     filename: String,
     base64_data: String,
 ) -> Result<String, String> {
     let root = app_data_root()?;
-    let dir = if target == "asset" {
-        root.join("assets").join(&sub_path)
-    } else {
-        root.join("projects").join(&sub_path)
+    validate_relative_path(&sub_path, "이미지 하위 경로")?;
+    validate_leaf(&filename, "이미지 파일명")?;
+    validate_extension(&filename, &["png", "jpg", "jpeg", "webp", "gif"], "이미지")?;
+    let (base, rel_prefix) = match target.as_str() {
+        "asset" => (root.join("assets"), "assets"),
+        "project" => (root.join("projects"), "projects"),
+        _ => return Err("이미지 저장 대상이 올바르지 않습니다.".to_string()),
     };
+    let dir = safe_join(&base, &sub_path, "이미지 하위 경로")?;
 
     save_image_internal(&dir, &filename, &base64_data)?;
 
-    // 상대 경로 반환
-    let rel = if target == "asset" {
-        format!("assets/{}/{}", sub_path, filename)
-    } else {
-        format!("projects/{}/{}", sub_path, filename)
-    };
-    Ok(rel)
+    Ok(format!("{rel_prefix}/{sub_path}/{filename}"))
 }
 
 #[tauri::command]
 fn delete_image_file(relative_path: String) -> Result<(), String> {
     let root = app_data_root()?;
-    let full = root.join(&relative_path);
+    validate_relative_path(&relative_path, "이미지 경로")?;
+    validate_extension(
+        &relative_path,
+        &["png", "jpg", "jpeg", "webp", "gif"],
+        "이미지",
+    )?;
+    if !relative_path.starts_with("projects/") && !relative_path.starts_with("assets/") {
+        return Err("삭제 가능한 이미지 경로가 아닙니다.".to_string());
+    }
+    let full = safe_join(&root, &relative_path, "이미지 경로")?;
     if full.exists() {
         std::fs::remove_file(&full).map_err(|e| format!("파일 삭제 실패: {e}"))?;
     }
 
     // 썸네일도 삭제
     if let Some(fname) = std::path::Path::new(&relative_path).file_name() {
-        let thumb = root.join("thumbnails").join(format!("thumb_{}", fname.to_string_lossy()));
+        let thumb_name = format!("thumb_{}", fname.to_string_lossy());
+        let thumb = safe_join_leaf(&root.join("thumbnails"), &thumb_name, "썸네일 파일명")?;
         if thumb.exists() {
             let _ = std::fs::remove_file(&thumb);
         }
@@ -740,7 +1153,16 @@ fn save_audio_file(
     base64_data: String,
 ) -> Result<String, String> {
     let root = app_data_root()?;
-    let dir = root.join("projects").join(&sub_path);
+    validate_relative_path(&sub_path, "오디오 하위 경로")?;
+    validate_leaf(&filename, "오디오 파일명")?;
+    validate_extension(
+        &filename,
+        &[
+            "wav", "mp3", "m4a", "aac", "flac", "ogg", "webm", "aiff", "opus",
+        ],
+        "오디오",
+    )?;
+    let dir = safe_join(&root.join("projects"), &sub_path, "오디오 하위 경로")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("디렉토리 생성 실패: {e}"))?;
 
     let raw = if let Some(pos) = base64_data.find(",") {
@@ -753,8 +1175,8 @@ fn save_audio_file(
         .decode(raw)
         .map_err(|e| format!("base64 디코딩 실패: {e}"))?;
 
-    let file_path = dir.join(&filename);
-    std::fs::write(&file_path, &bytes).map_err(|e| format!("오디오 저장 실패: {e}"))?;
+    let file_path = safe_join_leaf(&dir, &filename, "오디오 파일명")?;
+    atomic_write(&file_path, &bytes).map_err(|e| format!("오디오 저장 실패: {e}"))?;
 
     Ok(format!("projects/{}/{}", sub_path, filename))
 }
@@ -762,10 +1184,52 @@ fn save_audio_file(
 // ─── 로컬 스토리지: 프로젝트 CRUD ──────────────────────────────────
 
 #[tauri::command]
+fn read_audio_base64(relative_path: String) -> Result<String, String> {
+    let root = app_data_root()?;
+    validate_relative_path(&relative_path, "오디오 경로")?;
+    validate_extension(
+        &relative_path,
+        &[
+            "wav", "mp3", "m4a", "aac", "flac", "ogg", "webm", "aiff", "opus",
+        ],
+        "오디오",
+    )?;
+    if !relative_path.starts_with("projects/") {
+        return Err("읽을 수 없는 오디오 경로입니다.".to_string());
+    }
+    let full = safe_join(&root, &relative_path, "오디오 경로")?;
+    let bytes = std::fs::read(&full).map_err(|e| format!("오디오 읽기 실패: {e}"))?;
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let mime = match full
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "flac" => "audio/flac",
+        "ogg" => "audio/ogg",
+        "webm" => "audio/webm",
+        "aiff" => "audio/aiff",
+        "opus" => "audio/opus",
+        _ => "audio/wav",
+    };
+    Ok(format!("data:{mime};base64,{encoded}"))
+}
+
+#[tauri::command]
 fn create_project(title: String) -> Result<String, String> {
     let root = app_data_root()?;
-    let id = format!("proj_{}", uuid::Uuid::new_v4().to_string().replace("-", "")[..12].to_string());
-    let proj_dir = root.join("projects").join(&id);
+    let id = format!(
+        "proj_{}",
+        &uuid::Uuid::new_v4().to_string().replace("-", "")[..12]
+    );
+    validate_project_id(&id)?;
+    let proj_dir = safe_join_leaf(&root.join("projects"), &id, "프로젝트 ID")?;
 
     // 하위 폴더 생성
     std::fs::create_dir_all(proj_dir.join("images"))
@@ -784,9 +1248,8 @@ fn create_project(title: String) -> Result<String, String> {
         "createdAt": &now,
         "updatedAt": &now,
     });
-    let json_path = proj_dir.join("project.json");
-    std::fs::write(&json_path, serde_json::to_string_pretty(&meta).unwrap())
-        .map_err(|e| format!("project.json 저장 실패: {e}"))?;
+    let json_path = safe_join_leaf(&proj_dir, "project.json", "프로젝트 파일명")?;
+    atomic_write_json(&json_path, &meta).map_err(|e| format!("project.json 저장 실패: {e}"))?;
 
     // project_list.json 업데이트
     update_project_list_entry(&root, &id, &title, &now, 0, None, None)?;
@@ -796,48 +1259,57 @@ fn create_project(title: String) -> Result<String, String> {
 
 #[tauri::command]
 fn save_project(project_id: String, metadata_json: String) -> Result<(), String> {
+    validate_project_id(&project_id)?;
+    let parsed: serde_json::Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| format!("프로젝트 JSON 파싱 실패: {e}"))?;
+    if let Some(metadata_id) = parsed["id"].as_str() {
+        if metadata_id != project_id {
+            return Err("프로젝트 JSON의 ID가 저장 대상과 다릅니다.".to_string());
+        }
+    }
     let root = app_data_root()?;
-    let proj_dir = root.join("projects").join(&project_id);
+    let proj_dir = safe_join_leaf(&root.join("projects"), &project_id, "프로젝트 ID")?;
     if !proj_dir.exists() {
         return Err(format!("프로젝트 없음: {}", project_id));
     }
 
-    // 임시 파일 → rename (안전한 저장)
-    let json_path = proj_dir.join("project.json");
-    let tmp_path = proj_dir.join("project.json.tmp");
-    std::fs::write(&tmp_path, &metadata_json)
-        .map_err(|e| format!("임시 파일 저장 실패: {e}"))?;
-    std::fs::rename(&tmp_path, &json_path)
-        .map_err(|e| format!("project.json rename 실패: {e}"))?;
+    let json_path = safe_join_leaf(&proj_dir, "project.json", "프로젝트 파일명")?;
+    atomic_write_json(&json_path, &parsed).map_err(|e| format!("project.json 저장 실패: {e}"))?;
 
     // project_list 업데이트 (title, cutCount 추출)
-    match serde_json::from_str::<serde_json::Value>(&metadata_json) {
-        Ok(parsed) => {
-            let title = parsed["title"].as_str().unwrap_or("").to_string();
-            let cut_count = parsed["scenes"]
-                .as_array()
-                .map(|scenes| {
-                    scenes.iter().map(|s| s["cuts"].as_array().map_or(0, |c| c.len())).sum::<usize>()
-                })
-                .unwrap_or(0);
-            let thumb = parsed["scenes"]
-                .as_array()
-                .and_then(|s| s.first())
-                .and_then(|s| s["cuts"].as_array())
-                .and_then(|c| c.first())
-                .and_then(|c| c["selectedImagePath"].as_str().or(c["imagePaths"][0].as_str()))
-                .map(|s| s.to_string());
-            let art_style = parsed["artStyle"].as_str().map(|s| s.to_string());
-            let now = chrono_now();
-            // ★ silent 실패 방지 — 인덱스 업데이트 실패 시 경고 출력 (목록에 안 뜨는 원인 추적용).
-            //   project.json 자체는 이미 저장됐으므로 list_projects가 폴더 스캔 폴백으로 자동 복구.
-            if let Err(e) = update_project_list_entry(&root, &project_id, &title, &now, cut_count, thumb, art_style) {
-                eprintln!("[save_project] project_list 업데이트 실패 ({}): {} — 다음 list_projects 호출 시 폴더 스캔으로 자동 복구됨", project_id, e);
-            }
-        }
-        Err(e) => {
-            eprintln!("[save_project] metadata_json 파싱 실패: {} — project.json은 저장됐지만 인덱스 업데이트 스킵 (폴더 스캔 폴백 의존)", e);
-        }
+    let title = parsed["title"].as_str().unwrap_or("").to_string();
+    let cut_count = parsed["scenes"]
+        .as_array()
+        .map(|scenes| {
+            scenes
+                .iter()
+                .map(|scene| scene["cuts"].as_array().map_or(0, |cuts| cuts.len()))
+                .sum::<usize>()
+        })
+        .unwrap_or(0);
+    let thumb = parsed["scenes"]
+        .as_array()
+        .and_then(|scenes| scenes.first())
+        .and_then(|scene| scene["cuts"].as_array())
+        .and_then(|cuts| cuts.first())
+        .and_then(|cut| {
+            cut["selectedImagePath"]
+                .as_str()
+                .or(cut["imagePaths"][0].as_str())
+        })
+        .map(str::to_string);
+    let art_style = parsed["artStyle"].as_str().map(str::to_string);
+    let now = chrono_now();
+    if let Err(e) = update_project_list_entry(
+        &root,
+        &project_id,
+        &title,
+        &now,
+        cut_count,
+        thumb,
+        art_style,
+    ) {
+        eprintln!("[save_project] project_list 업데이트 실패 ({project_id}): {e} — 다음 list_projects 호출 시 폴더 스캔으로 자동 복구됨");
     }
 
     Ok(())
@@ -845,22 +1317,23 @@ fn save_project(project_id: String, metadata_json: String) -> Result<(), String>
 
 #[tauri::command]
 fn load_project(project_id: String) -> Result<String, String> {
+    validate_project_id(&project_id)?;
     let root = app_data_root()?;
-    let json_path = root.join("projects").join(&project_id).join("project.json");
-    std::fs::read_to_string(&json_path)
-        .map_err(|e| format!("프로젝트 로드 실패: {e}"))
+    let proj_dir = safe_join_leaf(&root.join("projects"), &project_id, "프로젝트 ID")?;
+    let json_path = safe_join_leaf(&proj_dir, "project.json", "프로젝트 파일명")?;
+    std::fs::read_to_string(&json_path).map_err(|e| format!("프로젝트 로드 실패: {e}"))
 }
 
 #[tauri::command]
 fn list_projects() -> Result<String, String> {
     let root = app_data_root()?;
-    let list_path = root.join("project_list.json");
-    let projects_dir = root.join("projects");
+    let list_path = safe_join_leaf(&root, "project_list.json", "프로젝트 목록 파일")?;
+    let projects_dir = safe_join(&root, "projects", "프로젝트 폴더")?;
 
     // 1) 인덱스 파일 로드 (없으면 빈 list)
     let mut list: serde_json::Value = if list_path.exists() {
-        let text = std::fs::read_to_string(&list_path)
-            .map_err(|e| format!("목록 로드 실패: {e}"))?;
+        let text =
+            std::fs::read_to_string(&list_path).map_err(|e| format!("목록 로드 실패: {e}"))?;
         serde_json::from_str(&text).unwrap_or(serde_json::json!({"projects": []}))
     } else {
         serde_json::json!({"projects": []})
@@ -870,23 +1343,38 @@ fn list_projects() -> Result<String, String> {
     if projects_dir.exists() {
         let indexed_ids: std::collections::HashSet<String> = list["projects"]
             .as_array()
-            .map(|arr| arr.iter().filter_map(|p| p["id"].as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|p| p["id"].as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         if let Ok(entries) = std::fs::read_dir(&projects_dir) {
             let mut recovered: Vec<serde_json::Value> = Vec::new();
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.is_dir() { continue; }
+                if !entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+                    continue;
+                }
                 let id = match path.file_name().and_then(|s| s.to_str()) {
                     Some(s) => s.to_string(),
                     None => continue,
                 };
-                if !id.starts_with("proj_") { continue; }
-                if indexed_ids.contains(&id) { continue; }
+                if validate_project_id(&id).is_err() {
+                    continue;
+                }
+                if indexed_ids.contains(&id) {
+                    continue;
+                }
                 // 인덱스에 없는 폴더 — project.json 읽어서 보강
-                let json_path = path.join("project.json");
-                if !json_path.exists() { continue; }
+                let json_path = match safe_join_leaf(&path, "project.json", "프로젝트 파일") {
+                    Ok(path) => path,
+                    Err(_) => continue,
+                };
+                if !json_path.exists() {
+                    continue;
+                }
                 let raw = match std::fs::read_to_string(&json_path) {
                     Ok(s) => s,
                     Err(_) => continue,
@@ -895,20 +1383,33 @@ fn list_projects() -> Result<String, String> {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
-                let title = parsed["title"].as_str().unwrap_or("(제목 없음)").to_string();
+                let title = parsed["title"]
+                    .as_str()
+                    .unwrap_or("(제목 없음)")
+                    .to_string();
                 let cut_count = parsed["scenes"]
                     .as_array()
-                    .map(|scenes| scenes.iter().map(|s| s["cuts"].as_array().map_or(0, |c| c.len())).sum::<usize>())
+                    .map(|scenes| {
+                        scenes
+                            .iter()
+                            .map(|s| s["cuts"].as_array().map_or(0, |c| c.len()))
+                            .sum::<usize>()
+                    })
                     .unwrap_or(0);
                 let thumb = parsed["scenes"]
                     .as_array()
                     .and_then(|s| s.first())
                     .and_then(|s| s["cuts"].as_array())
                     .and_then(|c| c.first())
-                    .and_then(|c| c["selectedImagePath"].as_str().or(c["imagePaths"][0].as_str()))
+                    .and_then(|c| {
+                        c["selectedImagePath"]
+                            .as_str()
+                            .or(c["imagePaths"][0].as_str())
+                    })
                     .map(|s| s.to_string());
                 let art_style = parsed["artStyle"].as_str().map(|s| s.to_string());
-                let updated_at = parsed["updatedAt"].as_str()
+                let updated_at = parsed["updatedAt"]
+                    .as_str()
                     .or(parsed["createdAt"].as_str())
                     .unwrap_or("")
                     .to_string();
@@ -931,7 +1432,9 @@ fn list_projects() -> Result<String, String> {
                         arr.insert(0, entry);
                     }
                     // 인덱스 파일 갱신 (다음 호출부터는 보강 안 해도 됨)
-                    let _ = std::fs::write(&list_path, serde_json::to_string_pretty(&list).unwrap());
+                    if let Err(error) = atomic_write_json(&list_path, &list) {
+                        eprintln!("[list_projects] 복구된 인덱스 저장 실패: {error}");
+                    }
                 }
             }
         }
@@ -942,28 +1445,29 @@ fn list_projects() -> Result<String, String> {
 
 #[tauri::command]
 fn delete_project(project_id: String) -> Result<(), String> {
+    validate_project_id(&project_id)?;
     let root = app_data_root()?;
-    let proj_dir = root.join("projects").join(&project_id);
+    let proj_dir = safe_join_leaf(&root.join("projects"), &project_id, "프로젝트 ID")?;
     if proj_dir.exists() {
-        std::fs::remove_dir_all(&proj_dir)
-            .map_err(|e| format!("프로젝트 삭제 실패: {e}"))?;
+        std::fs::remove_dir_all(&proj_dir).map_err(|e| format!("프로젝트 삭제 실패: {e}"))?;
     }
 
     // project_list에서 제거
-    let list_path = root.join("project_list.json");
+    let list_path = safe_join_leaf(&root, "project_list.json", "프로젝트 목록 파일")?;
     if list_path.exists() {
         if let Ok(text) = std::fs::read_to_string(&list_path) {
             if let Ok(mut list) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(arr) = list["projects"].as_array_mut() {
                     arr.retain(|p| p["id"].as_str() != Some(&project_id));
-                    let _ = std::fs::write(&list_path, serde_json::to_string_pretty(&list).unwrap());
+                    atomic_write_json(&list_path, &list)
+                        .map_err(|e| format!("프로젝트 목록 저장 실패: {e}"))?;
                 }
             }
         }
     }
 
     // 관련 썸네일 정리
-    let thumb_dir = root.join("thumbnails");
+    let thumb_dir = safe_join(&root, "thumbnails", "썸네일 폴더")?;
     if let Ok(entries) = std::fs::read_dir(&thumb_dir) {
         for entry in entries.flatten() {
             if entry.file_name().to_string_lossy().contains(&project_id) {
@@ -985,9 +1489,11 @@ fn update_project_list_entry(
     thumbnail_path: Option<String>,
     art_style: Option<String>,
 ) -> Result<(), String> {
-    let list_path = root.join("project_list.json");
+    validate_project_id(id)?;
+    let list_path = safe_join_leaf(root, "project_list.json", "프로젝트 목록 파일")?;
     let mut list: serde_json::Value = if list_path.exists() {
-        let text = std::fs::read_to_string(&list_path).unwrap_or_else(|_| r#"{"projects":[]}"#.to_string());
+        let text = std::fs::read_to_string(&list_path)
+            .unwrap_or_else(|_| r#"{"projects":[]}"#.to_string());
         serde_json::from_str(&text).unwrap_or(serde_json::json!({"projects": []}))
     } else {
         serde_json::json!({"projects": []})
@@ -1008,141 +1514,54 @@ fn update_project_list_entry(
         arr.insert(0, entry);
     }
 
-    std::fs::write(&list_path, serde_json::to_string_pretty(&list).unwrap())
-        .map_err(|e| format!("project_list.json 저장 실패: {e}"))?;
-    Ok(())
-}
-
-/// 30일 이상 업데이트되지 않은 프로젝트 자동 삭제
-#[tauri::command]
-fn cleanup_old_projects(max_age_days: Option<u64>) -> Result<String, String> {
-    let root = app_data_root()?;
-    let list_path = root.join("project_list.json");
-    if !list_path.exists() {
-        return Ok(r#"{"deleted":[]}"#.to_string());
-    }
-
-    let text = std::fs::read_to_string(&list_path)
-        .map_err(|e| format!("목록 로드 실패: {e}"))?;
-    let mut list: serde_json::Value = serde_json::from_str(&text)
-        .unwrap_or(serde_json::json!({"projects": []}));
-
-    let max_age_secs = (max_age_days.unwrap_or(30) as u64) * 24 * 60 * 60;
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let mut deleted: Vec<String> = Vec::new();
-
-    if let Some(arr) = list["projects"].as_array_mut() {
-        let mut to_delete: Vec<String> = Vec::new();
-
-        for proj in arr.iter() {
-            let id = proj["id"].as_str().unwrap_or("").to_string();
-            let updated = proj["updatedAt"].as_str().unwrap_or("");
-
-            // ISO 8601 파싱: "2025-03-01T12:00:00.000Z" → epoch
-            if let Some(epoch) = parse_iso_to_epoch(updated) {
-                if now_secs > epoch && (now_secs - epoch) > max_age_secs {
-                    to_delete.push(id);
-                }
-            }
-        }
-
-        for id in &to_delete {
-            // 프로젝트 폴더 삭제
-            let proj_dir = root.join("projects").join(id);
-            if proj_dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(&proj_dir) {
-                    eprintln!("[cleanup] 프로젝트 폴더 삭제 실패 {}: {}", id, e);
-                    continue; // 삭제 실패 시 목록에서도 제거하지 않음
-                }
-            }
-            // 썸네일 정리
-            let thumb_dir = root.join("thumbnails");
-            if let Ok(entries) = std::fs::read_dir(&thumb_dir) {
-                for entry in entries.flatten() {
-                    if entry.file_name().to_string_lossy().contains(id.as_str()) {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                }
-            }
-            deleted.push(id.clone());
-        }
-
-        // project_list에서 제거
-        arr.retain(|p| {
-            let pid = p["id"].as_str().unwrap_or("");
-            !deleted.iter().any(|d| d == pid)
-        });
-
-        std::fs::write(&list_path, serde_json::to_string_pretty(&list).unwrap())
-            .map_err(|e| format!("project_list.json 저장 실패: {e}"))?;
-    }
-
-    let result = serde_json::json!({ "deleted": deleted });
-    Ok(result.to_string())
-}
-
-/// ISO 8601 문자열 → epoch 초 (외부 크레이트 없이 간이 파싱)
-fn parse_iso_to_epoch(iso: &str) -> Option<u64> {
-    // "2025-03-01T12:30:45" or "2025-03-01T12:30:45.000Z"
-    let parts: Vec<&str> = iso.split('T').collect();
-    if parts.len() < 2 { return None; }
-    let date_parts: Vec<u64> = parts[0].split('-').filter_map(|s| s.parse().ok()).collect();
-    if date_parts.len() < 3 { return None; }
-    let (year, month, day) = (date_parts[0], date_parts[1], date_parts[2]);
-
-    let time_str = parts[1].trim_end_matches('Z').split('.').next().unwrap_or("0:0:0");
-    let time_parts: Vec<u64> = time_str.split(':').filter_map(|s| s.parse().ok()).collect();
-    let (hour, min, sec) = (
-        *time_parts.first().unwrap_or(&0),
-        *time_parts.get(1).unwrap_or(&0),
-        *time_parts.get(2).unwrap_or(&0),
-    );
-
-    // 간이 epoch 계산 (윤년 근사)
-    let days_from_epoch = (year - 1970) * 365 + (year - 1969) / 4
-        + match month {
-            1 => 0, 2 => 31, 3 => 59, 4 => 90, 5 => 120, 6 => 151,
-            7 => 181, 8 => 212, 9 => 243, 10 => 273, 11 => 304, 12 => 334,
-            _ => 0,
-        } + day - 1;
-    Some(days_from_epoch * 86400 + hour * 3600 + min * 60 + sec)
+    atomic_write_json(&list_path, &list).map_err(|e| format!("project_list.json 저장 실패: {e}"))
 }
 
 // ─── 로컬 스토리지: 에셋 CRUD ──────────────────────────────────────
 
 #[tauri::command]
 fn save_asset(
-    asset_type: String,   // "character" | "outfit" | "background" | "prop"
+    asset_type: String, // "character" | "outfit" | "background" | "prop"
     filename: String,
     base64_data: String,
     metadata_json: String,
 ) -> Result<String, String> {
+    validate_leaf(&filename, "에셋 파일명")?;
+    validate_extension(&filename, &["png", "jpg", "jpeg", "webp"], "이미지")?;
     let root = app_data_root()?;
-    let id = format!("asset_{}_{}", &asset_type[..3.min(asset_type.len())],
-        uuid::Uuid::new_v4().to_string().replace("-", "")[..8].to_string());
-
     // 에셋 타입별 하위 폴더
-    let sub = match asset_type.as_str() {
-        "character" => "characters",
-        "outfit" => "outfits",
-        "background" => "backgrounds",
-        "prop" => "props",
+    let (sub, id_prefix) = match asset_type.as_str() {
+        "character" => ("characters", "cha"),
+        "outfit" => ("outfits", "out"),
+        "background" => ("backgrounds", "bac"),
+        "prop" => ("props", "pro"),
         _ => return Err(format!("잘못된 에셋 타입: {}", asset_type)),
     };
-    let dir = root.join("assets").join(sub);
+    let id = format!(
+        "asset_{}_{}",
+        id_prefix,
+        &uuid::Uuid::new_v4().to_string().replace("-", "")[..8]
+    );
+    let dir = safe_join(&root, &format!("assets/{sub}"), "에셋 폴더")?;
     let actual_filename = format!("{}_{}", id, filename);
+    validate_leaf(&actual_filename, "에셋 파일명")?;
     save_image_internal(&dir, &actual_filename, &base64_data)?;
 
     let image_path = format!("assets/{}/{}", sub, actual_filename);
     let thumb_path = format!("thumbnails/thumb_{}", actual_filename);
 
     // 메타데이터 파싱 + catalog에 추가
-    let mut meta: serde_json::Value = serde_json::from_str(&metadata_json)
-        .unwrap_or(serde_json::json!({}));
+    let mut meta: serde_json::Value =
+        serde_json::from_str(&metadata_json).unwrap_or(serde_json::json!({}));
+    if !meta["tags"].is_object() {
+        meta["tags"] = serde_json::json!({});
+    }
+    let has_art_style = meta["tags"]["artStyle"]
+        .as_str()
+        .is_some_and(|value| !value.trim().is_empty());
+    if !has_art_style {
+        meta["tags"]["artStyle"] = serde_json::json!("dalle-chibi");
+    }
     meta["id"] = serde_json::json!(&id);
     meta["type"] = serde_json::json!(&asset_type);
     meta["imagePath"] = serde_json::json!(&image_path);
@@ -1150,9 +1569,10 @@ fn save_asset(
     meta["createdAt"] = serde_json::json!(chrono_now());
 
     // asset_catalog.json 업데이트
-    let catalog_path = root.join("asset_catalog.json");
+    let catalog_path = safe_join_leaf(&root, "asset_catalog.json", "에셋 카탈로그 파일")?;
     let mut catalog: serde_json::Value = if catalog_path.exists() {
-        let text = std::fs::read_to_string(&catalog_path).unwrap_or_else(|_| r#"{"version":1,"assets":[]}"#.to_string());
+        let text = std::fs::read_to_string(&catalog_path)
+            .unwrap_or_else(|_| r#"{"version":1,"assets":[]}"#.to_string());
         serde_json::from_str(&text).unwrap_or(serde_json::json!({"version": 1, "assets": []}))
     } else {
         serde_json::json!({"version": 1, "assets": []})
@@ -1162,7 +1582,7 @@ fn save_asset(
         arr.insert(0, meta);
     }
 
-    std::fs::write(&catalog_path, serde_json::to_string_pretty(&catalog).unwrap())
+    atomic_write_json(&catalog_path, &catalog)
         .map_err(|e| format!("에셋 카탈로그 저장 실패: {e}"))?;
 
     Ok(id)
@@ -1171,10 +1591,9 @@ fn save_asset(
 #[tauri::command]
 fn load_asset_catalog() -> Result<String, String> {
     let root = app_data_root()?;
-    let catalog_path = root.join("asset_catalog.json");
+    let catalog_path = safe_join_leaf(&root, "asset_catalog.json", "에셋 카탈로그 파일")?;
     if catalog_path.exists() {
-        std::fs::read_to_string(&catalog_path)
-            .map_err(|e| format!("에셋 카탈로그 로드 실패: {e}"))
+        std::fs::read_to_string(&catalog_path).map_err(|e| format!("에셋 카탈로그 로드 실패: {e}"))
     } else {
         Ok(r#"{"version":1,"assets":[]}"#.to_string())
     }
@@ -1185,23 +1604,21 @@ fn load_asset_catalog() -> Result<String, String> {
 #[tauri::command]
 fn save_lora_registry(json: String) -> Result<(), String> {
     // JSON 유효성 검증
-    let parsed: serde_json::Value = serde_json::from_str(&json)
-        .map_err(|e| format!("LoRA 레지스트리 JSON 파싱 실패: {e}"))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json).map_err(|e| format!("LoRA 레지스트리 JSON 파싱 실패: {e}"))?;
     let validated = serde_json::to_string_pretty(&parsed)
         .map_err(|e| format!("LoRA 레지스트리 직렬화 실패: {e}"))?;
     let root = app_data_root()?;
-    let path = root.join("lora_registry.json");
-    std::fs::write(&path, &validated)
-        .map_err(|e| format!("LoRA 레지스트리 저장 실패: {e}"))
+    let path = safe_join_leaf(&root, "lora_registry.json", "LoRA 레지스트리 파일")?;
+    atomic_write(&path, validated.as_bytes()).map_err(|e| format!("LoRA 레지스트리 저장 실패: {e}"))
 }
 
 #[tauri::command]
 fn load_lora_registry() -> Result<String, String> {
     let root = app_data_root()?;
-    let path = root.join("lora_registry.json");
+    let path = safe_join_leaf(&root, "lora_registry.json", "LoRA 레지스트리 파일")?;
     if path.exists() {
-        std::fs::read_to_string(&path)
-            .map_err(|e| format!("LoRA 레지스트리 로드 실패: {e}"))
+        std::fs::read_to_string(&path).map_err(|e| format!("LoRA 레지스트리 로드 실패: {e}"))
     } else {
         Ok(r#"{"version":1,"entries":[]}"#.to_string())
     }
@@ -1216,18 +1633,17 @@ fn save_openai_styles(json: String) -> Result<(), String> {
     let validated = serde_json::to_string_pretty(&parsed)
         .map_err(|e| format!("OpenAI 화풍 레지스트리 직렬화 실패: {e}"))?;
     let root = app_data_root()?;
-    let path = root.join("openai_styles.json");
-    std::fs::write(&path, &validated)
+    let path = safe_join_leaf(&root, "openai_styles.json", "OpenAI 화풍 파일")?;
+    atomic_write(&path, validated.as_bytes())
         .map_err(|e| format!("OpenAI 화풍 레지스트리 저장 실패: {e}"))
 }
 
 #[tauri::command]
 fn load_openai_styles() -> Result<String, String> {
     let root = app_data_root()?;
-    let path = root.join("openai_styles.json");
+    let path = safe_join_leaf(&root, "openai_styles.json", "OpenAI 화풍 파일")?;
     if path.exists() {
-        std::fs::read_to_string(&path)
-            .map_err(|e| format!("OpenAI 화풍 레지스트리 로드 실패: {e}"))
+        std::fs::read_to_string(&path).map_err(|e| format!("OpenAI 화풍 레지스트리 로드 실패: {e}"))
     } else {
         // 빈 상태 — 프론트의 mergeWithBuiltins가 빌트인을 시드.
         Ok(r#"{"styles":[],"defaultStyleId":"webtoon-chibi"}"#.to_string())
@@ -1236,26 +1652,35 @@ fn load_openai_styles() -> Result<String, String> {
 
 #[tauri::command]
 fn delete_asset(asset_id: String) -> Result<(), String> {
+    validate_asset_id(&asset_id)?;
     let root = app_data_root()?;
-    let catalog_path = root.join("asset_catalog.json");
+    let catalog_path = safe_join_leaf(&root, "asset_catalog.json", "에셋 카탈로그 파일")?;
 
     if catalog_path.exists() {
         let text = std::fs::read_to_string(&catalog_path)
             .map_err(|e| format!("카탈로그 읽기 실패: {e}"))?;
-        let mut catalog: serde_json::Value = serde_json::from_str(&text)
-            .unwrap_or(serde_json::json!({"version": 1, "assets": []}));
+        let mut catalog: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or(serde_json::json!({"version": 1, "assets": []}));
 
         // 에셋 찾아서 파일 삭제
         if let Some(arr) = catalog["assets"].as_array() {
             for asset in arr {
                 if asset["id"].as_str() == Some(&asset_id) {
                     if let Some(img_path) = asset["imagePath"].as_str() {
-                        let full = root.join(img_path);
-                        let _ = std::fs::remove_file(&full);
+                        if img_path.starts_with("assets/") {
+                            if let Ok(full) = safe_join(&root, img_path, "에셋 이미지 경로")
+                            {
+                                let _ = std::fs::remove_file(full);
+                            }
+                        }
                     }
                     if let Some(thumb_path) = asset["thumbnailPath"].as_str() {
-                        let full = root.join(thumb_path);
-                        let _ = std::fs::remove_file(&full);
+                        if thumb_path.starts_with("thumbnails/") {
+                            if let Ok(full) = safe_join(&root, thumb_path, "에셋 썸네일 경로")
+                            {
+                                let _ = std::fs::remove_file(full);
+                            }
+                        }
                     }
                     break;
                 }
@@ -1267,7 +1692,7 @@ fn delete_asset(asset_id: String) -> Result<(), String> {
             arr.retain(|a| a["id"].as_str() != Some(&asset_id));
         }
 
-        std::fs::write(&catalog_path, serde_json::to_string_pretty(&catalog).unwrap())
+        atomic_write_json(&catalog_path, &catalog)
             .map_err(|e| format!("카탈로그 저장 실패: {e}"))?;
     }
 
@@ -1276,19 +1701,20 @@ fn delete_asset(asset_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn update_asset_metadata(asset_id: String, metadata_json: String) -> Result<(), String> {
+    validate_asset_id(&asset_id)?;
     let root = app_data_root()?;
-    let catalog_path = root.join("asset_catalog.json");
+    let catalog_path = safe_join_leaf(&root, "asset_catalog.json", "에셋 카탈로그 파일")?;
 
     if !catalog_path.exists() {
         return Err("에셋 카탈로그 없음".to_string());
     }
 
-    let text = std::fs::read_to_string(&catalog_path)
-        .map_err(|e| format!("카탈로그 읽기 실패: {e}"))?;
-    let mut catalog: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("카탈로그 파싱 실패: {e}"))?;
-    let updates: serde_json::Value = serde_json::from_str(&metadata_json)
-        .map_err(|e| format!("메타데이터 파싱 실패: {e}"))?;
+    let text =
+        std::fs::read_to_string(&catalog_path).map_err(|e| format!("카탈로그 읽기 실패: {e}"))?;
+    let mut catalog: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("카탈로그 파싱 실패: {e}"))?;
+    let updates: serde_json::Value =
+        serde_json::from_str(&metadata_json).map_err(|e| format!("메타데이터 파싱 실패: {e}"))?;
 
     if let Some(arr) = catalog["assets"].as_array_mut() {
         for asset in arr.iter_mut() {
@@ -1296,7 +1722,9 @@ fn update_asset_metadata(asset_id: String, metadata_json: String) -> Result<(), 
                 // 업데이트 필드 머지 (id, type, imagePath, thumbnailPath는 보호)
                 if let Some(obj) = updates.as_object() {
                     for (k, v) in obj {
-                        if !["id", "type", "imagePath", "thumbnailPath", "createdAt"].contains(&k.as_str()) {
+                        if !["id", "type", "imagePath", "thumbnailPath", "createdAt"]
+                            .contains(&k.as_str())
+                        {
                             asset[k] = v.clone();
                         }
                     }
@@ -1306,9 +1734,7 @@ fn update_asset_metadata(asset_id: String, metadata_json: String) -> Result<(), 
         }
     }
 
-    std::fs::write(&catalog_path, serde_json::to_string_pretty(&catalog).unwrap())
-        .map_err(|e| format!("카탈로그 저장 실패: {e}"))?;
-    Ok(())
+    atomic_write_json(&catalog_path, &catalog).map_err(|e| format!("카탈로그 저장 실패: {e}"))
 }
 
 // ─── 로컬 스토리지: 파일 읽기 (asset:// 대안) ──────────────────────
@@ -1316,9 +1742,20 @@ fn update_asset_metadata(asset_id: String, metadata_json: String) -> Result<(), 
 #[tauri::command]
 fn read_image_base64(relative_path: String) -> Result<String, String> {
     let root = app_data_root()?;
-    let full = root.join(&relative_path);
-    let bytes = std::fs::read(&full)
-        .map_err(|e| format!("이미지 읽기 실패: {e}"))?;
+    validate_relative_path(&relative_path, "이미지 경로")?;
+    validate_extension(
+        &relative_path,
+        &["png", "jpg", "jpeg", "webp", "gif"],
+        "이미지",
+    )?;
+    if !relative_path.starts_with("projects/")
+        && !relative_path.starts_with("assets/")
+        && !relative_path.starts_with("thumbnails/")
+    {
+        return Err("읽을 수 없는 이미지 경로입니다.".to_string());
+    }
+    let full = safe_join(&root, &relative_path, "이미지 경로")?;
+    let bytes = std::fs::read(&full).map_err(|e| format!("이미지 읽기 실패: {e}"))?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
@@ -1359,20 +1796,41 @@ fn chrono_now() -> String {
     loop {
         let is_leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
         let ydays: i64 = if is_leap { 366 } else { 365 };
-        if rem_days < ydays { break; }
+        if rem_days < ydays {
+            break;
+        }
         rem_days -= ydays;
         y += 1;
     }
     let is_leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
-    let month_days = [31, if is_leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31,
+        if is_leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0;
     for (i, &md) in month_days.iter().enumerate() {
-        if rem_days < md as i64 { m = i + 1; break; }
+        if rem_days < md as i64 {
+            m = i + 1;
+            break;
+        }
         rem_days -= md as i64;
     }
     let day = rem_days + 1;
 
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, day, hours, minutes, seconds)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        y, m, day, hours, minutes, seconds
+    )
 }
 
 // ─── 에셋 카탈로그 독립 윈도우 ──────────────────────────────────
@@ -1420,13 +1878,96 @@ async fn open_image_studio(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+
+    fn test_root() -> PathBuf {
+        let root = std::env::temp_dir().join(format!("doremissul-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("create test root");
+        root
+    }
+
+    #[test]
+    fn rejects_path_traversal_and_absolute_paths() {
+        let root = test_root();
+        assert!(safe_join(&root, "projects/proj_abc", "test").is_ok());
+        assert!(safe_join(&root, "../secret", "test").is_err());
+        assert!(safe_join(&root, "/tmp/secret", "test").is_err());
+        assert!(safe_join_leaf(&root, "a/b.png", "test").is_err());
+        assert!(validate_project_id("proj_abc123").is_ok());
+        assert!(validate_project_id("proj_../../secret").is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_inside_storage_root() {
+        use std::os::unix::fs::symlink;
+        let root = test_root();
+        let outside = test_root();
+        symlink(&outside, root.join("linked")).expect("create symlink");
+        assert!(safe_join(&root, "linked/file.png", "test").is_err());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn atomic_write_replaces_complete_json() {
+        let root = test_root();
+        let path = root.join("state.json");
+        atomic_write_json(&path, &serde_json::json!({"version": 1})).expect("first write");
+        atomic_write_json(&path, &serde_json::json!({"version": 2, "ok": true}))
+            .expect("second write");
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("read state")).expect("valid json");
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["ok"], true);
+        assert_eq!(
+            std::fs::read_dir(&root)
+                .expect("read root")
+                .filter_map(Result::ok)
+                .count(),
+            1
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validates_supertone_voice_id_as_one_safe_url_segment() {
+        assert!(validate_supertone_voice_id("sona_en_123-ABC").is_ok());
+        assert!(validate_supertone_voice_id("../voice").is_err());
+        assert!(validate_supertone_voice_id("voice/other").is_err());
+        assert!(validate_supertone_voice_id("").is_err());
+    }
+
+    #[test]
+    fn validates_gemini_proxy_paths_without_query_injection() {
+        assert!(validate_gemini_url_path("v1beta/models/gemini-2.5-flash:generateContent").is_ok());
+        assert!(
+            validate_gemini_url_path("v1/models/gemini-2.5-flash:streamGenerateContent").is_ok()
+        );
+        assert!(validate_gemini_url_path("v1beta/models/x:generateContent?key=leak").is_err());
+        assert!(validate_gemini_url_path("https://example.com/").is_err());
+        assert!(validate_gemini_url_path("v1beta/files/abc").is_err());
+    }
+
+    #[test]
+    fn malformed_storage_config_never_falls_back_silently() {
+        assert!(parse_storage_path_config(r#"{"storage_path":"/tmp/doremi"}"#).is_ok());
+        assert!(parse_storage_path_config(r#"{"storage_path":"relative/path"}"#).is_err());
+        assert!(parse_storage_path_config(r#"{"other":"/tmp"}"#).is_err());
+        assert!(parse_storage_path_config("not-json").is_err());
+    }
+}
+
 fn main() {
     // 마이그레이션은 첫 키 접근 시 lazy 실행 (cached_keys 내부)
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             // 기존 API
             save_api_keys,
@@ -1437,15 +1978,19 @@ fn main() {
             proxy_claude_stream,
             proxy_gemini,
             proxy_supertone,
-            proxy_fetch,
             // Phase B: OpenAI gpt-image-2
             proxy_openai_image_generate,
             proxy_openai_image_edit,
+            // DALL-E 3 / OpenAI prompt helpers
+            proxy_openai_dalle_generate,
+            proxy_openai_chat,
+            test_openai_api_key,
             // 로컬 스토리지: 파일시스템
             ensure_directories,
             save_image_file,
             delete_image_file,
             save_audio_file,
+            read_audio_base64,
             read_image_base64,
             get_app_data_path,
             get_storage_path,
@@ -1456,7 +2001,6 @@ fn main() {
             load_project,
             list_projects,
             delete_project,
-            cleanup_old_projects,
             // 로컬 스토리지: 에셋
             save_asset,
             load_asset_catalog,

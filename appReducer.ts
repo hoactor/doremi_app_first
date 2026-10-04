@@ -4,16 +4,41 @@
 
 import {
     AppDataState, AppAction, Cut, GeneratedImage, Notification,
-    CharacterDescription, Scene, GeneratedScript, ArtStyle, ContentFormat, AIModelTier,
-    ImageEngine, FluxModel, SceneLayer, OutfitSession, ContiCut, EditableScene
+    Scene, GeneratedScript, ArtStyle, ContentFormat, AIModelTier,
+    ImageEngine, FluxModel, SceneLayer, OutfitSession, ContiCut, EditableScene,
+    ProjectMetadata, ProjectCut
 } from './types';
 import { DEFAULT_SCENE_LAYER_ID } from './types/pipeline';
 import { getEngineFromModel, createGeneratedImage, normalizeLocationEntries, findOutfitSessionForCut, findAnchorCutForBatch, deriveOutfitSessionsFromCuts, buildSessionKey } from './appUtils';
 import { handleContextModeCases } from './appReducerHelpers/contextModeCases';
 import { handleBlockEditorCases } from './appReducerHelpers/blockEditorCases';
 
+const projectCreatedAtCache = new Map<string, string>();
+
+/**
+ * 내보내기/IndexedDB 저장 전에 API 키처럼 절대 프로젝트 데이터에 들어가면 안 되는
+ * 필드를 중첩 객체까지 제거한다. 키 이름의 대소문자와 `_`/`-` 차이도 허용한다.
+ */
+const stripSecretFields = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+        value.forEach(stripSecretFields);
+        return;
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+        const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        if (normalized === 'apikey' || normalized.endsWith('apikey') || normalized.endsWith('apikeys')) {
+            delete record[key];
+            continue;
+        }
+        stripSecretFields(record[key]);
+    }
+};
+
 export const sanitizeState = (state: AppDataState): AppDataState => {
     const sanitized = JSON.parse(JSON.stringify(state)) as AppDataState;
+    stripSecretFields(sanitized);
     
     // Clean up global transient states
     sanitized.isLoading = false;
@@ -128,13 +153,22 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
         sanitized.selectedImageEngine = 'gemini';
     }
     if (!('selectedFluxModel' in sanitized) || !sanitized.selectedFluxModel) {
-        sanitized.selectedFluxModel = 'flux-pro';
+        sanitized.selectedFluxModel = 'flux-2-flex';
     }
     if (!('scriptInputMode' in sanitized) || !sanitized.scriptInputMode) {
         sanitized.scriptInputMode = 'auto';
     }
     if (!('falUsage' in sanitized) || !sanitized.falUsage) {
         sanitized.falUsage = { totalImages: 0, totalCost: 0, history: [] };
+    }
+    if (!Array.isArray(sanitized.generatedImageHistory)) {
+        sanitized.generatedImageHistory = [];
+    } else {
+        sanitized.generatedImageHistory = sanitized.generatedImageHistory.map(image => ({
+            ...image,
+            // tag 없는 레거시 이미지는 hq로 취급한다.
+            tag: image.tag || 'hq',
+        }));
     }
     // enriched_pause 상태에서 앱 재시작 시 idle로 리셋 (중간 상태 잔류 방지)
     if (sanitized.pipelineCheckpoint === 'enriched_pause' && !sanitized.enrichedBeats) {
@@ -178,100 +212,176 @@ export const sanitizeState = (state: AppDataState): AppDataState => {
     return sanitized;
 };
 
-export const buildProjectMetadata = (state: any): object => {
+const uniqueStrings = (values: unknown[]): string[] => Array.from(new Set(
+    values.filter((value): value is string => typeof value === 'string' && value.length > 0)
+));
+
+const isLocalMediaPath = (value: string): boolean =>
+    !/^(?:data:|blob:|https?:)/i.test(value);
+
+/**
+ * 프로젝트 로컬 저장 포맷 v3.
+ * v2의 기존 필드는 그대로 두고, 손실되던 컷/이미지/엔진 필드를 추가하는 방식이다.
+ */
+export const buildProjectMetadata = (state: AppDataState): ProjectMetadata => {
+    const now = new Date().toISOString();
+    const projectId = state.currentProjectId || '';
+    const createdAt = state.projectCreatedAt
+        || projectCreatedAtCache.get(projectId)
+        || now;
+    if (projectId) projectCreatedAtCache.set(projectId, createdAt);
+
     const scenes = state.generatedContent?.scenes?.map((scene: Scene) => ({
         sceneNumber: scene.sceneNumber,
         title: scene.title,
-        cuts: scene.cuts.map((cut: Cut) => {
-            // generatedImageHistory에서 이 컷의 이미지 찾기
-            const historyImages = (state.generatedImageHistory || []).filter(
-                (img: GeneratedImage) => img.sourceCutNumber === cut.cutNumber
+        settingPrompt: scene.settingPrompt,
+        cuts: scene.cuts.map((cut: Cut): ProjectCut => {
+            const historyImages = state.generatedImageHistory.filter(
+                (image: GeneratedImage) => image.sourceCutNumber === cut.cutNumber
             );
-            // localPath가 있는 이미지만 경로 저장, 없으면 빈 배열
-            const imagePaths = historyImages
-                .filter((img: GeneratedImage) => img.localPath)
-                .map((img: GeneratedImage) => img.localPath!);
-            
-            const selectedImg = historyImages.find((img: GeneratedImage) => img.id === cut.selectedImageId);
-            
+            const imagePaths = uniqueStrings([
+                ...historyImages.map(image => image.localPath),
+                ...(cut.imageUrls || []).filter(isLocalMediaPath),
+            ]);
+            const historyImageUrls = new Set(
+                historyImages
+                    .map(image => image.imageUrl)
+                    .filter(Boolean)
+            );
+            const persistentImageUrls = uniqueStrings(
+                (cut.imageUrls || []).filter(url =>
+                    !imagePaths.includes(url) && !historyImageUrls.has(url)
+                )
+            );
+            const selectedImage = historyImages.find(image => image.id === cut.selectedImageId);
+            const audioPaths = uniqueStrings([
+                ...(cut.audioPaths || []),
+                cut.audioPath,
+            ]);
+            if (Array.isArray(cut.audioDataUrls) && cut.audioDataUrls.length !== audioPaths.length) {
+                throw new Error(
+                    `컷 #${cut.cutNumber} 오디오 파일 저장이 완료되지 않아 project.json 저장을 중단했습니다.`
+                );
+            }
+
             return {
+                // v1/v2 필드
+                id: cut.id,
                 cutNumber: cut.cutNumber,
                 narration: cut.narration,
                 imagePaths,
-                selectedImagePath: selectedImg?.localPath || null,
-                audioPath: null, // TODO: 오디오 저장 연동
+                selectedImagePath: selectedImage?.localPath || null,
+                selectedImageId: cut.selectedImageId,
+                audioPath: audioPaths[0] || null,
+                audioPaths,
+                // v3 project.json에는 대용량 data/blob URL을 넣지 않는다.
+                // persistProjectAudio가 먼저 파일로 저장하고 audioPaths를 채운다.
+                audioDataUrls: undefined,
+                audioDuration: cut.audioDuration,
                 imagePrompt: cut.imagePrompt || '',
-                cutType: (cut as any).cutType,
-                // 컷 필드 보존 (나중에 복원용)
-                characters: cut.characters,
+                cutType: cut.cutType,
+                // 히스토리에 없는 업로드/레거시 이미지도 복구할 수 있게 보존
+                imageUrls: persistentImageUrls,
+                // v3: 실제 편집 가능한 Cut의 지속 필드 전체
+                characters: [...(cut.characters || [])],
                 location: cut.location,
                 cameraAngle: cut.cameraAngle,
                 sceneDescription: cut.sceneDescription,
                 characterEmotionAndExpression: cut.characterEmotionAndExpression,
                 characterPose: cut.characterPose,
                 characterOutfit: cut.characterOutfit,
-                characterIdentityDNA: cut.characterIdentityDNA || '',
+                characterIdentityDNA: cut.characterIdentityDNA,
                 locationDescription: cut.locationDescription,
                 otherNotes: cut.otherNotes,
+                suggestedEffect: cut.suggestedEffect,
                 directorialIntent: cut.directorialIntent,
+                dialogueSpeaker: cut.dialogueSpeaker,
+                guestCharacterUrl: cut.guestCharacterUrl,
+                guestCharacterName: cut.guestCharacterName,
+                voiceEmotion: cut.voiceEmotion,
+                voicePitch: cut.voicePitch,
+                voiceSpeed: cut.voiceSpeed,
+                artStyleOverride: cut.artStyleOverride,
+                useIntenseEmotion: cut.useIntenseEmotion,
+                characterEmotionAndExpressionIntense: cut.characterEmotionAndExpressionIntense,
+                sceneDescriptionIntense: cut.sceneDescriptionIntense,
+                characterPoseIntense: cut.characterPoseIntense,
+                sceneLayerId: cut.sceneLayerId,
+                sceneNarrative: cut.sceneNarrative,
+                cameraNote: cut.cameraNote,
+                moodNote: cut.moodNote,
+                detailsNarrative: cut.detailsNarrative,
+                staleByAnchor: cut.staleByAnchor,
             };
         }),
     })) || [];
 
-    // characterDescriptions에서 base64 이미지 제외, localPath만 보존
-    const charDescs: Record<string, any> = {};
-    if (state.characterDescriptions) {
-        for (const [key, char] of Object.entries(state.characterDescriptions as Record<string, CharacterDescription>)) {
-            charDescs[key] = { ...char };
-            // base64 이미지 필드들 — 나중에 localPath 연동 시 교체
-            // 현재는 그대로 보존 (작은 사이즈이므로)
-        }
-    }
-
-    return {
-        version: 2,
-        id: state.currentProjectId,
+    const metadata: ProjectMetadata = {
+        version: 3,
+        id: projectId,
         title: state.storyTitle || '제목 없음',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt,
+        updatedAt: now,
         artStyle: state.artStyle,
+        customArtStyle: state.customArtStyle,
         imageRatio: state.imageRatio,
         speakerGender: state.speakerGender,
-        characterDescriptions: charDescs,
+        characterDescriptions: state.characterDescriptions || {},
         scenes,
         locationVisualDNA: state.locationVisualDNA || {},
         enrichedScript: state.enrichedScript || '',
         enrichedBeats: state.enrichedBeats || undefined,
         userInputScript: state.userInputScript || '',
         pipelineCheckpoint: state.pipelineCheckpoint,
-        // Phase 4
         scenarioAnalysis: state.scenarioAnalysis,
         characterBibles: state.characterBibles,
         contiCuts: state.contiCuts,
         cinematographyPlan: state.cinematographyPlan,
         locationRegistry: state.locationRegistry || [],
         logline: state.logline || '',
-        // 파이프라인 모드 + LoRA 설정 보존
-        scriptInputMode: state.scriptInputMode || 'auto',
         storyBrief: state.storyBrief || '',
+        storyboardSeed: state.storyboardSeed,
+        scriptInputMode: state.scriptInputMode || 'auto',
         styleLoraId: state.styleLoraId || null,
-        styleLoraScaleOverride: state.styleLoraScaleOverride ?? undefined,
+        styleLoraScaleOverride: state.styleLoraScaleOverride,
         contentFormat: state.contentFormat || 'ssul-shorts',
         aiModelTier: state.aiModelTier || 'opus',
-        // 편집 중인 스토리보드 드래프트 (파이프라인 중간 상태 보존)
         editableStoryboard: state.editableStoryboard || null,
-        // 이미지 히스토리 (localPath가 있는 것만, base64 제외)
-        generatedImageHistory: (state.generatedImageHistory || [])
-            .filter((img: GeneratedImage) => img.localPath)
-            .map((img: GeneratedImage) => ({
-                id: img.id,
-                localPath: img.localPath,
-                sourceCutNumber: img.sourceCutNumber,
-                prompt: img.prompt,
-                engine: img.engine,
-                createdAt: img.createdAt,
-            })),
+        scriptMetadata: state.scriptMetadata,
+        contextSummary: state.contextSummary,
+        contextSceneDesigns: state.contextSceneDesigns,
+        selectedNanoModel: state.selectedNanoModel,
+        selectedImageEngine: state.selectedImageEngine || 'gemini',
+        selectedFluxModel: state.selectedFluxModel || 'flux-2-flex',
+        imageEngineMode: state.imageEngineMode || 'legacy',
+        openaiImageQuality: state.openaiImageQuality || 'medium',
+        selectedDalleStyleId: state.selectedDalleStyleId,
+        backgroundMusicUrl: state.backgroundMusicUrl,
+        backgroundMusicName: state.backgroundMusicName,
+        animationStyle: state.animationStyle,
+        falUsage: state.falUsage,
+        openaiUsage: state.openaiUsage,
+        generatedImageHistory: state.generatedImageHistory.map((image): GeneratedImage => ({
+            id: image.id,
+            // 디스크 경로가 있으면 base64 중복 저장을 피하고, 없으면 업로드/편집본을 잃지 않는다.
+            imageUrl: image.localPath ? '' : image.imageUrl,
+            localPath: image.localPath,
+            sourceCutNumber: image.sourceCutNumber,
+            prompt: image.prompt,
+            engine: image.engine,
+            openaiQuality: image.openaiQuality,
+            createdAt: image.createdAt,
+            tag: image.tag || 'hq',
+            model: image.model,
+            artStyleLabel: image.artStyleLabel,
+            batchAnchorFor: image.batchAnchorFor,
+        })),
     };
+
+    // 미래 필드에 비밀값이 섞여도 저장되지 않도록 최종 결과를 깊은 복제 후 방어한다.
+    const safeMetadata = JSON.parse(JSON.stringify(metadata)) as ProjectMetadata;
+    stripSecretFields(safeMetadata);
+    return safeMetadata;
 };
 
 
@@ -286,86 +396,201 @@ const LEGACY_STYLE_MAP: Record<string, string> = {
 const migrateArtStyle = (style: string | undefined): string =>
     LEGACY_STYLE_MAP[style || ''] || style || 'dalle-chibi';
 
+const stableLegacyId = (...parts: Array<string | number>): string =>
+    parts.join('-').replace(/[^a-zA-Z0-9_-]/g, '_');
+
 export const restoreStateFromProject = (metadata: any): Partial<AppDataState> => {
-    // scenes → generatedContent 복원
-    const scenes: Scene[] = (metadata.scenes || []).map((scene: any) => ({
-        sceneNumber: scene.sceneNumber,
-        title: scene.title,
-        settingPrompt: '',
-        cuts: (scene.cuts || []).map((cut: any) => ({
-            id: cut.id || window.crypto.randomUUID(),
-            cutNumber: cut.cutNumber,
-            narration: cut.narration || '',
-            characters: cut.characters || [],
-            location: cut.location || '',
-            cameraAngle: cut.cameraAngle || '',
-            sceneDescription: cut.sceneDescription || '',
-            characterEmotionAndExpression: cut.characterEmotionAndExpression || '',
-            characterPose: cut.characterPose || '',
-            characterOutfit: cut.characterOutfit || '',
-            characterIdentityDNA: cut.characterIdentityDNA || '',
-            locationDescription: cut.locationDescription || '',
-            otherNotes: cut.otherNotes || '',
-            imageUrls: [], // 이미지는 generatedImageHistory에서 복원
+    // v1 전체-state 내보내기와 v2/v3 로컬 metadata를 모두 읽는다.
+    const rawScenes: any[] = Array.isArray(metadata?.scenes)
+        ? metadata.scenes
+        : (Array.isArray(metadata?.generatedContent?.scenes) ? metadata.generatedContent.scenes : []);
+    const projectCreatedAt = typeof metadata?.createdAt === 'string' ? metadata.createdAt : undefined;
+    const projectId = typeof metadata?.id === 'string'
+        ? metadata.id
+        : (typeof metadata?.currentProjectId === 'string' ? metadata.currentProjectId : null);
+    if (projectId && projectCreatedAt) projectCreatedAtCache.set(projectId, projectCreatedAt);
+
+    const imageHistory: GeneratedImage[] = (Array.isArray(metadata?.generatedImageHistory)
+        ? metadata.generatedImageHistory
+        : []
+    ).map((image: any, index: number): GeneratedImage => ({
+        id: image.id || stableLegacyId('legacy-image', index, image.sourceCutNumber || 'unknown'),
+        imageUrl: typeof image.imageUrl === 'string' ? image.imageUrl : '',
+        localPath: typeof image.localPath === 'string' ? image.localPath : undefined,
+        sourceCutNumber: String(image.sourceCutNumber ?? ''),
+        prompt: image.prompt ?? '',
+        engine: image.engine || 'nano',
+        openaiQuality: image.openaiQuality,
+        createdAt: image.createdAt || projectCreatedAt || '',
+        // 호환 규칙: tag 없는 이미지는 hq.
+        tag: image.tag || 'hq',
+        model: image.model,
+        artStyleLabel: image.artStyleLabel,
+        batchAnchorFor: image.batchAnchorFor,
+    }));
+
+    const scenes: Scene[] = rawScenes.map((scene: any, sceneIndex: number): Scene => ({
+        sceneNumber: scene.sceneNumber ?? sceneIndex + 1,
+        title: scene.title ?? '',
+        settingPrompt: scene.settingPrompt ?? '',
+        cuts: (Array.isArray(scene.cuts) ? scene.cuts : []).map((cut: any, cutIndex: number): Cut => ({
+            id: cut.id || stableLegacyId('legacy-cut', sceneIndex, cutIndex, cut.cutNumber ?? ''),
+            cutNumber: String(cut.cutNumber ?? cutIndex + 1),
+            narration: cut.narration ?? '',
+            characters: Array.isArray(cut.characters) ? [...cut.characters] : [],
+            location: cut.location ?? '',
+            cameraAngle: cut.cameraAngle ?? '',
+            sceneDescription: cut.sceneDescription ?? '',
+            characterEmotionAndExpression: cut.characterEmotionAndExpression ?? '',
+            characterPose: cut.characterPose ?? '',
+            characterOutfit: cut.characterOutfit ?? '',
+            characterIdentityDNA: cut.characterIdentityDNA ?? '',
+            locationDescription: cut.locationDescription ?? '',
+            otherNotes: cut.otherNotes ?? '',
+            imageUrls: Array.isArray(cut.imageUrls) ? [...cut.imageUrls] : [],
+            suggestedEffect: cut.suggestedEffect,
             imageLoading: false,
-            selectedImageId: null, // 아래에서 재설정
-            directorialIntent: cut.directorialIntent || '',
-            imagePrompt: cut.imagePrompt || '',
+            audioPaths: Array.isArray(cut.audioPaths)
+                ? [...cut.audioPaths]
+                : (typeof cut.audioPath === 'string' ? [cut.audioPath] : []),
+            audioPath: cut.audioPath ?? (Array.isArray(cut.audioPaths) ? cut.audioPaths[0] ?? null : null),
+            audioDataUrls: Array.isArray(cut.audioDataUrls) ? [...cut.audioDataUrls] : undefined,
+            audioDuration: cut.audioDuration,
+            selectedImageId: typeof cut.selectedImageId === 'string' ? cut.selectedImageId : null,
+            directorialIntent: cut.directorialIntent,
+            dialogueSpeaker: cut.dialogueSpeaker,
+            guestCharacterUrl: cut.guestCharacterUrl,
+            guestCharacterName: cut.guestCharacterName,
+            voiceEmotion: cut.voiceEmotion,
+            voicePitch: cut.voicePitch,
+            voiceSpeed: cut.voiceSpeed,
+            imagePrompt: cut.imagePrompt ?? '',
+            artStyleOverride: cut.artStyleOverride
+                ? migrateArtStyle(cut.artStyleOverride) as ArtStyle
+                : undefined,
+            useIntenseEmotion: cut.useIntenseEmotion,
+            characterEmotionAndExpressionIntense: cut.characterEmotionAndExpressionIntense,
+            sceneDescriptionIntense: cut.sceneDescriptionIntense,
+            characterPoseIntense: cut.characterPoseIntense,
+            sceneLayerId: cut.sceneLayerId,
+            sceneNarrative: cut.sceneNarrative,
+            cameraNote: cut.cameraNote,
+            moodNote: cut.moodNote,
+            detailsNarrative: cut.detailsNarrative,
+            staleByAnchor: cut.staleByAnchor,
+            cutType: cut.cutType,
         })),
     }));
 
-    // generatedImageHistory 복원 (localPath → imageUrl은 나중에 resolveImageUrl로)
-    const imageHistory: GeneratedImage[] = (metadata.generatedImageHistory || []).map((img: any) => ({
-        id: img.id,
-        imageUrl: '', // 로드 시 resolveImageUrl로 채워야 함 — 빈 문자열로 시작
-        localPath: img.localPath,
-        sourceCutNumber: img.sourceCutNumber,
-        prompt: img.prompt || '',
-        engine: img.engine || 'nano',
-        createdAt: img.createdAt || '',
-    }));
+    // v1/v2에서 history가 빠졌어도 cut.imagePaths/imageUrls로 최소 히스토리를 재구성한다.
+    rawScenes.forEach((rawScene: any, sceneIndex: number) => {
+        const rawCuts = Array.isArray(rawScene?.cuts) ? rawScene.cuts : [];
+        rawCuts.forEach((rawCut: any, cutIndex: number) => {
+            const cut = scenes[sceneIndex]?.cuts[cutIndex];
+            if (!cut) return;
+            const candidates = uniqueStrings([
+                ...(Array.isArray(rawCut.imagePaths) ? rawCut.imagePaths : []),
+                ...(Array.isArray(rawCut.imageUrls) ? rawCut.imageUrls : []),
+            ]);
+            candidates.forEach((url, imageIndex) => {
+                const exists = imageHistory.some(image =>
+                    image.sourceCutNumber === cut.cutNumber
+                    && (image.localPath === url || image.imageUrl === url)
+                );
+                if (exists) return;
+                const useSelectedId = typeof rawCut.selectedImageId === 'string'
+                    && !imageHistory.some(image => image.id === rawCut.selectedImageId)
+                    && (rawCut.selectedImagePath === url || (!rawCut.selectedImagePath && imageIndex === 0));
+                imageHistory.push({
+                    id: useSelectedId
+                        ? rawCut.selectedImageId
+                        : stableLegacyId('legacy-image', sceneIndex, cutIndex, imageIndex),
+                    imageUrl: isLocalMediaPath(url) ? '' : url,
+                    localPath: isLocalMediaPath(url) ? url : undefined,
+                    sourceCutNumber: cut.cutNumber,
+                    prompt: rawCut.imagePrompt ?? '',
+                    engine: 'nano',
+                    createdAt: projectCreatedAt || '',
+                    tag: 'hq',
+                    model: metadata?.selectedNanoModel,
+                });
+            });
+        });
+    });
 
-    // 컷에 selectedImageId 재설정 (각 컷의 첫 번째 이미지)
-    for (const scene of scenes) {
-        for (const cut of scene.cuts) {
-            const cutImages = imageHistory.filter(img => img.sourceCutNumber === cut.cutNumber);
-            if (cutImages.length > 0) {
-                cut.selectedImageId = cutImages[0].id;
-                cut.imageUrls = cutImages.map(img => img.localPath || img.imageUrl).filter(Boolean);
-            }
-        }
-    }
+    // v3 selectedImageId 우선, v1/v2 selectedImagePath 차선, 그 뒤에만 첫 이미지 폴백.
+    rawScenes.forEach((rawScene: any, sceneIndex: number) => {
+        const rawCuts = Array.isArray(rawScene?.cuts) ? rawScene.cuts : [];
+        rawCuts.forEach((rawCut: any, cutIndex: number) => {
+            const cut = scenes[sceneIndex]?.cuts[cutIndex];
+            if (!cut) return;
+            const cutImages = imageHistory.filter(image => image.sourceCutNumber === cut.cutNumber);
+            const selectedById = typeof rawCut.selectedImageId === 'string'
+                ? cutImages.find(image => image.id === rawCut.selectedImageId)
+                : undefined;
+            const selectedByPath = typeof rawCut.selectedImagePath === 'string'
+                ? cutImages.find(image => image.localPath === rawCut.selectedImagePath || image.imageUrl === rawCut.selectedImagePath)
+                : undefined;
+            cut.selectedImageId = selectedById?.id || selectedByPath?.id || cutImages[0]?.id || null;
 
-    return {
+            const explicitUrls = Array.isArray(rawCut.imageUrls) ? rawCut.imageUrls : [];
+            const legacyPaths = Array.isArray(rawCut.imagePaths) ? rawCut.imagePaths : [];
+            cut.imageUrls = uniqueStrings([
+                ...legacyPaths,
+                ...explicitUrls,
+                ...cutImages.map(image => image.localPath || image.imageUrl),
+            ]);
+        });
+    });
+
+    const restored: Partial<AppDataState> = {
         appState: scenes.length > 0 ? 'storyboardGenerated' : 'initial',
         generatedContent: scenes.length > 0 ? { scenes } : null,
-        characterDescriptions: metadata.characterDescriptions || {},
-        locationVisualDNA: metadata.locationVisualDNA || {},
-        userInputScript: metadata.userInputScript || '',
-        enrichedScript: metadata.enrichedScript || null,
-        enrichedBeats: metadata.enrichedBeats || null,
-        storyTitle: metadata.title || null,
-        speakerGender: metadata.speakerGender || 'male',
-        artStyle: migrateArtStyle(metadata.artStyle) as ArtStyle,
-        imageRatio: metadata.imageRatio || '1:1',
+        characterDescriptions: metadata?.characterDescriptions || {},
+        locationVisualDNA: metadata?.locationVisualDNA || {},
+        userInputScript: metadata?.userInputScript ?? '',
+        enrichedScript: metadata?.enrichedScript ?? null,
+        enrichedBeats: metadata?.enrichedBeats ?? null,
+        storyTitle: metadata?.title ?? metadata?.storyTitle ?? null,
+        speakerGender: metadata?.speakerGender || 'male',
+        artStyle: migrateArtStyle(metadata?.artStyle) as ArtStyle,
+        imageRatio: metadata?.imageRatio || '1:1',
         generatedImageHistory: imageHistory,
-        currentProjectId: metadata.id,
+        currentProjectId: projectId,
+        projectCreatedAt,
         isProjectSaved: true,
-        pipelineCheckpoint: metadata.pipelineCheckpoint || 'idle',
-        scenarioAnalysis: metadata.scenarioAnalysis || null,
-        characterBibles: metadata.characterBibles || null,
-        contiCuts: metadata.contiCuts || null,
-        cinematographyPlan: metadata.cinematographyPlan || null,
-        editableStoryboard: metadata.editableStoryboard || null,
-        contentFormat: metadata.contentFormat || 'ssul-shorts',
-        aiModelTier: metadata.aiModelTier || 'opus',
-        scriptInputMode: metadata.scriptInputMode || 'auto',
-        logline: metadata.logline || '',
-        locationRegistry: metadata.locationRegistry || [],
-        storyBrief: metadata.storyBrief || '',
-        styleLoraId: metadata.styleLoraId || null,
-        styleLoraScaleOverride: metadata.styleLoraScaleOverride ?? undefined,
+        pipelineCheckpoint: metadata?.pipelineCheckpoint || 'idle',
+        scenarioAnalysis: metadata?.scenarioAnalysis || null,
+        characterBibles: metadata?.characterBibles || null,
+        contiCuts: metadata?.contiCuts || null,
+        cinematographyPlan: metadata?.cinematographyPlan || null,
+        editableStoryboard: metadata?.editableStoryboard || null,
+        contentFormat: metadata?.contentFormat || 'ssul-shorts',
+        aiModelTier: metadata?.aiModelTier || 'opus',
+        scriptInputMode: metadata?.scriptInputMode || 'auto',
+        logline: metadata?.logline ?? '',
+        locationRegistry: Array.isArray(metadata?.locationRegistry) ? metadata.locationRegistry : [],
+        storyBrief: metadata?.storyBrief ?? '',
+        storyboardSeed: metadata?.storyboardSeed ?? null,
+        styleLoraId: metadata?.styleLoraId ?? undefined,
+        styleLoraScaleOverride: metadata?.styleLoraScaleOverride,
+        scriptMetadata: metadata?.scriptMetadata,
+        contextSummary: metadata?.contextSummary ?? null,
+        contextSceneDesigns: Array.isArray(metadata?.contextSceneDesigns) ? metadata.contextSceneDesigns : undefined,
+        selectedNanoModel: metadata?.selectedNanoModel || 'nano-2.5',
+        selectedImageEngine: metadata?.selectedImageEngine || 'gemini',
+        selectedFluxModel: metadata?.selectedFluxModel || 'flux-2-flex',
+        imageEngineMode: metadata?.imageEngineMode || 'legacy',
+        openaiImageQuality: metadata?.openaiImageQuality || 'medium',
+        selectedDalleStyleId: metadata?.selectedDalleStyleId,
+        backgroundMusicUrl: metadata?.backgroundMusicUrl ?? null,
+        backgroundMusicName: metadata?.backgroundMusicName ?? null,
+        animationStyle: metadata?.animationStyle || 'none',
     };
+    if (typeof metadata?.customArtStyle === 'string') restored.customArtStyle = metadata.customArtStyle;
+    if (metadata?.falUsage) restored.falUsage = metadata.falUsage;
+    if (metadata?.openaiUsage) restored.openaiUsage = metadata.openaiUsage;
+    return restored;
 };
 
 
@@ -383,7 +608,6 @@ export const initialAppDataState: AppDataState = {
     isZipping: false,
     zippingProgress: null,
     notifications: [],
-    openAiApiKey: null,
     geminiTokenCount: 0,
     claudeTokenCount: 0,
     dalleImageCount: 0,
@@ -440,7 +664,7 @@ export const initialAppDataState: AppDataState = {
     isProjectSaved: true,
     // ★ Flux 엔진 (병행 운영)
     selectedImageEngine: 'gemini' as ImageEngine,
-    selectedFluxModel: 'flux-pro' as FluxModel,
+    selectedFluxModel: 'flux-2-flex' as FluxModel,
     // ★ MSF 대본 모드
     scriptInputMode: 'auto' as const,
 };
@@ -474,6 +698,45 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
                 return { ...scene, cuts: newCuts };
             });
             return { ...state, generatedContent: { ...state.generatedContent, scenes: newScenes } };
+        }
+        case 'UPDATE_IMAGE_LOCAL_PATHS': {
+            const paths = new Map(action.payload.map(item => [item.id, item.localPath] as const));
+            return {
+                ...state,
+                generatedImageHistory: state.generatedImageHistory.map(image => {
+                    const localPath = paths.get(image.id);
+                    return localPath ? { ...image, localPath } : image;
+                }),
+            };
+        }
+        case 'REMAP_CUT_IMAGE_URLS': {
+            if (!state.generatedContent) return state;
+            const replacements = new Map<string, Map<string, Set<string>>>();
+            for (const item of action.payload) {
+                const byUrl = replacements.get(item.cutNumber) || new Map<string, Set<string>>();
+                const targets = byUrl.get(item.from) || new Set<string>();
+                targets.add(item.to);
+                byUrl.set(item.from, targets);
+                replacements.set(item.cutNumber, byUrl);
+            }
+            return {
+                ...state,
+                generatedContent: {
+                    ...state.generatedContent,
+                    scenes: state.generatedContent.scenes.map(scene => ({
+                        ...scene,
+                        cuts: scene.cuts.map(cut => ({
+                            ...cut,
+                            imageUrls: Array.from(new Set(
+                                (cut.imageUrls || []).flatMap(url => {
+                                    const targets = replacements.get(cut.cutNumber)?.get(url);
+                                    return targets ? Array.from(targets) : [url];
+                                })
+                            )),
+                        })),
+                    })),
+                },
+            };
         }
         case 'SELECT_IMAGE_FOR_CUT': {
             const { cutNumber, imageId } = action.payload;
@@ -597,7 +860,6 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         case 'SET_ZIPPING_PROGRESS': return { ...state, zippingProgress: action.payload };
         case 'ADD_NOTIFICATION': return { ...state, notifications: [...state.notifications, action.payload] };
         case 'REMOVE_NOTIFICATION': return { ...state, notifications: state.notifications.filter(n => n.id !== action.payload) };
-        case 'SET_OPENAI_API_KEY': return { ...state, openAiApiKey: action.payload };
         case 'SET_CONTEXT_SUMMARY': return { ...state, contextSummary: action.payload };
         case 'ADD_USAGE': {
             const { tokens, source } = action.payload;
@@ -606,8 +868,8 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         }
         case 'ADD_FAL_USAGE': {
             const { images, model } = action.payload;
-            const priceMap: Record<string, number> = { 'flux-pro': 0.03, 'flux-flex': 0.06, 'flux-lora': 0.075 };
-            const cost = images * (priceMap[model] || 0.03);
+            const priceMap: Record<string, number> = { 'flux-pro': 0.03, 'flux-flex': 0.06, 'flux-2-flex': 0.06, 'flux-lora': 0.075 };
+            const cost = images * (priceMap[model] || priceMap['flux-2-flex']);
             const today = new Date().toISOString().slice(0, 10);
             const prev = state.falUsage || { totalImages: 0, totalCost: 0, history: [] };
             return {
@@ -621,8 +883,7 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         }
         case 'RESET_STATE': return {
             ...initialAppDataState,
-            // 인증 + 라이브러리 (세션 유지)
-            openAiApiKey: state.openAiApiKey,
+            // 라이브러리 (세션 유지)
             assetLibrary: state.assetLibrary,
             closetCharacters: state.closetCharacters,
             // 사용자 선호 설정 (프로젝트 간 유지)
@@ -638,7 +899,7 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
             styleLoraId: state.styleLoraId,
             styleLoraScaleOverride: state.styleLoraScaleOverride,
         };
-        case 'START_NEW_ANALYSIS': return { ...initialAppDataState, openAiApiKey: state.openAiApiKey, userInputScript: state.userInputScript, storyTitle: state.storyTitle, speakerGender: state.speakerGender, closetCharacters: state.closetCharacters, assetLibrary: state.assetLibrary, filenameTemplate: state.filenameTemplate, artStyle: state.artStyle, customArtStyle: state.customArtStyle, imageRatio: state.imageRatio, logline: state.logline, scriptInputMode: state.scriptInputMode, styleLoraId: state.styleLoraId, styleLoraScaleOverride: state.styleLoraScaleOverride };
+        case 'START_NEW_ANALYSIS': return { ...initialAppDataState, userInputScript: state.userInputScript, storyTitle: state.storyTitle, speakerGender: state.speakerGender, closetCharacters: state.closetCharacters, assetLibrary: state.assetLibrary, filenameTemplate: state.filenameTemplate, artStyle: state.artStyle, customArtStyle: state.customArtStyle, imageRatio: state.imageRatio, logline: state.logline, scriptInputMode: state.scriptInputMode, styleLoraId: state.styleLoraId, styleLoraScaleOverride: state.styleLoraScaleOverride };
         case 'SET_USER_INPUT_SCRIPT': return { ...state, userInputScript: action.payload };
         case 'SET_ENRICHED_SCRIPT': return { ...state, enrichedScript: action.payload };
         case 'SET_ENRICHED_BEATS': return { ...state, enrichedBeats: action.payload };
@@ -659,10 +920,10 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         case 'RESTORE_STATE': {
             try {
                 const sanitizedPayload = sanitizeState(action.payload as AppDataState);
-                return { ...initialAppDataState, ...sanitizedPayload, openAiApiKey: state.openAiApiKey };
+                return { ...initialAppDataState, ...sanitizedPayload };
             } catch (err) {
                 console.warn('RESTORE_STATE 실패 — 초기 상태로 폴백:', err);
-                return { ...initialAppDataState, openAiApiKey: state.openAiApiKey };
+                return { ...initialAppDataState };
             }
         }
         case 'SET_SMART_FIELD_SUGGESTIONS': return { ...state, smartFieldSuggestions: { ...state.smartFieldSuggestions, [action.payload.cutId]: { ...state.smartFieldSuggestions[action.payload.cutId], [action.payload.field]: action.payload.suggestions } } };
@@ -682,15 +943,28 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         case 'REPLACE_CUT': {
             if (!state.generatedContent) return state;
             const { originalCutNumber, newCuts } = action.payload;
+            const firstCutNumber = newCuts[0]?.cutNumber;
+            const normalizedCuts = newCuts.map((cut, index) => index === 0
+                ? cut
+                : { ...cut, imageUrls: [], selectedImageId: null });
             const newScenes = state.generatedContent.scenes.map(scene => {
                 const cuts = (scene.cuts || []);
                 const cutIndex = cuts.findIndex(c => c.cutNumber === originalCutNumber);
                 if (cutIndex === -1) return scene;
                 const updatedCuts = [...cuts];
-                updatedCuts.splice(cutIndex, 1, ...newCuts);
+                updatedCuts.splice(cutIndex, 1, ...normalizedCuts);
                 return { ...scene, cuts: updatedCuts };
             });
-            return { ...state, generatedContent: { ...state.generatedContent, scenes: newScenes } };
+            const generatedImageHistory = firstCutNumber
+                ? state.generatedImageHistory.map(image => image.sourceCutNumber === originalCutNumber
+                    ? { ...image, sourceCutNumber: firstCutNumber }
+                    : image)
+                : state.generatedImageHistory;
+            return {
+                ...state,
+                generatedImageHistory,
+                generatedContent: { ...state.generatedContent, scenes: newScenes },
+            };
         }
         case 'SET_LOCATION_OUTFIT_IMAGE_STATE': {
             const { characterKey, location, state: imageState } = action.payload;
@@ -748,12 +1022,30 @@ export function appReducer(state: AppDataState, action: AppAction): AppDataState
         // Phase 6: LoRA
         case 'SET_STYLE_LORA': return { ...state, styleLoraId: action.payload.id, styleLoraScaleOverride: action.payload.scaleOverride };
         // Phase 5: Local Storage
-        case 'SET_CURRENT_PROJECT_ID': return { ...state, currentProjectId: action.payload };
+        case 'SET_CURRENT_PROJECT_ID': {
+            const sameProject = action.payload !== null && action.payload === state.currentProjectId;
+            return {
+                ...state,
+                currentProjectId: action.payload,
+                projectCreatedAt: sameProject
+                    ? state.projectCreatedAt
+                    : (action.payload ? projectCreatedAtCache.get(action.payload) : undefined),
+            };
+        }
         case 'SET_PROJECT_SAVED': return state.isProjectSaved === action.payload ? state : { ...state, isProjectSaved: action.payload };
         case 'SET_ASSET_CATALOG': return { ...state, assetLibrary: [] }; // placeholder — catalog is external
         case 'RESTORE_IMAGE_URLS' as any: {
-            // 로컬 이미지 URL 복원 후 히스토리 + 컷 imageUrls 갱신
-            const resolvedHistory = (action as any).payload as GeneratedImage[];
+            // 로컬 이미지 URL 복원 후 현재 프로젝트의 같은 이미지에만 결과를 병합한다.
+            const incoming = (action as any).payload as GeneratedImage[];
+            const incomingById = new Map(incoming.map(image => [image.id, image] as const));
+            const resolvedHistory = state.generatedImageHistory.map(current => {
+                const resolved = incomingById.get(current.id);
+                if (!resolved
+                    || resolved.localPath !== current.localPath
+                    || resolved.sourceCutNumber !== current.sourceCutNumber
+                ) return current;
+                return { ...current, imageUrl: resolved.imageUrl || current.imageUrl };
+            });
             if (!state.generatedContent) return { ...state, generatedImageHistory: resolvedHistory };
             const newScenes = state.generatedContent.scenes.map(scene => ({
                 ...scene,

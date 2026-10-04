@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Scene, Cut, Notification, CharacterDescription } from '../types';
 import { XIcon, SpeakerWaveIcon, TrashIcon, UploadIcon, SpinnerIcon, SparklesIcon, ChevronDownIcon, CogIcon, CheckIcon, UserIcon, ExclamationTriangleIcon, ArrowTopRightOnSquareIcon, RefreshIcon } from './icons';
 import { generateTypecastSpeech } from '../services/typecastService';
-import { generateSupertoneSpeech } from '../services/supertoneService';
+import { generateSupertoneSpeech, splitSupertoneText } from '../services/supertoneService';
 import { useAppContext } from '../AppContext';
 
 interface BatchAudioModalProps {
@@ -128,25 +128,27 @@ const AudioCutCard: React.FC<AudioCutCardProps> = ({ cut: initialCut, globalSett
                 try {
                     const finalSpeed = liveCut.voiceSpeed !== undefined ? liveCut.voiceSpeed : roleSettings.speed;
                     const finalEmotion = liveCut.voiceEmotion || roleSettings.emotion;
-                    let audioFile: File;
                     if (roleSettings.engine === 'typecast') {
-                        audioFile = await generateTypecastSpeech({
+                        const audioFile = await generateTypecastSpeech({
                             actor_id: roleSettings.id,
                             text: seg.text,
                             emotion_name: finalEmotion,
                             speech_rate: finalSpeed,
                             pitch: liveCut.voicePitch ?? 0
                         });
+                        onAttachAudio(liveCut.cutNumber, audioFile, `${seg.label}|${roleSettings.engine}`);
                     } else {
-                        audioFile = await generateSupertoneSpeech({
-                            voiceId: roleSettings.id,
-                            text: seg.text,
-                            style: finalEmotion,
-                            speed: finalSpeed,
-                            pitch: liveCut.voicePitch ?? 0
-                        });
+                        for (const textPart of splitSupertoneText(seg.text)) {
+                            const audioFile = await generateSupertoneSpeech({
+                                voiceId: roleSettings.id,
+                                text: textPart,
+                                style: finalEmotion,
+                                speed: finalSpeed,
+                                pitch: liveCut.voicePitch ?? 0
+                            });
+                            onAttachAudio(liveCut.cutNumber, audioFile, `${seg.label}|${roleSettings.engine}`);
+                        }
                     }
-                    onAttachAudio(liveCut.cutNumber, audioFile, `${seg.label}|${roleSettings.engine}`);
                 } catch (e) {
                     console.error("Audio generation failed", e);
                     throw e;
@@ -384,17 +386,19 @@ export const BatchAudioModal: React.FC<BatchAudioModalProps> = ({ isOpen, onClos
                     const finalSpeed = cut.voiceSpeed ?? settings.speed;
                     const finalEmotion = cut.voiceEmotion || settings.emotion;
                     try {
-                        let audioFile: File;
                         if (settings.engine === 'typecast') {
-                            audioFile = await generateTypecastSpeech({
+                            const audioFile = await generateTypecastSpeech({
                                 actor_id: settings.id, text: part, emotion_name: finalEmotion, speech_rate: finalSpeed, pitch: cut.voicePitch ?? 0
                             });
+                            onAttachAudio(cut.cutNumber, audioFile, settings.label);
                         } else {
-                            audioFile = await generateSupertoneSpeech({
-                                voiceId: settings.id, text: part, style: finalEmotion, speed: finalSpeed, pitch: cut.voicePitch ?? 0
-                            });
+                            for (const textPart of splitSupertoneText(part)) {
+                                const audioFile = await generateSupertoneSpeech({
+                                    voiceId: settings.id, text: textPart, style: finalEmotion, speed: finalSpeed, pitch: cut.voicePitch ?? 0
+                                });
+                                onAttachAudio(cut.cutNumber, audioFile, settings.label);
+                            }
                         }
-                        onAttachAudio(cut.cutNumber, audioFile, settings.label);
                     } catch (e) { break; }
                 }
             }

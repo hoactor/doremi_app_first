@@ -7,7 +7,7 @@
  * 원하는 것만 묘사. 중요도순 배열. 80단어 이내 권장 (Flux 2 Pro 최적 30~80 words).
  */
 
-import type { Cut, EditableCut, CharacterDescription, ArtStyle, LoRAEntry } from './types';
+import type { Cut, EditableCut, CharacterDescription, ArtStyle, LoRAEntry, FluxModel } from './types';
 import { sanitizeChildSafety } from './appSafetySanitize';
 import type { PromptContext } from './appStyleEngine';
 import { callClaude } from './services/claudeService';
@@ -17,7 +17,7 @@ import { resolveCharId } from './appUtils';
 export interface FluxPromptContext extends PromptContext {
     loraRegistry?: LoRAEntry[];
     styleLoraId?: string;
-    fluxModel?: 'flux-pro' | 'flux-flex' | 'flux-lora';
+    fluxModel?: FluxModel;
 }
 
 // ─── 화풍 → Flux 키워드 매핑 ────────────────────────────────────
@@ -442,7 +442,7 @@ export function buildFluxPrompt(cut: Cut | EditableCut, ctx: FluxPromptContext):
 
     // 6순위: 배경/장소
     const location = extractLocation(cut, ctx);
-    if (location) parts.push(location);
+    if (location) parts.push(`${location}, softly focused illustrated background`);
 
     // 7순위: 화풍
     const hasStyleLora = ctx.styleLoraId && ctx.loraRegistry?.find((e: any) => e.id === ctx.styleLoraId);
@@ -462,8 +462,6 @@ export function buildFluxPrompt(cut: Cut | EditableCut, ctx: FluxPromptContext):
     const fx = extractFX(cut);
     if (fx) parts.push(fx);
 
-    parts.push('soft focus background');
-
     // ★ 최종 길이 제한 — Flux 스윗스팟 80단어
     const joined = parts.join(', ');
     const words = joined.split(/\s+/);
@@ -476,9 +474,9 @@ export function buildFluxPrompt(cut: Cut | EditableCut, ctx: FluxPromptContext):
 
 // ─── Flux 프롬프트 오염 방지 ──────────────────────────────────────
 
-/** Flux 프롬프트에서 Gemini 방어 로직 오염 검출 및 제거 */
+/** Flux 최종 프롬프트를 묘사형 자연어로 정규화한다. */
 function sanitizeFluxPrompt(prompt: string): string {
-    const DEFENSE_PATTERNS = [
+    const FORBIDDEN_PATTERNS = [
         /\[ABSOLUTE[^\]]*\]/gi,
         /\[CRITICAL[^\]]*\]/gi,
         /\[MANDATORY[^\]]*\]/gi,
@@ -487,31 +485,48 @@ function sanitizeFluxPrompt(prompt: string): string {
         /\bIDENTITY LOCK\b/gi,
         /\bPOSE SEPARATION\b/gi,
         /\bGLOBAL NEGATIVE\b/gi,
-        /\bDO NOT replicate\b/gi,
-        /\bDO NOT reproduce\b/gi,
-        /\bMUST FOLLOW\b/gi,
         /\bACTING NEGATIVES\b/gi,
-        /\bNEVER replicate\b/gi,
-        /# \[.*?OVERRIDE.*?\]/gi,
-        /# \[.*?NEGATIVE.*?\]/gi,
+        /\bDO\s+NOT\b/gi,
+        /\bMUST(?:\s+NOT)?\b/gi,
+        /\bNEVER\b/gi,
+        /\bMANDATORY\b/gi,
+        /\bCRITICAL\b/gi,
+        /\bABSOLUTE\b/gi,
+        /^\s*#{1,6}\s+.*$/gm,
+        /^\s*\[[^\]]+\]\s*:?\s*/gm,
+        /\bweight\s*:?\s*\d+(?:\.\d+)?\b/gi,
     ];
 
     let cleaned = prompt;
     let contaminated = false;
 
-    for (const pattern of DEFENSE_PATTERNS) {
-        if (pattern.test(cleaned)) {
-            contaminated = true;
-            cleaned = cleaned.replace(pattern, '');
-        }
+    for (const pattern of FORBIDDEN_PATTERNS) {
+        const next = cleaned.replace(pattern, '');
+        if (next !== cleaned) contaminated = true;
+        cleaned = next;
     }
+
+    const withoutWeights = cleaned.replace(/\(([^():]+):\s*\d+(?:\.\d+)?\)/g, '$1');
+    if (withoutWeights !== cleaned) contaminated = true;
+    cleaned = withoutWeights;
+
+    // 모델이 형식 요청을 어기고 JSON/마크다운을 반환해도 키와 껍데기를 제거한다.
+    const formatPattern = /```|[{}\[\]]|"?(?:character identity|art style|visual effects|style|subjects|scene|description|position|action|pose|emotion|outfit|camera|background|location|mood)"?\s*:/gi;
+    const withoutFormat = cleaned.replace(formatPattern, ' ');
+    if (withoutFormat !== cleaned) contaminated = true;
+    cleaned = withoutFormat;
 
     if (contaminated) {
-        console.warn('[FluxPromptEngine] ⚠️ Gemini 방어 로직 오염 감지 — 자동 제거됨');
-        cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+        console.warn('[FluxPromptEngine] ⚠️ 지시형/구조화 문법 오염 감지 — 자동 제거됨');
     }
 
-    return cleaned;
+    return cleaned
+        .replace(/^\s*(?:prompt|output)\s*:\s*/i, '')
+        .replace(/["`]/g, '')
+        .replace(/\s+([,.;])/g, '$1')
+        .replace(/,{2,}/g, ',')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 }
 
 // ─── 인서트 컷 (캐릭터 없는 배경 전용) ──────────────────────────
@@ -528,7 +543,7 @@ export function buildFluxInsertPrompt(cut: Cut | EditableCut, ctx: FluxPromptCon
     return sanitizeFluxPrompt([
         locDesc || location,
         scene ? scene.replace(/\[.*?\]/g, '').trim() : '',
-        'no people, empty scene, background art',
+        'empty illustrated scene, background art',
         style,
     ].filter(Boolean).join(', '));
 }
@@ -574,13 +589,13 @@ function extractCharacterOutfit(
         // 단일 캐릭터: 전체가 의상
         if (!customOutfit.includes('[')) return customOutfit.trim();
     }
-    // 폴백: 장소별 의상 → 기본 외모. Phase 5-d: 복합 키 우선 조회.
+    // 폴백: 장소별 의상. 외모 DNA(baseAppearance)는 의상으로 사용하지 않는다.
     const location = ('location' in cut ? (cut as any).location : '') || '';
     const layerId = ('sceneLayerId' in cut && (cut as any).sceneLayerId) ? (cut as any).sceneLayerId : '현재';
     return char?.locations?.[`${location}::${layerId}`]
         || char?.locations?.[`${location}::현재`]
         || char?.locations?.[location]
-        || char?.baseAppearance
+        || (char ? 'neutral casual outfit in a warm palette' : '')
         || '';
 }
 
@@ -638,67 +653,11 @@ function buildStructuredInput(
     };
 }
 
-const FLUX_STRUCTURED_SYSTEM = `You are a Flux image generation prompt writer.
-Convert structured scene data into a single natural-language Flux prompt.
-
-CRITICAL GOAL: The viewer must feel the character's emotion instantly — if they scroll past without feeling anything, you failed.
-
-## OUTPUT FORMAT
-- Output ONLY the prompt text. No markdown, headers, rules, brackets, or weight notation.
-- Write in flowing descriptive prose — like describing a scene to a painter. NOT keyword lists.
-- Use active present-tense verbs: "gripping" not "gripped", "lunging forward" not "lunged forward".
-- STRICT LIMIT: 60 words maximum. Count carefully. Every word must earn its place.
-- Preserve HEX color codes from outfit descriptions (e.g., #B8956A).
-
-## PRIORITY ORDER (this is the order words appear in the prompt)
-1. ART STYLE — begin the prompt with the art style.
-   Example: "In warm glowing chibi anime style, ..."
-2. CHARACTER IDENTITY — appearance + outfit merged in one phrase.
-3. ACTION + EMOTION + POSE — the frozen moment.
-4. CAMERA + BACKGROUND — woven into the scene.
-
-## ART STYLE (FIRST WORDS OF PROMPT)
-- Start every prompt with the art style description.
-- ALL elements — characters AND backgrounds — must match this style.
-- Background MUST be illustrated/stylized when style is anime/chibi.
-  ✅ "illustrated anime-style police station with warm fluorescent glow"
-  ❌ "realistic police station interior"
-
-## CHARACTER + OUTFIT (MERGED — NEVER SEPARATE)
-- Character = appearance + outfit in ONE continuous phrase. Never split them.
-  ✅ "a brown-haired chibi boy in a wrinkled navy blazer and loosened red tie"
-  ❌ "a boy with brown hair" (outfit missing)
-  ❌ "a brown-haired boy. He wears a blazer." (separated into two sentences)
-- Outfit is CHARACTER IDENTITY — never compress, abbreviate, or omit clothing details.
-- Keep character+outfit phrase under 20 words.
-- If triggerWord provided: use it as name, add bodyHint, then outfit.
-  Example: "dss_boy, chibi boy small slim body, in wrinkled navy blazer, ..."
-
-## SINGLE CHARACTER (1 person)
-- Begin with art style, then character identity directly. No "solo" tag.
-
-## TWO CHARACTERS (2 people)
-- After art style, state "Two characters,"
-- Describe spatial relationship: who is LEFT/RIGHT or FOREGROUND/BACKGROUND.
-- Each character gets a FULL identity phrase (appearance+outfit).
-- Characters MUST visually differ: different hair color/style, different clothing.
-
-## SCENE CONSTRUCTION
-- Merge Pose and Scene into one fluid freeze-frame description.
-- Emotion shows through body AND face AND manga effects (sweat drops, sparkles, veins).
-- Camera angle weaves into prose: "seen from below, she towers over him" not "low angle shot".
-
-## BACKGROUND
-- Background description MUST include art style prefix.
-- Close-up/medium: "soft focus illustrated background"
-- Wide/full: describe background in focus WITH art style modifier.
-- Insert shots: describe subject in sharp detail with stylized surroundings.
-
-## WHAT NOT TO DO
-- Do NOT use negative language ("no blur", "without extra people").
-  Describe what IS there: "sharp focus", "single character in frame".
-- Do NOT list style keywords with commas at the end.
-- Do NOT contradict art style ("photorealistic" with "chibi anime" = conflict).`;
+const FLUX_STRUCTURED_SYSTEM = `Rewrite the supplied scene as one concise English sentence for Flux image generation.
+Return only flowing descriptive prose, with active present-tense action and positive visual details.
+Keep the visual information in this exact order: character identity, action and pose, emotion, outfit, camera, background, art style, visual effects.
+Keep each character distinct and keep each outfit attached to the named character.
+Preserve trigger words and HEX colors exactly. Use at most 60 words.`;
 
 /** 구조화 데이터 → Claude가 자연어 Flux 프롬프트로 변환 */
 async function translateStructuredToFlux(
@@ -709,25 +668,29 @@ async function translateStructuredToFlux(
         const charDescriptions = input.characters.map(c => {
             const physique = c.physique ? `, physique="${c.physique}"` : '';
             if (c.triggerWord) {
-                return `- ${c.name}: triggerWord="${c.triggerWord}", bodyType="${c.bodyHint}"${physique}, outfit="${c.outfit}"`;
+                return `${c.name}: triggerWord="${c.triggerWord}", bodyType="${c.bodyHint}"${physique}`;
             }
-            return `- ${c.name}: appearance="${c.appearance}", bodyType="${c.bodyHint}"${physique}, outfit="${c.outfit}"`;
+            return `${c.name}: appearance="${c.appearance}", bodyType="${c.bodyHint}"${physique}`;
         }).join('\n');
+        const outfits = input.characters
+            .filter(c => !!c.outfit)
+            .map(c => `${c.name}: ${c.outfit}`)
+            .join('\n');
 
         // ★ Claude에게 스타일 키워드를 명시적으로 전달 → 산문에 녹이게
         const styleKeywords = input.styleTrigger || getFluxStyleKeywords(artStyle, '');
-        const styleLabel = `Art style to integrate naturally: ${styleKeywords}`;
-
-        const userMessage = `Characters:
+        const userMessage = `Character identity:
 ${charDescriptions}
 
-Scene: ${input.action}
+Action: ${input.action}
 ${input.pose ? `Pose: ${input.pose}` : ''}
 Emotion: ${input.emotion}
+Outfit:
+${outfits}
 Camera: ${input.camera}
-Location: ${input.location}
-${input.fx ? `FX: ${input.fx}` : ''}
-${styleLabel}`;
+Background: ${input.location}
+Art style: ${styleKeywords}
+${input.fx ? `Visual effects: ${input.fx}` : ''}`;
 
         const res = await callClaude(FLUX_STRUCTURED_SYSTEM, userMessage, {
             temperature: 0.3,
@@ -736,12 +699,12 @@ ${styleLabel}`;
 
         const translated = res.text.trim();
         if (translated) {
-            // ★ Claude가 스타일을 프롬프트 안에 녹였으므로 후처리 접합 불필요
-            // LoRA 트리거워드만 Claude가 모를 수 있으므로 안전장치
-            let finalPrompt = translated;
+            // 스타일 LoRA 트리거가 빠지면 올바른 순서를 보장하는 규칙 기반 경로로 폴백한다.
             if (input.styleTrigger && !translated.includes(input.styleTrigger)) {
-                finalPrompt = `${translated}, ${input.styleTrigger}`;
+                console.warn('[FluxPromptEngine] 스타일 트리거 누락 — 규칙 기반 폴백');
+                return '';
             }
+            const finalPrompt = sanitizeFluxPrompt(translated);
             console.log('[FluxPromptEngine] 구조화→Flux 변환:', finalPrompt.substring(0, 80) + '...');
             return finalPrompt;
         }
@@ -1007,45 +970,30 @@ export async function buildFluxPromptSmart(
     const rawCharacters = 'characters' in cut ? cut.characters : [];
     const characters = rawCharacters ? rawCharacters.filter((c: string) => c?.trim()) : [];
 
-    // ★ 모든 Flux 모델(LoRA 포함) JSON 경로 사용
-    //    - buildStructuredInput이 LoRA triggerWord + styleTrigger를 자동 주입
-    //    - buildFluxJSON이 triggerWord 감지 시 appearance/bodyHint를 생략해 프롬프트 최소화
-    //    - LoRA와 Pro/Flex의 유일한 구조적 차이는 "triggerWord로 인물을 지칭하느냐"뿐
-    const structuredInput = buildStructuredInput(cut, ctx, characters);
-    const jsonPrompt = buildFluxJSON(structuredInput, ctx.artStyle);
-
-    // ★ 1인 이상 → Claude 검수 (의상 누락 / 화풍-장소 모순 / 인물 유사도 / 공간 모호성 체크)
-    //    인서트 컷(0인)만 검수 스킵
-    if (characters.length >= 1 && options?.useClaude !== false) {
-        const reviewed = await reviewFluxJSON(jsonPrompt);
-        return sanitizeChildSafety(sanitizeFluxPrompt(reviewed));
+    if (characters.length === 0) {
+        return sanitizeChildSafety(buildFluxInsertPrompt(cut, ctx));
     }
 
-    return sanitizeChildSafety(sanitizeFluxPrompt(jsonPrompt));
+    const structuredInput = buildStructuredInput(cut, ctx, characters);
+
+    if (options?.useClaude !== false) {
+        const translated = await translateStructuredToFlux(structuredInput, ctx.artStyle);
+        if (translated) {
+            return sanitizeChildSafety(sanitizeFluxPrompt(translated));
+        }
+    }
+
+    // API 실패나 형식 위반 시에도 같은 우선순서의 순수 자연어만 반환한다.
+    return sanitizeChildSafety(sanitizeFluxPrompt(buildFluxPrompt(cut, ctx)));
 }
 
 // ─── 이미지대본 직통 번역 (상세대본 → Flux) ─────────────────────────
 
-const IMAGE_SCRIPT_FLUX_SYSTEM = `You are a Flux image generation prompt translator.
-Convert Korean image descriptions into English Flux-optimized prompts.
-
-CRITICAL GOAL: The viewer must feel the character's emotion instantly from the image alone.
-
-Rules:
-- Output ONLY the prompt text. No markdown, headers, rules, or brackets
-- Translate the ENTIRE description faithfully — do not add, remove, or reinterpret
-- Natural descriptive prose, not keyword lists
-- Use active present-tense verbs. Write flowing prose, not keyword lists.
-- Replace Korean character names with their designated trigger words or appearance descriptions
-- Camera angles: translate directly (클로즈업→close-up, 미디엄샷→medium shot, 풀샷→full shot)
-- Manga effects: translate to visual descriptions (땀방울→sweat drops, 별 이펙트→star burst effect)
-- Preserve HEX color codes from descriptions.
-- STRICT LIMIT: 60 words maximum.
-- 1 character → begin with character description directly. Do NOT use "solo" tag.
-- 회상 톤 → append "nostalgic warm tone, soft dreamy filter"
-- 상상 장면 → append "fantasy dreamlike scene, bokeh cloud background"
-- Integrate art style naturally into prose — do not list keywords with commas at the end.
-- Every frame is a manga freeze-frame: mid-action, dynamic, alive`;
+const IMAGE_SCRIPT_FLUX_SYSTEM = `Translate the Korean image description into one concise English sentence for Flux image generation.
+Return only flowing descriptive prose with positive, visible details and active present-tense action.
+Keep information in this exact order when present: character identity, action and pose, emotion, outfit, camera, background, art style, visual effects.
+Replace each Korean character name with its supplied identity description. Preserve trigger words and HEX colors exactly.
+Translate camera terms and manga effects into concrete visual descriptions. Use at most 60 words.`;
 
 /** 이미지대본 전용: 이미지프롬프트 원문 → Flux 프롬프트 직통 번역 */
 export async function translateImageScriptToFlux(
@@ -1055,7 +1003,7 @@ export async function translateImageScriptToFlux(
     options?: {
         styleLoraId?: string;
         loraRegistry?: LoRAEntry[];
-        fluxModel?: 'flux-pro' | 'flux-flex' | 'flux-lora';
+        fluxModel?: FluxModel;
     }
 ): Promise<string> {
     // 캐릭터 매핑 빌드
@@ -1080,7 +1028,7 @@ export async function translateImageScriptToFlux(
     const userMessage = `Character mapping:
 ${charMapping}
 
-Art style: ${artStyle}
+Art style: ${styleKeywords}
 
 Translate this image description to Flux prompt:
 ${imagePromptText}`;
@@ -1093,14 +1041,15 @@ ${imagePromptText}`;
 
         const translated = res.text.trim();
         if (translated) {
-            // ★ 스타일 LoRA 트리거만 보정 (Claude가 스타일을 산문에 녹임)
-            let finalPrompt = translated;
+            // 스타일 LoRA 트리거가 빠지면 스마트 빌더가 규칙 기반 프롬프트로 재구성한다.
             if (isLoraModel && options?.styleLoraId) {
                 const styleLora = options.loraRegistry?.find(e => e.id === options.styleLoraId);
                 if (styleLora?.triggerWord && !translated.includes(styleLora.triggerWord)) {
-                    finalPrompt = `${translated}, ${styleLora.triggerWord}`;
+                    console.warn('[FluxPromptEngine] 이미지대본 번역에서 스타일 트리거 누락');
+                    return '';
                 }
             }
+            const finalPrompt = sanitizeChildSafety(sanitizeFluxPrompt(translated));
             console.log('[FluxPromptEngine] 이미지대본 직통 번역:', finalPrompt.substring(0, 80) + '...');
             return finalPrompt;
         }

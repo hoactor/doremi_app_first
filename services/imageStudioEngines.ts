@@ -6,7 +6,7 @@
 // 어댑터가 흡수. 엔진 전용 옵션은 EngineOptions로 받음.
 
 import { editImageWithNano, generateOutfitImage } from './ai/imageGeneration';
-import { editImageWithFlux, generateImageWithFlux } from './falService';
+import { editImageWithFlux, generateImageWithFlux, getFluxEndpoint } from './falService';
 import { editWithGptImage2, generateWithGptImage2 } from './openaiImageService';
 import { generateImageWithDalle } from './openaiService';
 import { composePromptWithStyle, getStyleBlockById } from './openaiStyleRegistry';
@@ -23,7 +23,7 @@ export interface StudioGenerateInput {
     artStylePrompt?: string;
     /** Gemini 모델 (기본 nano-3.1) */
     geminiModel?: NanoModel;
-    /** Flux 엔드포인트 (기본 fal-ai/flux-2-pro) */
+    /** Flux 모델 (미지정 시 호환 폴백인 flux-2-flex) */
     fluxModel?: FluxModel;
     /** OpenAI quality */
     openaiQuality?: OpenAIImageQuality;
@@ -99,7 +99,7 @@ export async function studioGenerate(
         const result = await generateImageWithFlux(input.prompt, {
             seed: input.seed,
             imageSize: ratioToFluxSize(input.ratio),
-            endpoint: input.fluxModel ? `fal-ai/${input.fluxModel}` : undefined,
+            endpoint: getFluxEndpoint(input.fluxModel),
         });
         return {
             imageUrl: result.imageUrl,
@@ -186,7 +186,7 @@ export async function studioEdit(
             referenceImageUrls: input.references,
             seed: input.seed,
             imageSize: ratioToFluxSize(input.ratio),
-            endpoint: input.fluxModel ? `fal-ai/${input.fluxModel}` : undefined,
+            endpoint: getFluxEndpoint(input.fluxModel),
         });
         return {
             imageUrl: result.imageUrl,

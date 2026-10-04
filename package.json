@@ -4,33 +4,38 @@
   "version": "0.3.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "lint": "tsc --noEmit",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "dev": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY vite",
+    "build": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY vite build",
+    "preview": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY vite preview",
+    "lint": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY tsc --noEmit",
+    "test": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY vitest run",
+    "check:all": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY sh -c 'npm run test && npm run lint && npm run build && cd src-tauri && cargo fmt --check && cargo check && cargo test && cargo clippy -- -D warnings'",
+    "tauri": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY tauri",
+    "tauri:dev": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY tauri dev",
+    "tauri:build": "env -u CLAUDE_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SUPERTONE_API_KEY -u FAL_API_KEY -u OPENAI_API_KEY tauri build"
   },
   "dependencies": {
     "@fal-ai/client": "^1.9.5",
-    "@google/genai": "^0.11.0",
-    "@tauri-apps/api": "^2",
+    "@google/genai": "2.11.0",
+    "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-fs": "^2",
-    "@tauri-apps/plugin-shell": "^2",
     "idb-keyval": "^6.2.2",
     "jszip": "3.10.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.5.19",
+    "tailwindcss": "3.4.17",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "3.2.7"
   }
 }

@@ -283,10 +283,7 @@ export function buildMechanicalOutfit(
     const parts: string[] = [];
 
     names.forEach(name => {
-        const key = Object.keys(characterDescriptions).find(k => {
-            const cd = characterDescriptions[k];
-            return (cd.canonicalName && cd.canonicalName === name) || cd.koreanName === name;
-        });
+        const key = resolveCharId(name, characterDescriptions);
         if (key && characterDescriptions[key]) {
             const desc = characterDescriptions[key];
 
@@ -316,29 +313,48 @@ export function buildMechanicalOutfit(
 
 // ── 4. 캐릭터 ID 매칭 (레거시 호환) ──
 
-/** charId 또는 한국어 이름 → charId 변환. 매칭 실패 시 null */
+/**
+ * charId/canonicalName/koreanName/alias → charId 변환.
+ * 괄호 속 역할 표기와 영문 대소문자 차이는 무시한다. 매칭 실패 시 null.
+ */
 export function resolveCharId(
     nameOrId: string,
     characterDescriptions: Record<string, CharacterDescription>
 ): string | null {
-    if (!nameOrId) return null;
+    const rawName = nameOrId?.trim();
+    if (!rawName) return null;
+
     // 1. charId 직접 매칭
-    if (characterDescriptions[nameOrId]) return nameOrId;
+    if (characterDescriptions[rawName]) return rawName;
 
-    // 2. displayName 정확 매칭
-    const byExact = Object.entries(characterDescriptions)
-        .find(([, c]) => c.koreanName === nameOrId);
-    if (byExact) return byExact[0];
+    const entries = Object.entries(characterDescriptions);
 
-    // 3. 괄호 제거 후 매칭
-    const strip = (s: string) => s.replace(/\s*\(.*\)$/, '').trim();
-    const stripped = strip(nameOrId);
-    const byStripped = Object.entries(characterDescriptions)
-        .find(([, c]) => strip(c.koreanName || '') === stripped);
-    if (byStripped) return byStripped[0];
+    // 2. 모든 공식 이름/별칭의 정확 매칭
+    const exact = entries.find(([key, char]) =>
+        key === rawName
+        || char.canonicalName === rawName
+        || char.koreanName === rawName
+        || (char.aliases || []).includes(rawName)
+    );
+    if (exact) return exact[0];
+
+    // 3. 괄호 속 역할 표기, 전각 괄호, 연속 공백, 영문 대소문자를 정규화한 매칭
+    const normalizeCharacterName = (value: string): string => value
+        .normalize('NFKC')
+        .replace(/\s*\([^)]*\)\s*/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase();
+    const normalizedName = normalizeCharacterName(rawName);
+    const normalized = entries.find(([key, char]) => {
+        const candidates = [key, char.canonicalName, char.koreanName, ...(char.aliases || [])]
+            .filter((candidate): candidate is string => !!candidate);
+        return candidates.some(candidate => normalizeCharacterName(candidate) === normalizedName);
+    });
+    if (normalized) return normalized[0];
 
     // 4. 레거시 키 매칭 (공백→언더스코어)
-    const legacyKey = nameOrId.replace(/\s/g, '_');
+    const legacyKey = rawName.replace(/\s/g, '_');
     if (characterDescriptions[legacyKey]) return legacyKey;
 
     return null;
@@ -473,4 +489,15 @@ export function isFirstCutInBatch(
     if (!found) return false;
     const anchor = findAnchorCutForBatch(found.session, cuts);
     return anchor?.cutNumber === cut.cutNumber;
+}
+
+/** 프롬프트 수정은 macOS ⌘+Enter에서만 실행한다. 일반 Enter는 textarea 줄바꿈이다. */
+export function shouldSubmitPromptRefinement(
+    event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'isComposing'> & { ctrlKey?: boolean },
+    input: string,
+): boolean {
+    return !event.isComposing
+        && event.key === 'Enter'
+        && event.metaKey
+        && input.trim().length > 0;
 }

@@ -4,7 +4,7 @@
 import type { AppAction, Cut, GeneratedImage, GeneratedScript, CharacterDescription, ImageEngine } from './types';
 import { editImageWithNano, generateMultiCharacterImage } from './services/geminiService';
 import { IS_TAURI, getGeminiApiKey } from './services/tauriAdapter';
-import { generateMultiCharWithFlux, generateImageWithFlux, getFluxImageSize } from './services/falService';
+import { generateMultiCharWithFlux, generateImageWithFlux, getFluxEndpoint, getFluxImageSize } from './services/falService';
 import { resolveCharId } from './appUtils';
 import type { PromptContext } from './appStyleEngine';
 
@@ -22,7 +22,8 @@ export async function editImageWithRetry(
     isCreativeGeneration: boolean = false,
 ): Promise<{ imageUrl: string; textResponse: string; tokenCount: number }> {
     if (modelName === 'gemini-3-pro-image-preview' || modelName === 'gemini-3.1-flash-image-preview') {
-        const geminiKey = IS_TAURI ? await getGeminiApiKey() : (globalThis as any).process?.env?.API_KEY;
+        if (!IS_TAURI) throw new Error('Gemini 기능은 로컬 데스크톱 앱에서만 사용할 수 있습니다.');
+        const geminiKey = await getGeminiApiKey();
         if (!geminiKey) throw new Error('Gemini API key not configured');
     }
 
@@ -93,7 +94,7 @@ export async function generateImageForCut(
             const res = await generateImageWithFlux(prompt, {
                 loraUrls: ctx.loraUrls,
                 imageSize: fluxImageSize,
-                endpoint: ctx.fluxEndpoint || 'fal-ai/flux-2/lora',
+                endpoint: getFluxEndpoint(ctx.fluxEndpoint || ctx.fluxModel || 'flux-lora'),
             });
             resultImageUrl = res.imageUrl;
             tokenCountUsed = 1;
@@ -101,7 +102,10 @@ export async function generateImageForCut(
             // ★ Flux Pro/Flex 다중 캐릭터: IP-Adapter 참조
             const fluxImageSize = getFluxImageSize(imageRatio);
             const refUrls = charsToGenerate.map(c => c.url);
-            const res = await generateMultiCharWithFlux(prompt, refUrls, { imageSize: fluxImageSize });
+            const res = await generateMultiCharWithFlux(prompt, refUrls, {
+                imageSize: fluxImageSize,
+                endpoint: getFluxEndpoint(ctx.fluxEndpoint || ctx.fluxModel),
+            });
             resultImageUrl = res.imageUrl;
             tokenCountUsed = 1;
         } else {
@@ -116,7 +120,7 @@ export async function generateImageForCut(
             const res = await generateImageWithFlux(prompt, {
                 loraUrls: ctx.loraUrls,
                 imageSize: fluxImageSize,
-                endpoint: ctx.fluxEndpoint || 'fal-ai/flux-2/lora',
+                endpoint: getFluxEndpoint(ctx.fluxEndpoint || ctx.fluxModel || 'flux-lora'),
             });
             resultImageUrl = res.imageUrl;
             tokenCountUsed = 1;
@@ -133,7 +137,7 @@ export async function generateImageForCut(
             const res = await generateImageWithFlux(prompt, {
                 loraUrls: ctx.loraUrls,
                 imageSize: fluxImageSize,
-                endpoint: ctx.fluxEndpoint || 'fal-ai/flux-2/lora',
+                endpoint: getFluxEndpoint(ctx.fluxEndpoint || ctx.fluxModel || 'flux-lora'),
             });
             resultImageUrl = res.imageUrl;
             tokenCountUsed = 1;

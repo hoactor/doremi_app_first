@@ -106,16 +106,6 @@ export const ProjectListModal: React.FC<ProjectListModalProps> = ({
         } catch { return ''; }
     };
 
-    /** 남은 일수 계산 (30일 기준) */
-    const getDaysLeft = (dateStr: string): number => {
-        try {
-            const d = new Date(dateStr);
-            const now = new Date();
-            const elapsed = Math.floor((now.getTime() - d.getTime()) / 86400000);
-            return Math.max(0, 30 - elapsed);
-        } catch { return 30; }
-    };
-
     if (!isOpen) return null;
 
     return (
@@ -144,19 +134,11 @@ export const ProjectListModal: React.FC<ProjectListModalProps> = ({
                         </div>
                     ) : (
                         <div className="space-y-2">
-                            {projects.filter(p => p.id !== currentProjectId).map((project) => {
-                                const daysLeft = getDaysLeft(project.updatedAt);
-                                const isUrgent = daysLeft <= 7;
-                                const isWarning = daysLeft <= 14 && daysLeft > 7;
-                                return (
+                            {projects.filter(p => p.id !== currentProjectId).map((project) => (
                                     <div
                                         key={project.id}
                                         onClick={() => handleOpen(project)}
-                                        className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
-                                            isUrgent
-                                                ? 'bg-red-950/20 border-red-900/40 hover:border-red-700/60 hover:bg-red-950/30'
-                                                : 'bg-zinc-900/50 border-zinc-700 hover:border-zinc-500/50 hover:bg-zinc-800/80'
-                                        }`}
+                                        className="flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer bg-zinc-900/50 border-zinc-700 hover:border-zinc-500/50 hover:bg-zinc-800/80"
                                     >
                                         {/* 썸네일 */}
                                         <div className="w-14 h-14 rounded-lg bg-zinc-800 flex-shrink-0 overflow-hidden border border-zinc-700">
@@ -171,16 +153,6 @@ export const ProjectListModal: React.FC<ProjectListModalProps> = ({
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <p className="font-semibold text-sm text-zinc-100 truncate">{project.title || '제목 없음'}</p>
-                                                {isUrgent && (
-                                                    <span className="px-1.5 py-0.5 text-[9px] rounded-full bg-red-900/60 text-red-300 font-bold flex-shrink-0">
-                                                        D-{daysLeft}
-                                                    </span>
-                                                )}
-                                                {isWarning && (
-                                                    <span className="px-1.5 py-0.5 text-[9px] rounded-full bg-amber-900/50 text-amber-300 font-bold flex-shrink-0">
-                                                        D-{daysLeft}
-                                                    </span>
-                                                )}
                                             </div>
                                             <div className="flex items-center gap-2 mt-1 text-[11px] text-zinc-500">
                                                 <span>{project.cutCount || 0}컷</span>
@@ -204,24 +176,10 @@ export const ProjectListModal: React.FC<ProjectListModalProps> = ({
                                             <TrashIcon className="w-4 h-4" />
                                         </button>
                                     </div>
-                                );
-                            })}
+                            ))}
                         </div>
                     )}
                 </div>
-
-                {/* 주의사항 */}
-                {projects.length > 0 && (
-                    <div className="px-4 pb-4 pt-2 border-t border-zinc-700/50">
-                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-zinc-900/60 border border-zinc-700/40">
-                            <span className="text-[11px] mt-px flex-shrink-0">⚠️</span>
-                            <p className="text-[10px] text-zinc-500 leading-relaxed">
-                                마지막 수정 후 <span className="text-zinc-400 font-semibold">30일</span>이 지난 프로젝트는 앱 시작 시 자동 삭제됩니다.
-                                보관이 필요한 프로젝트는 <span className="text-orange-400/70">Export</span>로 백업하세요.
-                            </p>
-                        </div>
-                    </div>
-                )}
             </div>
         </div>
     );
